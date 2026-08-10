@@ -49,8 +49,8 @@ Todo Agent 把本地任务、可选的飞书任务同步，以及可选的 AI �
 
 当前首发版本：[v0.0.1](https://github.com/BrotherHappy/TodoAgent/releases/tag/v0.0.1)。
 
-- **macOS（Apple Silicon）**：[DMG](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo%20Agent-0.0.1-arm64.dmg) · [ZIP](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo%20Agent-0.0.1-arm64-mac.zip)
-- **Windows x64**：[ZIP](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo%20Agent-0.0.1-win.zip)
+- **macOS（Apple Silicon）**：[DMG](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-arm64.dmg) · [ZIP](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-arm64-mac.zip)
+- **Windows x64**：[ZIP](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-win.zip)
 
 这是一个 Early Preview。macOS 产物尚未进行 Developer ID 签名和公证；Windows 已生成 x64 包，但仍建议在目标设备完成最终安装与多显示器验收。
 
