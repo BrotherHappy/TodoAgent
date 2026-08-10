@@ -1,0 +1,129 @@
+{
+  "name": "todo-agent-desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A local-first desktop TODO and personal execution agent for macOS and Windows.",
+  "main": "dist-electron/main.cjs",
+  "author": "Todo Agent",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n renderer,main,electron -c blue,magenta,green \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev:renderer": "vite --host 127.0.0.1",
+    "dev:main": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outdir=dist-electron --out-extension:.js=.cjs --sourcemap --watch",
+    "dev:electron": "wait-on tcp:5173 dist-electron/main.cjs && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "build": "npm run build:renderer && npm run build:main",
+    "build:renderer": "vite build",
+    "build:main": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outdir=dist-electron --out-extension:.js=.cjs --sourcemap",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && playwright test",
+    "verify": "npm run typecheck && npm run test && npm run build",
+    "package:mac": "npm run build && electron-builder --mac dmg zip",
+    "package:mac:current": "npm run build && electron-builder --mac dmg zip --arm64",
+    "package:win": "npm run build && electron-builder --win nsis zip --x64",
+    "package:win:zip": "npm run build && electron-builder --win zip --x64",
+    "package:dir": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.72.0",
+    "chrono-node": "^2.8.1",
+    "lucide-react": "^1.30.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "rrule": "^2.8.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "playwright": "^1.62.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10",
+    "wait-on": "^9.0.3"
+  },
+  "build": {
+    "appId": "com.todoagent.desktop",
+    "productName": "Todo Agent",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Todo Agent only uses the camera when you explicitly choose a camera-enabled tool.",
+        "NSMicrophoneUsageDescription": "Todo Agent only uses the microphone when you explicitly start voice input or screen recording.",
+        "NSScreenCaptureDescription": "Todo Agent captures the screen only after an explicit, reviewed request.",
+        "NSRemindersUsageDescription": "Todo Agent uses reminders only for task notifications you create."
+      }
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "dmg": {
+      "sign": false
+    }
+  }
+}

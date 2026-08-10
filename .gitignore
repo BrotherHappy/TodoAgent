@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-electron/
+release/
+coverage/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Codex workspace metadata and synced reference material are local-only.
+AGENTS.md
+sources/
