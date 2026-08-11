@@ -1112,6 +1112,31 @@ select {
 .floating-copy {
   min-width: 0;
 }
+.floating-carousel {
+  min-width: 0;
+  height: 21px;
+  overflow: hidden;
+}
+.floating-carousel-item {
+  height: 21px;
+  animation: floating-task-carousel-enter 280ms cubic-bezier(0.22, 0.8, 0.24, 1);
+}
+.floating-carousel.is-static .floating-carousel-item {
+  animation: none;
+}
+.floating-carousel.is-paused .floating-carousel-item {
+  animation-play-state: paused;
+}
+@keyframes floating-task-carousel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(105%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 .floating-copy strong,
 .floating-copy small {
   display: block;
@@ -1238,6 +1263,9 @@ select {
   .floating-context-menu {
     animation: none;
   }
+  .floating-carousel-item {
+    animation: none;
+  }
 }
 
 .mini-panel {
@@ -1257,10 +1285,10 @@ select {
 .mini-tabs {
   flex: 0 0 auto;
   display: grid;
-  /* Three navigation tabs plus a compact, separately-sized main-window
-   * affordance. A four-child grid with only three columns made that action
+  /* Four navigation tabs plus a compact, separately-sized main-window
+   * affordance. A five-child grid with only four columns would make that action
    * wrap into an accidental second header row. */
-  grid-template-columns: repeat(3, minmax(0, 1fr)) 40px;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 40px;
   gap: 3px;
   padding: 7px;
   border-bottom: 1px solid var(--app-line);
