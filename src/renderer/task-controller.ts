@@ -207,10 +207,19 @@ export function useTaskController(
         let nextSelection = visibleSelection;
         if (currentSelection && !visibleSelection && typeof api.get === "function") {
           // A filtered-out task is still a valid selection. `get(..., true)`
-          // also lets a concurrent delete resolve to an empty inspector rather
-          // than leaving an outdated object on screen.
-          nextSelection = await api.get(currentSelection, true);
+          // also lets a concurrent trash/restore operation clear an inspector
+          // whose deletion state no longer belongs in the active view. Other
+          // filter changes (for example, moving Today to tomorrow) keep the
+          // editor open so a multi-field edit is not interrupted.
+          const fetchedSelection = await api.get(currentSelection, true);
           if (requestId !== refreshRequestRef.current) return;
+          const deletionMatchesView =
+            view === "trash"
+              ? Boolean(fetchedSelection?.deletedAt)
+              : !fetchedSelection?.deletedAt;
+          nextSelection = deletionMatchesView
+            ? fetchedSelection
+            : undefined;
         }
         if (!currentSelection) nextSelection = nextTasks[0];
         setTasks(nextTasks);

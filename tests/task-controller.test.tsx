@@ -359,4 +359,38 @@ describe("useTaskController", () => {
     });
     expect(get).toHaveBeenLastCalledWith(todayTask.id, true);
   });
+
+  it("clears a stale inspector when the selected task is trashed outside the controller", async () => {
+    const task = makeTask("2026-08-10T10:00:00.000Z");
+    const trashedTask = {
+      ...task,
+      deletedAt: "2026-08-10T00:05:00.000Z",
+      updatedAt: "2026-08-10T00:05:00.000Z",
+    };
+    const listeners = new Set<() => void>();
+    const sections = vi
+      .fn<() => Promise<TaskViewSection[]>>()
+      .mockResolvedValueOnce([{ id: "due-today", tasks: [task] }])
+      .mockResolvedValueOnce([]);
+    const get = vi.fn().mockResolvedValue(trashedTask);
+    window.desktopApi = {
+      tasks: { sections, get },
+      events: {
+        onTasksChanged: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    } as unknown as DesktopApi;
+
+    const { result } = renderHook(() => useTaskController("today", ""));
+    await waitFor(() => expect(result.current.selected?.id).toBe(task.id));
+
+    act(() => listeners.forEach((listener) => listener()));
+
+    await waitFor(() => expect(result.current.tasks).toHaveLength(0));
+    await waitFor(() => expect(result.current.selected).toBeUndefined());
+    expect(result.current.selectedId).toBeUndefined();
+    expect(get).toHaveBeenCalledWith(task.id, true);
+  });
 });

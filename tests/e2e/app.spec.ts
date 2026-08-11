@@ -811,6 +811,89 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
   });
 
+  test("opens the floating panel on all tasks and remembers the chosen tab", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+
+    // A future task belongs to the all-task overview but not Today. This
+    // proves the new initial tab is backed by the main `all` view rather than
+    // merely a renamed Today list.
+    const futureTitle = "悬浮全部任务验收-未来任务";
+    await main.evaluate(async (title) => {
+      await window.desktopApi!.tasks.create({
+        title,
+        plannedDate: "2099-01-01",
+        source: { type: "local" },
+      });
+    }, futureTitle);
+
+    await floating
+      .getByRole("button", { name: "展开 Todo Agent" })
+      .click();
+    const allTasks = floating.getByRole("button", {
+      name: "全部任务",
+      exact: true,
+    });
+    const todayTasks = floating.getByRole("button", {
+      name: "今日任务",
+      exact: true,
+    });
+    const chat = floating.getByRole("button", { name: "对话", exact: true });
+    await expect(allTasks).toHaveClass(/active/u);
+    await expect(
+      floating.locator(".mini-content").getByText(futureTitle, { exact: true }),
+    ).toBeVisible();
+
+    await todayTasks.click();
+    await expect(todayTasks).toHaveClass(/active/u);
+    await expect(
+      floating.locator(".mini-content").getByText(futureTitle, { exact: true }),
+    ).toHaveCount(0);
+    await expect
+      .poll(() =>
+        floating.evaluate(() => localStorage.getItem("todoAgentFloatingTab")),
+      )
+      .toBe("today");
+
+    // Folding the panel keeps the user on the last selected task scope.
+    await floating
+      .getByRole("button", { name: "收起 Todo Agent" })
+      .click();
+    await floating
+      .getByRole("button", { name: "展开 Todo Agent" })
+      .click();
+    await expect(todayTasks).toHaveClass(/active/u);
+
+    // The same guarantee applies to non-task tabs and survives a real app
+    // restart, not only a React re-render.
+    await chat.click();
+    await expect(chat).toHaveClass(/active/u);
+    await expect
+      .poll(() =>
+        floating.evaluate(() => localStorage.getItem("todoAgentFloatingTab")),
+      )
+      .toBe("chat");
+    await app.close();
+    app = undefined;
+
+    app = await launch(profilePath);
+    const reopenedMain = await windowFor(app, "main");
+    await reopenedMain.waitForLoadState("domcontentloaded");
+    await finishOnboarding(reopenedMain);
+    const reopenedFloating = await windowFor(app, "floating");
+    await reopenedFloating.waitForLoadState("domcontentloaded");
+    await reopenedFloating
+      .getByRole("button", { name: "展开 Todo Agent" })
+      .click();
+    await expect(
+      reopenedFloating.getByRole("button", { name: "对话", exact: true }),
+    ).toHaveClass(/active/u);
+  });
+
   test("opens Today when the compact floating orb or capsule icon is double-clicked after the main window hides", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
@@ -1849,6 +1932,92 @@ test.describe("Todo Agent desktop shell", () => {
     expect(Math.abs(layout.sourceCenter - layout.rowCenter)).toBeLessThanOrEqual(1);
   });
 
+  test("rotates compact Today tasks vertically, pauses on hover, and keeps its action aligned", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const titles = [
+      "Codex验收-悬浮轮播任务一",
+      "Codex验收-悬浮轮播任务二",
+    ];
+    const focusedTaskId = await main.evaluate(async (nextTitles) => {
+      const api = window.desktopApi!;
+      const now = new Date();
+      const plannedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      const first = await api.tasks.create({
+        title: nextTitles[0],
+        plannedDate,
+        source: { type: "local" },
+      });
+      await api.tasks.create({
+        title: nextTitles[1],
+        plannedDate,
+        source: { type: "local" },
+      });
+      return first.task.id;
+    }, titles);
+
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+    const carousel = floating.locator(".floating-carousel");
+    const carouselTitle = carousel.locator(".floating-carousel-item");
+    await expect(carousel).toHaveAttribute("data-carousel-mode", "rotating");
+    await expect
+      .poll(async () => carouselTitle.textContent())
+      .toMatch(new RegExp(titles.join("|"), "u"));
+
+    const beforeRotation = await carouselTitle.textContent();
+    expect(beforeRotation).toBeTruthy();
+    await expect(
+      floating.getByRole("button", { name: `完成${beforeRotation}` }),
+    ).toBeVisible();
+    await expect
+      .poll(async () => carouselTitle.textContent(), { timeout: 5_500 })
+      .not.toBe(beforeRotation);
+    const afterRotation = await carouselTitle.textContent();
+    await expect(
+      floating.getByRole("button", { name: `完成${afterRotation}` }),
+    ).toBeVisible();
+
+    // Hovering anywhere in the floating stack pauses the automatic rotation.
+    await floating.locator(".floating-stack").hover();
+    await expect(carousel).toHaveAttribute("data-carousel-paused", "true");
+    const whileHovered = await carouselTitle.textContent();
+    await floating.waitForTimeout(4_100);
+    await expect(carouselTitle).toHaveText(whileHovered!);
+
+    await main.evaluate(async () => {
+      const settings = await window.desktopApi!.settings.get();
+      await window.desktopApi!.settings.replace({
+        ...settings,
+        floating: { ...settings.floating, privacyMode: true },
+      });
+    });
+    await expect(carousel).toHaveAttribute("data-carousel-mode", "private");
+    await expect(carouselTitle).toHaveText("私人任务");
+
+    await main.evaluate(async () => {
+      const settings = await window.desktopApi!.settings.get();
+      await window.desktopApi!.settings.replace({
+        ...settings,
+        floating: { ...settings.floating, privacyMode: false },
+      });
+    });
+    await floating.locator(".floating-stack").evaluate((element) => {
+      element.dispatchEvent(
+        new MouseEvent("mouseout", { bubbles: true, relatedTarget: null }),
+      );
+    });
+    await main.evaluate(
+      (taskId) => window.desktopApi!.tasks.startFocus(taskId),
+      focusedTaskId,
+    );
+    await expect(carousel).toHaveAttribute("data-carousel-mode", "static");
+    await expect(carouselTitle).toHaveText(titles[0]);
+  });
+
   test("streams Markdown and scrolls long Agent replies inside the floating window", async () => {
     const modelServer = await startStreamingModelServer();
     try {
@@ -1888,8 +2057,8 @@ test.describe("Todo Agent desktop shell", () => {
       const miniTabLayout = await floating.locator(".mini-tabs").evaluate((element) => {
         const header = element as HTMLElement;
         const controls = [...header.querySelectorAll<HTMLElement>("button")];
-        if (controls.length !== 4)
-          throw new Error("Expected three tabs and an open-main control");
+        if (controls.length !== 5)
+          throw new Error("Expected four tabs and an open-main control");
         const tops = controls.map((control) => control.getBoundingClientRect().top);
         return {
           height: header.getBoundingClientRect().height,
@@ -1970,7 +2139,9 @@ test.describe("Todo Agent desktop shell", () => {
       await expect
         .poll(async () => (await floatingWindowState(app!)).bounds)
         .toEqual({ width: 360, height: 420 });
-      await floating.getByRole("button", { name: "Today", exact: true }).click();
+      await floating
+        .getByRole("button", { name: "今日任务", exact: true })
+        .click();
       await expect(
         floating
           .locator(".mini-task")

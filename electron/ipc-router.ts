@@ -20,6 +20,7 @@ import {
   parseCustomSnoozeInput,
   parseReminderActionInput,
 } from "./services/reminder-action-input";
+import { rendererUrlIsTrusted } from "./trusted-renderer";
 
 const idSchema = z.string().trim().min(1).max(512);
 const routeSchema = z.string().trim().min(1).max(80).optional();
@@ -164,24 +165,11 @@ function senderIsTrusted(
   event: IpcMainInvokeEvent,
   dependencies: DesktopIpcDependencies,
 ): boolean {
-  const url = event.senderFrame?.url;
-  if (!url) return false;
-  if (dependencies.devServerUrl) {
-    try {
-      return new URL(url).origin === new URL(dependencies.devServerUrl).origin;
-    } catch {
-      return false;
-    }
-  }
-  try {
-    const parsed = new URL(url);
-    return (
-      parsed.protocol === "file:" &&
-      decodeURIComponent(parsed.pathname) === dependencies.rendererPath
-    );
-  } catch {
-    return false;
-  }
+  return rendererUrlIsTrusted({
+    url: event.senderFrame?.url,
+    rendererPath: dependencies.rendererPath,
+    devServerUrl: dependencies.devServerUrl,
+  });
 }
 
 export function registerDesktopIpc(

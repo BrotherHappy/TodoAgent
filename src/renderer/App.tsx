@@ -135,7 +135,30 @@ interface ToastState {
 
 type ReadyDataPreview = Extract<DataPreviewResultView, { status: "ready" }>;
 const floatingAgentDraftId = "floating-agent-prompt";
+const floatingTabStorageKey = "todoAgentFloatingTab";
 const mainNavigationStateKey = "todoAgentMainNavigation";
+
+type FloatingTab = "all" | "today" | "chat" | "activity";
+
+function isFloatingTab(value: unknown): value is FloatingTab {
+  return (
+    value === "all" ||
+    value === "today" ||
+    value === "chat" ||
+    value === "activity"
+  );
+}
+
+function readFloatingTab(): FloatingTab {
+  try {
+    const saved = localStorage.getItem(floatingTabStorageKey);
+    return isFloatingTab(saved) ? saved : "all";
+  } catch {
+    // A disabled or unavailable storage area must never make the desktop
+    // entry unusable. The first-run default remains the all-task overview.
+    return "all";
+  }
+}
 
 const routeTitles: Record<MainRoute, string> = {
   inbox: "暂存",
@@ -274,6 +297,126 @@ function humanDuration(totalSeconds: number): string {
   return hours > 0
     ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+const floatingCarouselIntervalMs = 3_600;
+
+function usePrefersReducedMotion(): boolean {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
+  );
+  useEffect(() => {
+    const mediaQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mediaQuery) return undefined;
+    const update = () => setPrefersReducedMotion(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
+  return prefersReducedMotion;
+}
+
+function useFloatingTodayCarousel(
+  tasks: Task[],
+  focusedTask: Task | undefined,
+  paused: boolean,
+): {
+  task?: Task;
+  index: number;
+  count: number;
+  paused: boolean;
+  static: boolean;
+} {
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const todayTasks = useMemo(
+    () => tasks.filter((task) => task.status === "open" && !task.deletedAt),
+    [tasks],
+  );
+  const taskIds = todayTasks.map((task) => task.id).join("\u0001");
+  const [activeTaskId, setActiveTaskId] = useState<string>();
+  useEffect(() => {
+    setActiveTaskId((currentId) => {
+      if (focusedTask?.id) return focusedTask.id;
+      if (currentId && todayTasks.some((task) => task.id === currentId)) {
+        return currentId;
+      }
+      return todayTasks[0]?.id;
+    });
+  }, [focusedTask?.id, taskIds, todayTasks]);
+
+  const activeIndex = Math.max(
+    0,
+    todayTasks.findIndex((task) => task.id === activeTaskId),
+  );
+  const activeTask = focusedTask ?? todayTasks[activeIndex];
+  const staticCarousel =
+    Boolean(focusedTask) || todayTasks.length < 2 || prefersReducedMotion;
+  const carouselPaused = paused || staticCarousel;
+
+  useEffect(() => {
+    if (carouselPaused) return undefined;
+    const timer = window.setInterval(() => {
+      setActiveTaskId((currentId) => {
+        const currentIndex = todayTasks.findIndex(
+          (task) => task.id === currentId,
+        );
+        return todayTasks[(currentIndex + 1) % todayTasks.length]?.id;
+      });
+    }, floatingCarouselIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [carouselPaused, taskIds, todayTasks]);
+
+  return {
+    task: activeTask,
+    index: activeTask ? activeIndex : 0,
+    count: todayTasks.length,
+    paused: carouselPaused,
+    static: staticCarousel,
+  };
+}
+
+function FloatingTodayCarousel({
+  task,
+  index,
+  count,
+  paused,
+  static: staticCarousel,
+  privacyMode,
+}: {
+  task?: Task;
+  index: number;
+  count: number;
+  paused: boolean;
+  static: boolean;
+  privacyMode: boolean;
+}) {
+  const title = task ? (privacyMode ? "私人任务" : task.title) : "今天已清空";
+  const mode = privacyMode
+    ? "private"
+    : !task
+      ? "empty"
+      : staticCarousel
+        ? "static"
+        : "rotating";
+  return (
+    <div
+      className={`floating-carousel ${staticCarousel || privacyMode ? "is-static" : ""} ${paused ? "is-paused" : ""}`}
+      data-carousel-mode={mode}
+      data-carousel-paused={paused ? "true" : "false"}
+      aria-label={
+        privacyMode
+          ? "隐私模式：今日任务"
+          : task
+            ? `今日任务 ${index + 1}/${count}：${task.title}`
+            : "今天没有待办"
+      }
+      aria-live="off"
+    >
+      <strong className="floating-carousel-item" key={privacyMode ? "private" : task?.id ?? "empty"}>
+        {title}
+      </strong>
+    </div>
+  );
 }
 
 function feishuRequestFromSettings(
@@ -6785,7 +6928,11 @@ function QuickCaptureWindow() {
 }
 
 function FloatingWindow() {
-  const controller = useTaskController("today", "");
+  // Keep both task collections live. The floating panel can switch between
+  // the open all-task overview and the complete Today list without waiting
+  // for a fresh renderer load, and each controller refreshes on task changes.
+  const todayController = useTaskController("today", "");
+  const allController = useTaskController("all", "");
   const [expanded, setExpanded] = useState(false);
   const [shape, setShape] =
     useState<AppSettings["floating"]["shape"]>("capsule");
@@ -6804,7 +6951,8 @@ function FloatingWindow() {
   const [privacyMode, setPrivacyMode] = useState(false);
   const [floatingLocked, setFloatingLocked] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
-  const [tab, setTab] = useState<"today" | "chat" | "activity">("today");
+  const [isFloatingHovered, setIsFloatingHovered] = useState(false);
+  const [tab, setTab] = useState<FloatingTab>(readFloatingTab);
   const [input, setInput] = useState("");
   const [creatingFloatingTask, setCreatingFloatingTask] = useState(false);
   const floatingCreateRef = useRef(false);
@@ -6813,6 +6961,17 @@ function FloatingWindow() {
   const [now, setNow] = useState(Date.now());
   const miniContentRef = useRef<HTMLDivElement>(null);
   const chatFollowsOutputRef = useRef(true);
+  const focusedTask = todayController.tasks.find(
+    (task) => task.focusStartedAt,
+  );
+  const carousel = useFloatingTodayCarousel(
+    todayController.tasks,
+    focusedTask,
+    isFloatingHovered || expanded || contextMenuOpen || privacyMode,
+  );
+  // The compact completion action follows the visible title. A rotating
+  // capsule must never complete a different, hidden task.
+  const current = carousel.task;
   const floatingChat = useAgentChat({
     initialMessage:
       "我可以直接在这里查询、创建和整理任务；需要确认的操作也会留在这个小窗口里。",
@@ -6821,7 +6980,9 @@ function FloatingWindow() {
         return /飞书/u.test(text)
           ? "飞书任务不会在模型未启用时静默改成本地任务。请先连接飞书并启用模型。"
           : "模型未启用，我不会依据模糊自然语言直接创建、修改或完成任务。可以切到 Today 用下方输入框明确新增本地任务，或在设置中启用模型。";
-      const openTasks = controller.tasks.filter((task) => task.status === "open");
+      const openTasks = todayController.tasks.filter(
+        (task) => task.status === "open",
+      );
       return openTasks.length
         ? `模型未启用。今天有 ${openTasks.length} 项未完成任务；启用模型后可在此对话查询和整理。`
         : "模型未启用，今天没有未完成任务。启用模型后可在这里进行自然语言对话和任务管理。";
@@ -6835,6 +6996,14 @@ function FloatingWindow() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(floatingTabStorageKey, tab);
+    } catch {
+      // Persisting the focus is a convenience; the active in-memory tab still
+      // works if a platform policy blocks local storage.
+    }
+  }, [tab]);
   useEffect(
     () => () => {
       hoveringFloatingRef.current = false;
@@ -6916,9 +7085,9 @@ function FloatingWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [expanded, floatingChat.messages, tab]);
-  const current =
-    controller.tasks.find((task) => task.focusStartedAt) ??
-    controller.tasks.find((task) => task.status === "open");
+  const isTaskTab = tab === "all" || tab === "today";
+  const displayedTaskController =
+    tab === "all" ? allController : todayController;
   const elapsed = current
     ? current.focusElapsedSeconds +
       (current.focusStartedAt
@@ -6938,12 +7107,12 @@ function FloatingWindow() {
       suggestion ?? (tab === "chat" ? floatingChat.input : input)
     ).trim();
     if (!text) return;
-    if (tab === "today") {
+    if (isTaskTab) {
       if (floatingCreateRef.current) return;
       floatingCreateRef.current = true;
       setCreatingFloatingTask(true);
       try {
-        await controller.create({
+        await todayController.create({
           title: text,
           plannedDate: dateKey(),
           source: { type: "local" },
@@ -7082,6 +7251,7 @@ function FloatingWindow() {
   }
   const beginHoverExpand = () => {
     hoveringFloatingRef.current = true;
+    setIsFloatingHovered(true);
     scheduleHoverExpand();
   };
   const cancelHoverExpand = () => {
@@ -7091,6 +7261,7 @@ function FloatingWindow() {
   };
   const endHoverInteraction = () => {
     hoveringFloatingRef.current = false;
+    setIsFloatingHovered(false);
     cancelHoverExpand();
     if (expandTriggerRef.current === "hover") {
       setPanelExpanded(false);
@@ -7188,7 +7359,14 @@ function FloatingWindow() {
                 }}
               >
                 <div className="floating-copy">
-                  <strong>{titleFor(current)}</strong>
+                  <FloatingTodayCarousel
+                    task={current}
+                    index={carousel.index}
+                    count={carousel.count}
+                    paused={carousel.paused}
+                    static={carousel.static}
+                    privacyMode={privacyMode}
+                  />
                   <small>
                     {current
                       ? `${current.focusStartedAt ? "专注中" : "下一项"} · ${current.source.type === "feishu" ? "飞书" : "本地"}${privacyMode ? " · 隐私模式" : ""}`
@@ -7207,7 +7385,7 @@ function FloatingWindow() {
                   aria-label={
                     privacyMode ? "完成当前私人任务" : `完成${current.title}`
                   }
-                  onClick={() => void controller.toggleComplete(current)}
+                  onClick={() => void todayController.toggleComplete(current)}
                 >
                   <Check size={17} />
                 </button>
@@ -7302,10 +7480,17 @@ function FloatingWindow() {
             <div className="mini-tabs">
               <button
                 type="button"
+                className={tab === "all" ? "active" : ""}
+                onClick={() => setTab("all")}
+              >
+                全部任务
+              </button>
+              <button
+                type="button"
                 className={tab === "today" ? "active" : ""}
                 onClick={() => setTab("today")}
               >
-                Today
+                今日任务
               </button>
               <button
                 type="button"
@@ -7350,15 +7535,17 @@ function FloatingWindow() {
               aria-relevant={tab === "chat" ? "additions text" : undefined}
               aria-busy={tab === "chat" && floatingChat.isSending}
             >
-              {tab === "today" &&
-                controller.tasks.slice(0, 4).map((task) => (
+              {isTaskTab &&
+                displayedTaskController.tasks.map((task) => (
                   <div className="mini-task" key={task.id}>
                     <input
                       className="task-checkbox"
                       type="checkbox"
                       checked={task.status === "completed"}
                       disabled={!canToggleTaskCompletion(task)}
-                      onChange={() => void controller.toggleComplete(task)}
+                      onChange={() =>
+                        void displayedTaskController.toggleComplete(task)
+                      }
                       aria-label={
                         privacyMode ? "完成私人任务" : `完成${task.title}`
                       }
@@ -7371,9 +7558,9 @@ function FloatingWindow() {
                     </small>
                   </div>
                 ))}
-              {tab === "today" && !controller.tasks.length && (
+              {isTaskTab && !displayedTaskController.tasks.length && (
                 <div className="empty-state">
-                  <p>今天没有待办</p>
+                  <p>{tab === "all" ? "还没有未完成任务" : "今天没有待办"}</p>
                 </div>
               )}
               {tab === "chat" &&
@@ -7528,7 +7715,7 @@ function FloatingWindow() {
             </div>
             {tab !== "activity" && !privacyMode && (
               <div className="mini-composer">
-                {tab === "today" ? (
+                {isTaskTab ? (
                   <input
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
@@ -7569,7 +7756,7 @@ function FloatingWindow() {
                   type="button"
                   className="icon-button"
                   disabled={
-                    tab === "today"
+                    isTaskTab
                       ? !input.trim() || creatingFloatingTask
                       : !floatingChat.isSending && !floatingChat.input.trim()
                   }
@@ -7581,7 +7768,7 @@ function FloatingWindow() {
                     void submit();
                   }}
                   aria-label={
-                    tab === "today"
+                    isTaskTab
                       ? creatingFloatingTask
                         ? "正在新增任务"
                         : "新增任务"
