@@ -1,0 +1,131 @@
+name: Publish Todo Pet v0.0.1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/release-v0.0.1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: Package macOS Apple Silicon
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run package:mac:current
+      - name: Normalize release asset names
+        run: |
+          mkdir -p release-upload
+          cp "release/Todo Agent-0.0.1-arm64.dmg" "release-upload/Todo.Agent-0.0.1-arm64.dmg"
+          cp "release/Todo Agent-0.0.1-arm64-mac.zip" "release-upload/Todo.Agent-0.0.1-arm64-mac.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: release-upload/*
+          if-no-files-found: error
+
+  windows:
+    name: Package Windows x64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run package:win
+      - name: Normalize release asset names
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-upload | Out-Null
+          Copy-Item "release/Todo Agent Setup 0.0.1.exe" "release-upload/Todo.Agent.Setup.0.0.1.exe"
+          Copy-Item "release/Todo Agent-0.0.1-win.zip" "release-upload/Todo.Agent-0.0.1-win.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release-upload/*
+          if-no-files-found: error
+
+  publish:
+    name: Update GitHub Release
+    needs:
+      - macos
+      - windows
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: v0.0.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-bundle
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd release-bundle
+          sha256sum Todo.Agent-0.0.1-arm64.dmg \
+            Todo.Agent-0.0.1-arm64-mac.zip \
+            Todo.Agent.Setup.0.0.1.exe \
+            Todo.Agent-0.0.1-win.zip > SHA256SUMS.txt
+      - name: Point preview tag at this verified source
+        run: |
+          git tag --force "$RELEASE_TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$RELEASE_TAG" --force
+      - name: Update release notes and assets
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          ## Todo Pet 预览版（2026-08-15 更新）
+
+          Todo Agent 现在以 **Todo Pet** 作为唯一桌面悬浮形态：它不再是悬浮球或胶囊，而是一只始终置顶、能陪你执行任务的桌面伙伴。
+
+          ### 本次更新
+
+          - Todo Pet 常驻桌面，可拖动、锁定、缩放，并记住显示器位置与上次入口。
+          - 今日任务自动上下轮播；鼠标停留暂停。单击或悬停展开全部、今天、专注、聊聊和小窝。
+          - 加入原生番茄钟与正计时、重启恢复、任务绑定、休息轮次和温和成长奖励。
+          - 加入等级、亲密度、正向属性、奖励、事实日记、用户明确批准的长期记忆与城市天气。
+          - 小窗 Agent 支持流式 Markdown、任务批量增删改查、网页与本机工具，以及风险操作确认和审计。
+          - 保留本地优先任务、飞书双向同步、交互后立即同步、离线队列和冲突处理。
+          - 修复未签名 macOS 安装包可能在系统安全存储健康检查时卡住的问题。
+
+          ### 下载
+
+          - macOS Apple Silicon：DMG 或 ZIP。
+          - Windows x64：安装程序或 ZIP 免安装版。
+          - `SHA256SUMS.txt`：全部安装资产的完整性校验值。
+
+          ### 验证
+
+          - TypeScript 类型检查通过。
+          - 53 个测试文件、462 项单元测试全部通过。
+          - 25 项真实 Electron 桌面流程全部通过。
+          - macOS 打包态与安装态均通过启动、本地任务写入及重启持久化测试。
+
+          ### 已知边界
+
+          - macOS 包暂未使用 Developer ID 签名和公证，首次打开可能需要在系统设置中确认。
+          - Windows 包暂未使用受信任的公开代码签名证书，可能出现 SmartScreen 提示。
+          EOF
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Todo Agent v0.0.1 · Todo Pet Preview" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --target "$GITHUB_SHA"
+          gh release upload "$RELEASE_TAG" release-bundle/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
