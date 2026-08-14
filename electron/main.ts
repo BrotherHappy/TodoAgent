@@ -1039,7 +1039,15 @@ async function startApplication(): Promise<void> {
       arch: process.arch,
       version: app.getVersion(),
       isPackaged: app.isPackaged,
-      secureStorageAvailable: safeStorage.isEncryptionAvailable(),
+      // `safeStorage.isEncryptionAvailable()` can synchronously wait for an
+      // interactive Keychain response in an unsigned packaged macOS app. An
+      // IPC health check must never hold the main process open on that prompt.
+      // Todo Agent targets macOS and Windows, where Electron provides the
+      // native credential backend once the app is ready; actual credential
+      // reads/writes still go through the adapter above and surface a concrete
+      // error if the OS backend cannot be used.
+      secureStorageAvailable:
+        process.platform === "darwin" || process.platform === "win32",
     }),
     showMain: (route) => requestMainWindow(route),
     showQuickCapture: () => windows?.showQuick(),
