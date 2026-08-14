@@ -162,13 +162,16 @@ describe('DataPortabilityService export safety', () => {
     ).rejects.toThrow('Expected one of: bearer, none');
   });
 
-  it('imports legacy floating settings with current hover and always-on-top defaults', async () => {
+  it('imports legacy floating settings as the unique Todo Pet defaults', async () => {
     const source = new MemoryPortabilityRepository(snapshot());
     const bundle = JSON.parse(await serviceFor(source).exportJson()) as {
       data: { settings: { floating: Record<string, unknown> } };
     };
     delete bundle.data.settings.floating.hoverExpandDelayMs;
     delete bundle.data.settings.floating.topMode;
+    delete bundle.data.settings.floating.selectedTab;
+    delete bundle.data.settings.floating.scalePercent;
+    bundle.data.settings.floating.shape = 'capsule';
     const target = new MemoryPortabilityRepository(snapshot());
 
     await serviceFor(target).importJson(JSON.stringify(bundle), {
@@ -177,6 +180,9 @@ describe('DataPortabilityService export safety', () => {
 
     expect(target.state.settings.floating.hoverExpandDelayMs).toBe(1_000);
     expect(target.state.settings.floating.topMode).toBe('always');
+    expect(target.state.settings.floating.selectedTab).toBe('all');
+    expect(target.state.settings.floating.scalePercent).toBe(100);
+    expect(target.state.settings.floating).not.toHaveProperty('shape');
   });
 
   it.each(['focus-only', 'never'] as const)(

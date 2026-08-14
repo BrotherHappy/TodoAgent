@@ -19,14 +19,16 @@ interface WindowManagerOptions {
 const SAFE_EXTERNAL_PROTOCOLS = new Set(["https:", "mailto:"]);
 
 const floatingWindowSize = (
-  shape: AppSettings["floating"]["shape"],
   expanded: boolean,
-): { width: number; height: number } =>
-  expanded
-    ? { width: 360, height: 420 }
-    : shape === "orb"
-      ? { width: 72, height: 72 }
-      : { width: 360, height: 80 };
+  scalePercent = 100,
+): { width: number; height: number } => {
+  if (expanded) return { width: 480, height: 600 };
+  const scale = Math.max(0.75, Math.min(1.25, scalePercent / 100));
+  return {
+    width: Math.round(410 * scale),
+    height: Math.round(116 * scale),
+  };
+};
 
 function clampWindowToWorkArea(
   bounds: Rectangle,
@@ -68,7 +70,7 @@ export function snapToWorkArea(
 /**
  * The floating surface is intentionally shown without taking keyboard focus.
  * On macOS, an inactive frameless window normally consumes the first pointer
- * press just to activate itself, which made the capsule's expand control feel
+ * press just to activate itself, which made Todo Pet's expand control feel
  * like it needed two clicks. `acceptFirstMouse` forwards that first press to
  * the renderer while keeping the regular `showInactive()` lifecycle intact.
  * Electron only supports this option on macOS, so omit it elsewhere.
@@ -208,7 +210,10 @@ export class WindowManager {
   createFloating(): BrowserWindow {
     if (this.#floating && !this.#floating.isDestroyed()) return this.#floating;
     const settings = this.#options.settings().floating;
-    const size = floatingWindowSize(settings.shape, this.#floatingExpanded);
+    const size = floatingWindowSize(
+      this.#floatingExpanded,
+      settings.scalePercent,
+    );
     const display =
       (settings.lastDisplayId
         ? screen
@@ -234,6 +239,7 @@ export class WindowManager {
       backgroundColor: "#00000000",
       resizable: false,
       movable: !settings.locked,
+      focusable: this.#floatingExpanded,
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
@@ -304,8 +310,12 @@ export class WindowManager {
     const window = this.createFloating();
     const settings = this.#options.settings().floating;
     const current = window.getBounds();
+    // A compact desktop pet must not keep keyboard focus away from the main
+    // application. The expanded panel becomes focusable again for chat,
+    // approvals and task input.
+    window.setFocusable(expanded);
     const display = screen.getDisplayMatching(current);
-    const size = floatingWindowSize(settings.shape, expanded);
+    const size = floatingWindowSize(expanded, settings.scalePercent);
     const anchoredRight =
       current.x + current.width >
       display.workArea.x + display.workArea.width / 2;

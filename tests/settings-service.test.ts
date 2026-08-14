@@ -50,7 +50,7 @@ describe('SettingsService', () => {
     expect(persisted.ai.authMode).toBe('bearer');
   });
 
-  it('migrates an older floating configuration and persists a custom hover delay', async () => {
+  it('migrates a legacy orb or capsule into the unique Todo Pet configuration', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-floating-settings-'));
     const initial = new SettingsService(root, encryption);
     await initial.load();
@@ -59,6 +59,9 @@ describe('SettingsService', () => {
       floating: Record<string, unknown>;
     };
     delete legacy.floating.hoverExpandDelayMs;
+    delete legacy.floating.selectedTab;
+    delete legacy.floating.scalePercent;
+    legacy.floating.shape = 'orb';
     legacy.floating.topMode = 'focus-only';
     await writeFile(settingsPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8');
 
@@ -66,10 +69,15 @@ describe('SettingsService', () => {
     await migrated.load();
     expect(migrated.get().floating.hoverExpandDelayMs).toBe(1_000);
     expect(migrated.get().floating.topMode).toBe('always');
+    expect(migrated.get().floating.selectedTab).toBe('all');
+    expect(migrated.get().floating.scalePercent).toBe(100);
     const persistedMigration = JSON.parse(await readFile(settingsPath, 'utf8')) as {
-      floating: { topMode: string };
+      floating: Record<string, unknown>;
     };
     expect(persistedMigration.floating.topMode).toBe('always');
+    expect(persistedMigration.floating.selectedTab).toBe('all');
+    expect(persistedMigration.floating.scalePercent).toBe(100);
+    expect(persistedMigration.floating).not.toHaveProperty('shape');
     const replaced = await migrated.replace({
       ...migrated.get(),
       floating: {

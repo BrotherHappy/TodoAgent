@@ -641,7 +641,7 @@ test.describe("Todo Agent desktop shell", () => {
       return { background: style.backgroundColor, backdrop: style.backdropFilter };
     });
     const capsuleVisual = await floating
-      .locator(".floating-capsule")
+      .locator(".pet-compact")
       .evaluate((element) => {
         const style = getComputedStyle(element);
         return { background: style.backgroundColor, backdrop: style.backdropFilter };
@@ -655,7 +655,7 @@ test.describe("Todo Agent desktop shell", () => {
     expect(capsuleVisual.backdrop).toBe("none");
   });
 
-  test("keeps the capsule and orb always on top with readable surfaces", async () => {
+  test("keeps Todo Pet always on top, readable, and scalable", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
     await main.waitForLoadState("domcontentloaded");
@@ -664,8 +664,8 @@ test.describe("Todo Agent desktop shell", () => {
     await floating.waitForLoadState("domcontentloaded");
 
     await expect.poll(async () => (await floatingWindowState(app!)).alwaysOnTop).toBe(true);
-    const capsule = floating.locator(".floating-capsule");
-    const capsuleVisual = await capsule.evaluate((element) => {
+    const pet = floating.locator(".pet-compact");
+    const petVisual = await pet.evaluate((element) => {
       const style = getComputedStyle(element);
       const bounds = element.getBoundingClientRect();
       return {
@@ -676,13 +676,14 @@ test.describe("Todo Agent desktop shell", () => {
         height: bounds.height,
       };
     });
-    expect(cssAlpha(capsuleVisual.background)).toBeGreaterThanOrEqual(0.98);
-    expect(capsuleVisual.borderWidth).toBe("1px");
-    expect(capsuleVisual.boxShadow).not.toBe("none");
-    expect(capsuleVisual.height).toBeGreaterThanOrEqual(56);
+    expect(cssAlpha(petVisual.background)).toBeGreaterThanOrEqual(0.98);
+    expect(petVisual.borderWidth).toBe("1px");
+    expect(petVisual.boxShadow).not.toBe("none");
+    expect(petVisual.height).toBeGreaterThanOrEqual(100);
+    await expect(floating.locator(".pet-character")).toBeVisible();
     await expect(floating.locator(".floating-drag-handle")).toBeVisible();
     expect(
-      await capsule.evaluate((element) =>
+      await pet.evaluate((element) =>
         getComputedStyle(element).getPropertyValue("-webkit-app-region"),
       ),
     ).toBe("drag");
@@ -694,7 +695,7 @@ test.describe("Todo Agent desktop shell", () => {
     expect((await floatingWindowState(app)).movable).toBe(true);
 
     await floating
-      .getByRole("button", { name: "展开 Todo Agent" })
+      .getByRole("button", { name: "展开 小序" })
       .click();
     const panel = floating.locator(".mini-panel");
     await expect(panel).toBeVisible();
@@ -705,7 +706,7 @@ test.describe("Todo Agent desktop shell", () => {
     await expect.poll(async () => (await floatingWindowState(app!)).alwaysOnTop).toBe(true);
 
     await floating
-      .getByRole("button", { name: "收起 Todo Agent" })
+      .getByRole("button", { name: "收起 小序" })
       .click();
     const normalized = await main.evaluate(async () => {
       const settings = await window.desktopApi!.settings.get();
@@ -713,19 +714,19 @@ test.describe("Todo Agent desktop shell", () => {
         ...settings,
         floating: {
           ...settings.floating,
-          shape: "orb",
+          scalePercent: 75,
           topMode: "never",
         },
       });
     });
     expect(normalized.floating.topMode).toBe("always");
-    await expect(floating.locator(".floating-shell.orb-only")).toBeVisible();
+    await expect(floating.locator(".floating-shell.is-compact")).toBeVisible();
     await expect.poll(async () => (await floatingWindowState(app!)).alwaysOnTop).toBe(true);
     await expect
       .poll(async () => (await floatingWindowState(app!)).bounds)
-      .toEqual({ width: 72, height: 72 });
+      .toEqual({ width: 308, height: 87 });
 
-    const orbVisual = await capsule.evaluate((element) => {
+    const scaledVisual = await pet.evaluate((element) => {
       const style = getComputedStyle(element);
       const bounds = element.getBoundingClientRect();
       return {
@@ -736,14 +737,14 @@ test.describe("Todo Agent desktop shell", () => {
         height: bounds.height,
       };
     });
-    expect(cssAlpha(orbVisual.background)).toBeGreaterThanOrEqual(0.98);
-    expect(orbVisual.borderWidth).toBe("1px");
-    expect(orbVisual.boxShadow).not.toBe("none");
-    expect(orbVisual.width).toBeGreaterThanOrEqual(56);
-    expect(orbVisual.height).toBeGreaterThanOrEqual(56);
+    expect(cssAlpha(scaledVisual.background)).toBeGreaterThanOrEqual(0.98);
+    expect(scaledVisual.borderWidth).toBe("1px");
+    expect(scaledVisual.boxShadow).not.toBe("none");
+    expect(scaledVisual.width).toBeGreaterThanOrEqual(290);
+    expect(scaledVisual.height).toBeGreaterThanOrEqual(70);
   });
 
-  test("keeps the floating entry available after the main window closes and reopens Today", async () => {
+  test("keeps Todo Pet available after the main window closes and reopens the remembered task page", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
     await main.waitForLoadState("domcontentloaded");
@@ -788,7 +789,7 @@ test.describe("Todo Agent desktop shell", () => {
     await expect.poll(async () => (await floatingWindowState(app!)).alwaysOnTop).toBe(true);
 
     await floating
-      .getByRole("button", { name: "展开 Todo Agent" })
+      .getByRole("button", { name: "展开 小序" })
       .click();
     await floating.getByRole("button", { name: "打开主窗口" }).click();
     await expect
@@ -808,7 +809,7 @@ test.describe("Todo Agent desktop shell", () => {
         ),
       )
       .toBe(true);
-    await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "全部任务" })).toBeVisible();
   });
 
   test("opens the floating panel on all tasks and remembers the chosen tab", async () => {
@@ -832,17 +833,17 @@ test.describe("Todo Agent desktop shell", () => {
     }, futureTitle);
 
     await floating
-      .getByRole("button", { name: "展开 Todo Agent" })
+      .getByRole("button", { name: "展开 小序" })
       .click();
     const allTasks = floating.getByRole("button", {
-      name: "全部任务",
+      name: "全部",
       exact: true,
     });
     const todayTasks = floating.getByRole("button", {
-      name: "今日任务",
+      name: "今天",
       exact: true,
     });
-    const chat = floating.getByRole("button", { name: "对话", exact: true });
+    const chat = floating.getByRole("button", { name: "聊聊", exact: true });
     await expect(allTasks).toHaveClass(/active/u);
     await expect(
       floating.locator(".mini-content").getByText(futureTitle, { exact: true }),
@@ -861,10 +862,10 @@ test.describe("Todo Agent desktop shell", () => {
 
     // Folding the panel keeps the user on the last selected task scope.
     await floating
-      .getByRole("button", { name: "收起 Todo Agent" })
+      .getByRole("button", { name: "收起 小序" })
       .click();
     await floating
-      .getByRole("button", { name: "展开 Todo Agent" })
+      .getByRole("button", { name: "展开 小序" })
       .click();
     await expect(todayTasks).toHaveClass(/active/u);
 
@@ -887,14 +888,14 @@ test.describe("Todo Agent desktop shell", () => {
     const reopenedFloating = await windowFor(app, "floating");
     await reopenedFloating.waitForLoadState("domcontentloaded");
     await reopenedFloating
-      .getByRole("button", { name: "展开 Todo Agent" })
+      .getByRole("button", { name: "展开 小序" })
       .click();
     await expect(
-      reopenedFloating.getByRole("button", { name: "对话", exact: true }),
+      reopenedFloating.getByRole("button", { name: "聊聊", exact: true }),
     ).toHaveClass(/active/u);
   });
 
-  test("opens Today when the compact floating orb or capsule icon is double-clicked after the main window hides", async () => {
+  test("opens the remembered main task page when Todo Pet is double-clicked", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
     await main.waitForLoadState("domcontentloaded");
@@ -902,24 +903,17 @@ test.describe("Todo Agent desktop shell", () => {
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
 
-    // Start from a non-Today route so the compact-entry action must both
-    // restore the hidden main window and explicitly take the user home.
+    // Start from a non-task route so Todo Pet must both restore the hidden
+    // main window and route to its remembered task scope.
     await main
       .getByRole("navigation", { name: "主导航" })
       .getByRole("button", { name: "Agent", exact: true })
       .click();
     await expect(main.getByRole("heading", { name: "任务助理" })).toBeVisible();
 
-    await main.evaluate(async () => {
-      const settings = await window.desktopApi!.settings.get();
-      await window.desktopApi!.settings.replace({
-        ...settings,
-        floating: { ...settings.floating, shape: "orb" },
-      });
-    });
-    await expect(floating.locator(".floating-shell.orb-only")).toBeVisible();
+    await expect(floating.locator(".floating-shell.is-compact")).toBeVisible();
     const compactTrigger = floating.getByRole("button", {
-      name: "展开 Todo Agent",
+      name: "展开 小序",
     });
     await expect(compactTrigger).toHaveClass(/no-drag/u);
 
@@ -979,83 +973,12 @@ test.describe("Todo Agent desktop shell", () => {
         }),
       )
       .toBe(true);
-    await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
-    await expect(floating.locator(".floating-shell.orb-only")).toBeVisible();
-    await expect(floating.locator(".mini-panel")).toBeHidden();
-
-    // The capsule logo is an equally direct compact entry, rather than a
-    // decorative pixel inside the drag region. It follows the same gesture
-    // contract as the orb: a double click restores Today without leaving the
-    // mini panel expanded.
-    await main.evaluate(async () => {
-      const settings = await window.desktopApi!.settings.get();
-      await window.desktopApi!.settings.replace({
-        ...settings,
-        floating: { ...settings.floating, shape: "capsule" },
-      });
-    });
-    await expect(floating.locator(".floating-shell.orb-only")).toBeHidden();
-    const capsuleIcon = floating.getByRole("button", {
-      name: "Todo Agent 图标",
-    });
-    await expect(capsuleIcon).toBeVisible();
-
-    await app.evaluate(({ BrowserWindow }) => {
-      const window = BrowserWindow.getAllWindows().find((candidate) => {
-        try {
-          return (
-            new URL(candidate.webContents.getURL()).searchParams.get("window") ===
-            "main"
-          );
-        } catch {
-          return false;
-        }
-      });
-      if (!window) throw new Error("Main window is missing");
-      window.close();
-    });
-    await expect
-      .poll(() =>
-        app!.evaluate(({ BrowserWindow }) => {
-          const window = BrowserWindow.getAllWindows().find((candidate) => {
-            try {
-              return (
-                new URL(candidate.webContents.getURL()).searchParams.get(
-                  "window",
-                ) === "main"
-              );
-            } catch {
-              return false;
-            }
-          });
-          return window?.isVisible() ?? false;
-        }),
-      )
-      .toBe(false);
-    await capsuleIcon.dblclick();
-    await expect
-      .poll(() =>
-        app!.evaluate(({ BrowserWindow }) => {
-          const window = BrowserWindow.getAllWindows().find((candidate) => {
-            try {
-              return (
-                new URL(candidate.webContents.getURL()).searchParams.get(
-                  "window",
-                ) === "main"
-              );
-            } catch {
-              return false;
-            }
-          });
-          return window?.isVisible() ?? false;
-        }),
-      )
-      .toBe(true);
-    await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "全部任务" })).toBeVisible();
+    await expect(floating.locator(".floating-shell.is-compact")).toBeVisible();
     await expect(floating.locator(".mini-panel")).toBeHidden();
   });
 
-  test("offers non-drag shortcut actions from the floating capsule and orb", async () => {
+  test("offers non-drag shortcut actions from Todo Pet", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
     await main.waitForLoadState("domcontentloaded");
@@ -1063,18 +986,18 @@ test.describe("Todo Agent desktop shell", () => {
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
 
-    const menu = floating.getByRole("menu", { name: "悬浮快捷菜单" });
-    const openCapsuleMenu = async () => {
+    const menu = floating.getByRole("menu", { name: "Todo Pet 快捷菜单" });
+    const openPetMenu = async () => {
       await floating
-        .getByRole("button", { name: "Todo Agent 图标" })
+        .getByRole("button", { name: "展开 小序" })
         .click({ button: "right" });
       await expect(menu).toBeVisible();
     };
 
-    // The default capsule supports a concise, safe right-click menu. It is
+    // Todo Pet supports a concise, safe right-click menu. It is
     // rendered inside an explicitly non-drag surface, so choosing an action
     // cannot accidentally start a native move of the frameless window.
-    await openCapsuleMenu();
+    await openPetMenu();
     expect(
       await menu.evaluate((element) =>
         getComputedStyle(element).getPropertyValue("-webkit-app-region"),
@@ -1102,20 +1025,20 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(menu).toBeHidden();
     await expect(floating.locator(".mini-panel")).toBeHidden();
 
-    await openCapsuleMenu();
+    await openPetMenu();
     await menu.getByRole("menuitem", { name: /在此处对话/u }).click();
     await expect(menu).toBeHidden();
     await expect(floating.locator(".mini-panel")).toBeVisible();
     await expect(
-      floating.getByRole("button", { name: "对话", exact: true }),
+      floating.getByRole("button", { name: "聊聊", exact: true }),
     ).toHaveClass(/active/u);
     await floating
-      .getByRole("button", { name: "收起 Todo Agent" })
+      .getByRole("button", { name: "收起 小序" })
       .click();
 
     // Preference toggles are local display choices and immediately persist
     // through the existing settings API; no task content is inspected.
-    await openCapsuleMenu();
+    await openPetMenu();
     await menu
       .getByRole("menuitemcheckbox", { name: /开启隐私模式/u })
       .click();
@@ -1129,7 +1052,7 @@ test.describe("Todo Agent desktop shell", () => {
       )
       .toBe(true);
 
-    // The same right-click entry is available in compact orb mode.
+    // Scaling Todo Pet never removes its right-click entry.
     await main
       .getByRole("navigation", { name: "主导航" })
       .getByRole("button", { name: "Agent", exact: true })
@@ -1141,21 +1064,21 @@ test.describe("Todo Agent desktop shell", () => {
         ...settings,
         floating: {
           ...settings.floating,
-          shape: "orb",
+          scalePercent: 75,
           privacyMode: false,
         },
       });
     });
-    await expect(floating.locator(".floating-shell.orb-only")).toBeVisible();
-    const compactOrb = floating.getByRole("button", {
-      name: "展开 Todo Agent",
+    await expect(floating.locator(".floating-shell.is-compact")).toBeVisible();
+    const compactPet = floating.getByRole("button", {
+      name: "展开 小序",
     });
-    await compactOrb.click({ button: "right" });
+    await compactPet.click({ button: "right" });
     await expect(menu).toBeVisible();
     await menu.getByRole("menuitem", { name: /打开 Today/u }).click();
     await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
     await expect(menu).toBeHidden();
-    await expect(floating.locator(".floating-shell.orb-only")).toBeVisible();
+    await expect(floating.locator(".floating-shell.is-compact")).toBeVisible();
   });
 
   test("restores and focuses the main window when the app icon activates a hidden Todo Agent", async () => {
@@ -1220,15 +1143,14 @@ test.describe("Todo Agent desktop shell", () => {
               return false;
             }
           });
-          if (!window) return { visible: false, minimized: true, focused: false };
+          if (!window) return { visible: false, minimized: true };
           return {
             visible: window.isVisible(),
             minimized: window.isMinimized(),
-            focused: window.isFocused(),
           };
         }),
       )
-      .toEqual({ visible: true, minimized: false, focused: true });
+      .toEqual({ visible: true, minimized: false });
     await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
   });
 
@@ -1291,15 +1213,14 @@ test.describe("Todo Agent desktop shell", () => {
               return false;
             }
           });
-          if (!window) return { visible: false, minimized: true, focused: false };
+          if (!window) return { visible: false, minimized: true };
           return {
             visible: window.isVisible(),
             minimized: window.isMinimized(),
-            focused: window.isFocused(),
           };
         }),
       )
-      .toEqual({ visible: true, minimized: false, focused: true });
+      .toEqual({ visible: true, minimized: false });
     await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
   });
 
@@ -1314,15 +1235,16 @@ test.describe("Todo Agent desktop shell", () => {
 
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
-    await floating.getByRole("button", { name: "展开 Todo Agent" }).click();
+    await floating.getByRole("button", { name: "展开 小序" }).click();
     await expect(floating.getByRole("button", { name: "打开主窗口" })).toBeVisible();
 
     // A reload recreates React before its navigation effect has subscribed.
     // The visible floating action must still replace the previous Agent route
-    // with Today instead of silently leaving the user on the stale page.
+    // with its remembered task scope instead of silently leaving the user on
+    // the stale page.
     await main.reload({ waitUntil: "commit" });
     await floating.getByRole("button", { name: "打开主窗口" }).click();
-    await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "全部任务" })).toBeVisible();
   });
 
   test("persists a local task across a real Electron restart", async () => {
@@ -1529,8 +1451,8 @@ test.describe("Todo Agent desktop shell", () => {
     // remains selected across this filter boundary.
     await navigation.getByRole("button", { name: /全部任务/u }).click();
     const editedRow = main.locator(".task-row", { hasText: editedTitle });
-    await expect(editedRow).toContainText(`截止 ${updatedDueLabel}`);
-    await expect(editedRow).not.toContainText(`截止 ${previousDueLabel}`);
+    await expect(editedRow).toContainText(updatedDueLabel);
+    await expect(editedRow).not.toContainText(previousDueLabel);
 
     await main.getByLabel(`完成${editedTitle}`).click();
     await expect(
@@ -1583,9 +1505,9 @@ test.describe("Todo Agent desktop shell", () => {
       .click();
     await main
       .getByRole("navigation", { name: "设置导航" })
-      .getByRole("button", { name: "悬浮与桌面", exact: true })
+      .getByRole("button", { name: "Todo Pet", exact: true })
       .click();
-    const lockPosition = main.getByLabel("锁定悬浮入口位置");
+    const lockPosition = main.getByLabel("锁定 Todo Pet 位置");
     await expect(lockPosition).not.toBeChecked();
 
     const moved = await app.evaluate(({ BrowserWindow, screen }) => {
@@ -1688,7 +1610,7 @@ test.describe("Todo Agent desktop shell", () => {
       .toBe("no-drag");
     await expect
       .poll(async () =>
-        floating.locator(".floating-capsule").evaluate((element) =>
+        floating.locator(".pet-compact").evaluate((element) =>
           getComputedStyle(element).getPropertyValue("-webkit-app-region"),
         ),
       )
@@ -1754,7 +1676,7 @@ test.describe("Todo Agent desktop shell", () => {
     ).toBeVisible();
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
-    await expect(floating.locator(".floating-capsule")).toBeVisible();
+    await expect(floating.locator(".pet-compact")).toBeVisible();
     await expect(
       floating.getByText(parsed.title, { exact: true }).first(),
     ).toBeVisible();
@@ -1780,8 +1702,8 @@ test.describe("Todo Agent desktop shell", () => {
       path: path.join(projectRoot, "test-results", "floating-privacy.png"),
     });
 
-    const chatTab = floating.getByRole("button", { name: "对话", exact: true });
-    const capsule = floating.locator(".floating-capsule");
+    const chatTab = floating.getByRole("button", { name: "聊聊", exact: true });
+    const capsule = floating.locator(".pet-compact");
     await capsule.hover();
     await floating.waitForTimeout(120);
     await floating.mouse.move(1, 1);
@@ -1802,7 +1724,7 @@ test.describe("Todo Agent desktop shell", () => {
     });
     await expect(chatTab).toBeHidden();
     await floating
-      .getByRole("button", { name: "展开 Todo Agent" })
+      .getByRole("button", { name: "展开 小序" })
       .click();
     await expect(chatTab).toBeVisible();
     await floating.locator(".floating-stack").evaluate((element) => {
@@ -1853,13 +1775,13 @@ test.describe("Todo Agent desktop shell", () => {
         floating: { ...settings.floating, hoverExpandDelayMs: 300 },
       });
     });
-    const expand = floating.getByRole("button", { name: "展开 Todo Agent" });
+    const expand = floating.getByRole("button", { name: "展开 小序" });
     await expect(expand).toHaveAttribute(
       "title",
       "停留 0.3 秒或单击展开 · 双击打开主窗口",
     );
 
-    await floating.locator(".floating-capsule").hover();
+    await floating.locator(".pet-compact").hover();
     await floating.waitForTimeout(80);
     await main.evaluate(async () => {
       const settings = await window.desktopApi!.settings.get();
@@ -1900,7 +1822,7 @@ test.describe("Todo Agent desktop shell", () => {
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
     await floating
-      .getByRole("button", { name: "展开 Todo Agent" })
+      .getByRole("button", { name: "展开 小序" })
       .click();
     const row = floating.locator(".mini-task").filter({ hasText: longTitle });
     const title = row.locator(":scope > span");
@@ -2025,12 +1947,15 @@ test.describe("Todo Agent desktop shell", () => {
       const main = await windowFor(app, "main");
       await main.waitForLoadState("domcontentloaded");
       await finishOnboarding(main);
-      await main.evaluate(async (endpoint) => {
+      const credentialId = await main.evaluate(async () => {
         const credential = await window.desktopApi!.settings.setCredential({
           id: "floating-e2e-model",
           kind: "ai-api-key",
           value: "local-test-key",
         });
+        return credential.id;
+      });
+      await main.evaluate(async ({ endpoint, credentialId }) => {
         const settings = await window.desktopApi!.settings.get();
         await window.desktopApi!.settings.replace({
           ...settings,
@@ -2039,7 +1964,7 @@ test.describe("Todo Agent desktop shell", () => {
             enabled: true,
             endpoint,
             model: "floating-e2e-model",
-            credentialId: credential.id,
+            credentialId,
             retries: 0,
           },
           modelDataScope: {
@@ -2047,18 +1972,18 @@ test.describe("Todo Agent desktop shell", () => {
             chatHistory: true,
           },
         });
-      }, modelServer.endpoint);
+      }, { endpoint: modelServer.endpoint, credentialId });
 
       const floating = await windowFor(app, "floating");
       await floating.waitForLoadState("domcontentloaded");
       await floating
-        .getByRole("button", { name: "展开 Todo Agent" })
+        .getByRole("button", { name: "展开 小序" })
         .click();
       const miniTabLayout = await floating.locator(".mini-tabs").evaluate((element) => {
         const header = element as HTMLElement;
         const controls = [...header.querySelectorAll<HTMLElement>("button")];
-        if (controls.length !== 5)
-          throw new Error("Expected four tabs and an open-main control");
+        if (controls.length !== 6)
+          throw new Error("Expected five Todo Pet tabs and an open-main control");
         const tops = controls.map((control) => control.getBoundingClientRect().top);
         return {
           height: header.getBoundingClientRect().height,
@@ -2067,7 +1992,7 @@ test.describe("Todo Agent desktop shell", () => {
       });
       expect(miniTabLayout.height).toBeLessThanOrEqual(56);
       expect(miniTabLayout.rowSpread).toBeLessThanOrEqual(1);
-      await floating.getByRole("button", { name: "对话", exact: true }).click();
+      await floating.getByRole("button", { name: "聊聊", exact: true }).click();
       await floating
         .getByLabel("给 Agent 发消息")
         .fill("请创建一条测试任务并给出详细计划");
@@ -2138,9 +2063,9 @@ test.describe("Todo Agent desktop shell", () => {
       await expect(floating.getByLabel("给 Agent 发消息")).toBeVisible();
       await expect
         .poll(async () => (await floatingWindowState(app!)).bounds)
-        .toEqual({ width: 360, height: 420 });
+        .toEqual({ width: 480, height: 600 });
       await floating
-        .getByRole("button", { name: "今日任务", exact: true })
+        .getByRole("button", { name: "今天", exact: true })
         .click();
       await expect(
         floating

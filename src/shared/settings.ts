@@ -1,6 +1,6 @@
 export type ThemePreference = 'system' | 'light' | 'dark';
-export type FloatingShape = 'capsule' | 'orb';
 export type FloatingTopMode = 'always' | 'focus-only' | 'never';
+export type PetTab = 'all' | 'today' | 'focus' | 'chat' | 'home';
 /** How the OpenAI-compatible model endpoint authenticates requests. */
 export type AiAuthenticationMode = 'bearer' | 'none';
 export const FLOATING_HOVER_EXPAND_DELAY_MIN_MS = 200;
@@ -29,12 +29,13 @@ export interface NotificationSettings {
 
 export interface FloatingSettings {
   enabled: boolean;
-  shape: FloatingShape;
   hoverExpandDelayMs: number;
   topMode: FloatingTopMode;
   locked: boolean;
   hideInFullscreen: boolean;
   privacyMode: boolean;
+  selectedTab: PetTab;
+  scalePercent: number;
   /** The most recently used display, so multi-monitor positions survive restart. */
   lastDisplayId?: string;
   positions: Record<string, { x: number; y: number }>;
@@ -124,12 +125,13 @@ export const defaultSettings: AppSettings = {
   },
   floating: {
     enabled: true,
-    shape: 'capsule',
     hoverExpandDelayMs: FLOATING_HOVER_EXPAND_DELAY_DEFAULT_MS,
     topMode: 'always',
     locked: false,
     hideInFullscreen: true,
     privacyMode: false,
+    selectedTab: 'all',
+    scalePercent: 100,
     positions: {},
   },
   ai: {

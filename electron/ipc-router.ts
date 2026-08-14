@@ -49,7 +49,6 @@ const settingsSchema = z
     floating: z
       .object({
         enabled: z.boolean(),
-        shape: z.enum(["capsule", "orb"]),
         hoverExpandDelayMs: z
           .number()
           .int()
@@ -59,6 +58,8 @@ const settingsSchema = z
         locked: z.boolean(),
         hideInFullscreen: z.boolean(),
         privacyMode: z.boolean(),
+        selectedTab: z.enum(["all", "today", "focus", "chat", "home"]),
+        scalePercent: z.number().int().min(75).max(125),
         lastDisplayId: z.string().trim().min(1).max(512).optional(),
         positions: z.record(
           z.string(),

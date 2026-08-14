@@ -25,6 +25,7 @@ interface StoredSecrets {
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
+const petTabs = new Set(['all', 'today', 'focus', 'chat', 'home']);
 
 async function atomicJsonWrite(filePath: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -80,6 +81,12 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   // behind ordinary windows. Accept those stored values for compatibility,
   // but normalize them to the current always-on-top product behavior.
   merged.floating.topMode = 'always';
+  merged.floating.selectedTab = petTabs.has(merged.floating.selectedTab)
+    ? merged.floating.selectedTab
+    : 'all';
+  merged.floating.scalePercent = Number.isFinite(merged.floating.scalePercent)
+    ? Math.min(125, Math.max(75, Math.round(merged.floating.scalePercent)))
+    : defaultSettings.floating.scalePercent;
 
   // Keep the ordinary settings document on an explicit allow-list. Types and
   // the renderer IPC schema are useful boundaries, but callers in the main
@@ -106,12 +113,13 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     },
     floating: {
       enabled: merged.floating.enabled,
-      shape: merged.floating.shape,
       hoverExpandDelayMs: merged.floating.hoverExpandDelayMs,
       topMode: merged.floating.topMode,
       locked: merged.floating.locked,
       hideInFullscreen: merged.floating.hideInFullscreen,
       privacyMode: merged.floating.privacyMode,
+      selectedTab: merged.floating.selectedTab,
+      scalePercent: merged.floating.scalePercent,
       lastDisplayId: merged.floating.lastDisplayId,
       positions: clone(merged.floating.positions),
     },
@@ -180,7 +188,10 @@ export class SettingsService {
       this.#settings = mergeSettings(raw);
       if (
         raw.floating?.topMode !== this.#settings.floating.topMode ||
-        raw.ai?.authMode !== this.#settings.ai.authMode
+        raw.ai?.authMode !== this.#settings.ai.authMode ||
+        raw.floating?.selectedTab !== this.#settings.floating.selectedTab ||
+        raw.floating?.scalePercent !== this.#settings.floating.scalePercent ||
+        Object.prototype.hasOwnProperty.call(raw.floating ?? {}, 'shape')
       ) {
         await this.saveSettings();
       }

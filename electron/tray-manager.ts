@@ -64,7 +64,7 @@ export class TrayManager {
       { label: '打开 Agent', click: () => this.#options.showMain('agent') },
       { type: 'separator' },
       {
-        label: '显示悬浮胶囊',
+        label: '显示 Todo Pet',
         type: 'checkbox',
         checked: status.floatingVisible,
         click: (item) => this.#options.toggleFloating(item.checked),

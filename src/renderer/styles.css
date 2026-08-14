@@ -1018,7 +1018,9 @@ select {
 }
 
 .floating-shell {
-  padding: 8px;
+  width: 100vw;
+  height: 100vh;
+  padding: 6px;
 }
 .floating-stack {
   position: relative;
@@ -1028,19 +1030,23 @@ select {
   display: flex;
   flex-direction: column;
 }
-.floating-capsule {
+.pet-compact {
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
-  min-height: 60px;
+  height: calc(100vh - 12px);
+  min-height: 0;
   display: grid;
-  grid-template-columns: 24px 38px minmax(0, 1fr) auto;
-  gap: 7px;
+  grid-template-columns:
+    18px calc(82px * var(--pet-scale, 1)) minmax(0, 1fr) 34px;
+  gap: calc(6px * var(--pet-scale, 1));
   align-items: center;
   border: 1px solid var(--floating-line);
-  border-radius: 22px;
-  padding: 8px 9px;
-  background: var(--floating-surface-strong);
+  border-radius: calc(29px * var(--pet-scale, 1));
+  padding: calc(5px * var(--pet-scale, 1)) calc(8px * var(--pet-scale, 1));
+  background:
+    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.76), transparent 30%),
+    color-mix(in srgb, var(--floating-surface-strong) 96%, #7772f4 4%);
   box-shadow:
     var(--floating-shadow),
     inset 0 1px 0 color-mix(in srgb, #fff 58%, transparent);
@@ -1051,9 +1057,22 @@ select {
     background-color 160ms ease,
     box-shadow 160ms ease;
 }
-/* Electron only permits native dragging from explicit drag regions. The
- * controls inside the capsule are already explicitly marked no-drag. */
-.floating-capsule.drag-region {
+.pet-shell.is-expanded .pet-compact {
+  height: 104px;
+  grid-template-columns: 18px 82px minmax(0, 1fr) 34px;
+  gap: 6px;
+  border-radius: 29px;
+  padding: 5px 8px;
+}
+.pet-shell.is-expanded .pet-avatar-button {
+  width: 82px;
+  height: 94px;
+}
+.pet-shell.is-expanded .pet-character.is-compact {
+  --pet-scale: 1;
+}
+/* Electron only permits native dragging from explicit drag regions. */
+.pet-compact.drag-region {
   -webkit-app-region: drag;
 }
 .floating-drag-handle {
@@ -1078,8 +1097,155 @@ select {
   cursor: not-allowed;
   opacity: 0.42;
 }
-.position-locked .floating-capsule.drag-region {
+.position-locked .pet-compact.drag-region {
   -webkit-app-region: no-drag;
+}
+.pet-avatar-button {
+  width: calc(82px * var(--pet-scale, 1));
+  height: calc(94px * var(--pet-scale, 1));
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 28px;
+  padding: 0;
+  background: transparent;
+  overflow: visible;
+}
+.pet-avatar-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--app-brand) 65%, #fff);
+  outline-offset: -3px;
+}
+.pet-character {
+  --pet-scale: 1;
+  width: calc(96px * var(--pet-scale));
+  height: calc(96px * var(--pet-scale));
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  transform-origin: center bottom;
+}
+.pet-character.is-compact {
+  width: calc(86px * var(--pet-scale));
+  height: calc(92px * var(--pet-scale));
+}
+.pet-character svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.pet-ground {
+  fill: rgba(57, 50, 129, 0.16);
+}
+.pet-body,
+.pet-ear {
+  fill: url(#pet-body-gradient);
+}
+.pet-ear {
+  stroke: rgba(255, 255, 255, 0.36);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+.pet-belly {
+  fill: url(#pet-belly-gradient);
+}
+.pet-eye {
+  fill: #24213d;
+  transform-origin: center;
+}
+.pet-mouth,
+.pet-check,
+.pet-arm {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pet-mouth {
+  stroke: #37324f;
+  stroke-width: 2.2;
+}
+.pet-cheek {
+  fill: #ff9cae;
+  opacity: 0.62;
+}
+.pet-check {
+  stroke: #625ce8;
+  stroke-width: 4.5;
+}
+.pet-arm {
+  stroke: #5c56db;
+  stroke-width: 5;
+}
+.pet-focus-mark,
+.pet-sync-mark,
+.pet-alert-mark,
+.pet-happy-mark {
+  opacity: 0;
+  transform-origin: 83px 24px;
+}
+.pet-focus-mark circle {
+  fill: #fff4c4;
+  stroke: #db9839;
+  stroke-width: 2;
+}
+.pet-focus-mark path,
+.pet-sync-mark path,
+.pet-alert-mark path {
+  fill: none;
+  stroke: #a96b20;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pet-sync-mark path {
+  stroke: #4a8ddf;
+}
+.pet-alert-mark path:first-child {
+  fill: #fff0c2;
+  stroke: #dd7d2f;
+}
+.pet-happy-mark path {
+  fill: #ffe37c;
+  stroke: #d29a2a;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.pet-mood-focus .pet-focus-mark,
+.pet-mood-syncing .pet-sync-mark,
+.pet-mood-alert .pet-alert-mark,
+.pet-mood-happy .pet-happy-mark {
+  opacity: 1;
+}
+.pet-mood-happy .pet-mouth {
+  d: path("M45 57c4 7 10 7 14 0");
+}
+.pet-mood-alert .pet-cheek {
+  opacity: 0.24;
+}
+.pet-task-bubble {
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--app-line) 88%, #756ff0 12%);
+  border-radius: calc(16px * var(--pet-scale, 1));
+  padding: calc(7px * var(--pet-scale, 1)) calc(10px * var(--pet-scale, 1));
+  background: color-mix(in srgb, var(--app-surface-raised) 93%, transparent);
+  box-shadow: 0 8px 22px rgba(43, 38, 104, 0.1);
+}
+.pet-task-bubble::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-left: 1px solid var(--app-line);
+  border-bottom: 1px solid var(--app-line);
+  background: var(--app-surface-raised);
+  transform: translateY(-50%) rotate(45deg);
+}
+.pet-complete-button {
+  width: 32px;
+  height: 32px;
+  border-color: color-mix(in srgb, var(--app-brand) 32%, var(--app-line));
+  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
 }
 .floating-expand-trigger {
   border: 0;
@@ -1101,7 +1267,7 @@ select {
 .floating-summary:hover {
   background: var(--app-glass-soft);
 }
-.floating-capsule:hover {
+.pet-compact:hover {
   border-color: color-mix(in srgb, var(--app-brand) 38%, var(--floating-line));
   background: color-mix(
     in srgb,
@@ -1154,7 +1320,7 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-.focus-mode .floating-capsule {
+.focus-mode .pet-compact {
   border-color: color-mix(in srgb, var(--floating-focus) 58%, var(--floating-line));
 }
 
@@ -1175,7 +1341,7 @@ select {
 .floating-context-menu {
   position: absolute;
   z-index: 4;
-  top: 68px;
+  top: 108px;
   right: 0;
   width: min(326px, calc(100% - 2px));
   overflow: hidden;
@@ -1285,10 +1451,8 @@ select {
 .mini-tabs {
   flex: 0 0 auto;
   display: grid;
-  /* Four navigation tabs plus a compact, separately-sized main-window
-   * affordance. A five-child grid with only four columns would make that action
-   * wrap into an accidental second header row. */
-  grid-template-columns: repeat(4, minmax(0, 1fr)) 40px;
+  /* Five Todo Pet destinations plus the full-app affordance. */
+  grid-template-columns: repeat(5, minmax(0, 1fr)) 40px;
   gap: 3px;
   padding: 7px;
   border-bottom: 1px solid var(--app-line);
@@ -1340,6 +1504,110 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--app-text-soft);
+}
+.pet-focus-view {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 18px 18px;
+  text-align: center;
+}
+.pet-focus-kicker,
+.pet-focus-task,
+.pet-home-view p {
+  margin: 0;
+  color: var(--app-text-soft);
+}
+.pet-focus-kicker {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.pet-focus-timer {
+  font-size: clamp(38px, 11vw, 54px);
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+}
+.pet-focus-task {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-focus-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pet-focus-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.pet-home-view {
+  display: grid;
+  gap: 10px;
+  padding: 6px 2px 12px;
+}
+.pet-home-hero {
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-radius: 18px;
+  padding: 8px 12px 8px 4px;
+  background: linear-gradient(145deg, rgba(119, 114, 244, 0.13), rgba(112, 180, 255, 0.08));
+}
+.pet-home-hero span {
+  color: var(--app-brand-strong);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pet-home-hero h3 {
+  margin: 3px 0 5px;
+  font-size: 20px;
+}
+.pet-home-hero p {
+  font-size: 12px;
+}
+.pet-home-card {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  border: 1px solid var(--app-line);
+  border-radius: 15px;
+  padding: 10px 11px;
+  background: color-mix(in srgb, var(--app-surface-raised) 88%, transparent);
+}
+.pet-home-card > svg {
+  margin-top: 2px;
+  color: var(--app-brand-strong);
+}
+.pet-home-card strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+.pet-home-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.pet-home-settings {
+  justify-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
 }
 .mini-composer {
   flex: 0 0 auto;
@@ -1467,43 +1735,11 @@ select {
 .privacy-mode .mini-task > span {
   letter-spacing: 0.04em;
 }
-.privacy-mode .floating-capsule,
+.privacy-mode .pet-compact,
 .privacy-mode .mini-panel {
   background: var(--floating-surface-private);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-}
-.orb-only .mini-panel,
-.orb-only .floating-copy,
-.orb-only .focus-time {
-  display: none;
-}
-.floating-shell.orb-only {
-  padding: 8px;
-}
-.orb-only .floating-stack {
-  width: 56px;
-  height: 56px;
-}
-.orb-only .floating-capsule {
-  width: 56px;
-  height: 56px;
-  min-height: 56px;
-  display: grid;
-  grid-template-columns: 16px 32px;
-  gap: 0;
-  border-radius: 50%;
-  padding: 4px;
-}
-.orb-only .floating-drag-handle {
-  width: 20px;
-  height: 34px;
-  border-radius: 8px;
-}
-.orb-only .floating-expand-trigger {
-  width: 32px;
-  height: 32px;
-  border-radius: 12px;
 }
 
 .agent-layout {
@@ -2428,7 +2664,7 @@ select {
 @media (prefers-reduced-transparency: reduce) {
   .app-window,
   .quick-panel,
-  .floating-capsule,
+  .pet-compact,
   .mini-panel,
   .modal-sheet {
     backdrop-filter: none;
@@ -2443,6 +2679,22 @@ select {
   }
   .agent-orb {
     animation: orb-breathe 3.8s ease-in-out infinite;
+  }
+  .pet-float {
+    animation: pet-breathe 3.6s ease-in-out infinite;
+    transform-origin: 52px 82px;
+  }
+  .pet-eye {
+    animation: pet-blink 5.8s ease-in-out infinite;
+  }
+  .pet-mood-focus .pet-float {
+    animation-duration: 2.6s;
+  }
+  .pet-mood-syncing .pet-sync-mark {
+    animation: pet-spin 1.5s linear infinite;
+  }
+  .pet-mood-happy .pet-happy-mark {
+    animation: pet-sparkle 1.8s ease-in-out infinite;
   }
   .toast {
     animation: toast-in 170ms ease-out;
@@ -2475,6 +2727,40 @@ select {
     50% {
       box-shadow: 0 10px 30px
         color-mix(in srgb, var(--app-brand) 28%, transparent);
+    }
+  }
+  @keyframes pet-breathe {
+    0%,
+    100% {
+      transform: translateY(0) scale(1);
+    }
+    50% {
+      transform: translateY(-2.5px) scale(1.012);
+    }
+  }
+  @keyframes pet-blink {
+    0%,
+    45%,
+    49%,
+    100% {
+      transform: scaleY(1);
+    }
+    47% {
+      transform: scaleY(0.08);
+    }
+  }
+  @keyframes pet-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes pet-sparkle {
+    0%,
+    100% {
+      transform: scale(0.9) rotate(-4deg);
+    }
+    50% {
+      transform: scale(1.12) rotate(4deg);
     }
   }
 }

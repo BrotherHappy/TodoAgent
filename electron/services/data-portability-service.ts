@@ -684,11 +684,23 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectOptional(notifications, 'mutedUntil', `${path}.notifications`, expectIsoDateTime);
 
   const floating = expectRecord(settings.floating, `${path}.floating`);
-  assertOnlyKeys(floating, ['enabled', 'shape', 'hoverExpandDelayMs', 'topMode', 'locked', 'hideInFullscreen', 'privacyMode', 'lastDisplayId', 'positions'], `${path}.floating`);
+  assertOnlyKeys(floating, ['enabled', 'hoverExpandDelayMs', 'topMode', 'locked', 'hideInFullscreen', 'privacyMode', 'selectedTab', 'scalePercent', 'lastDisplayId', 'positions', 'shape'], `${path}.floating`);
   ['enabled', 'locked', 'hideInFullscreen', 'privacyMode'].forEach((key) =>
     expectBoolean(floating[key], `${path}.floating.${key}`),
   );
-  expectEnum(floating.shape, ['capsule', 'orb'] as const, `${path}.floating.shape`);
+  if (floating.selectedTab !== undefined) {
+    expectEnum(floating.selectedTab, ['all', 'today', 'focus', 'chat', 'home'] as const, `${path}.floating.selectedTab`);
+  }
+  if (floating.scalePercent !== undefined) {
+    expectNumber(floating.scalePercent, `${path}.floating.scalePercent`, {
+      integer: true,
+      minimum: 75,
+      maximum: 125,
+    });
+  }
+  if (floating.shape !== undefined) {
+    expectEnum(floating.shape, ['capsule', 'orb'] as const, `${path}.floating.shape`);
+  }
   if (floating.hoverExpandDelayMs !== undefined) {
     expectNumber(floating.hoverExpandDelayMs, `${path}.floating.hoverExpandDelayMs`, {
       integer: true,
@@ -772,9 +784,10 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectEnum(settings.permissionMode, ['read-only', 'standard', 'full-access'] as const, `${path}.permissionMode`);
   expectBoolean(settings.onboardingComplete, `${path}.onboardingComplete`);
   const validated = clone(settings) as unknown as AppSettings;
+  const { shape: _legacyShape, ...portableFloating } = floating;
   validated.floating = {
     ...clone(defaultSettings.floating),
-    ...clone(floating),
+    ...clone(portableFloating),
     topMode: 'always',
   } as AppSettings['floating'];
   validated.ai = {

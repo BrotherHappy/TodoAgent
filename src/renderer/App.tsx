@@ -60,6 +60,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -82,6 +83,7 @@ import {
   defaultSettings,
   type AiAuthenticationMode,
   type AppSettings,
+  type PetTab,
 } from "../shared/settings";
 import type {
   AgentApprovalView,
@@ -103,6 +105,7 @@ import {
   toLocalDateTimeInput,
 } from "./local-datetime";
 import { feishuCreationBlockedMessage } from "./feishu-create-guard";
+import { PetCharacter, type PetMood } from "./PetCharacter";
 import { useTaskController, type TaskController } from "./task-controller";
 import { useAgentChat } from "./use-agent-chat";
 
@@ -138,21 +141,23 @@ const floatingAgentDraftId = "floating-agent-prompt";
 const floatingTabStorageKey = "todoAgentFloatingTab";
 const mainNavigationStateKey = "todoAgentMainNavigation";
 
-type FloatingTab = "all" | "today" | "chat" | "activity";
-
-function isFloatingTab(value: unknown): value is FloatingTab {
+function isPetTab(value: unknown): value is PetTab {
   return (
     value === "all" ||
     value === "today" ||
+    value === "focus" ||
     value === "chat" ||
-    value === "activity"
+    value === "home"
   );
 }
 
-function readFloatingTab(): FloatingTab {
+function readFloatingTab(): PetTab {
   try {
     const saved = localStorage.getItem(floatingTabStorageKey);
-    return isFloatingTab(saved) ? saved : "all";
+    // `activity` was the final tab in the legacy capsule. Migrate it to the
+    // pet's home instead of discarding the user's remembered navigation.
+    if (saved === "activity") return "home";
+    return isPetTab(saved) ? saved : "all";
   } catch {
     // A disabled or unavailable storage area must never make the desktop
     // entry unusable. The first-run default remains the all-task overview.
@@ -4209,7 +4214,7 @@ function SettingsPage({
   };
   const nav: Array<[SettingsSection, ReactNode, string]> = [
     ["general", <Settings size={17} />, "通用"],
-    ["floating", <PanelTop size={17} />, "悬浮与桌面"],
+    ["floating", <PanelTop size={17} />, "Todo Pet"],
     ["notifications", <Bell size={17} />, "提醒"],
     ["integrations", <Cloud size={17} />, "飞书"],
     ["ai", <Sparkles size={17} />, "模型与 Agent"],
@@ -4302,7 +4307,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>关闭主窗口后驻留</strong>
-                <p>提醒、同步和悬浮入口继续工作</p>
+                <p>提醒、同步和 Todo Pet 继续工作</p>
               </div>
               <Switch
                 checked={appSettings.closeToTray}
@@ -4316,12 +4321,12 @@ function SettingsPage({
         )}
         {section === "floating" && (
           <section className="settings-section">
-            <h1>悬浮与桌面</h1>
-            <p>悬浮胶囊、迷你面板和主应用保持同一任务语境。</p>
+            <h1>Todo Pet 与桌面</h1>
+            <p>桌面宠物、随身面板和主应用保持同一任务语境。</p>
             <div className="settings-row">
               <div>
-                <strong>显示悬浮入口</strong>
-                <p>可随时从菜单栏或托盘重新打开</p>
+                <strong>显示 Todo Pet</strong>
+                <p>让小序留在桌面陪伴；也可从菜单栏或托盘重新打开</p>
               </div>
               <Switch
                 checked={appSettings.floating.enabled}
@@ -4336,34 +4341,41 @@ function SettingsPage({
                       floating: { ...appSettings.floating, enabled: value },
                     });
                 }}
-                label="显示悬浮入口"
+                label="显示 Todo Pet"
               />
             </div>
             <div className="settings-row">
               <div>
-                <strong>收起形态</strong>
-                <p>悬浮球更轻，胶囊会保留当前任务</p>
+                <strong>宠物大小</strong>
+                <p>只调整收起后的宠物与任务气泡，不影响展开面板</p>
               </div>
-              <select
-                className="settings-input"
-                value={appSettings.floating.shape}
-                onChange={(event) =>
-                  void persist(
-                    {
-                      ...appSettings,
+              <div className="settings-number-control pet-scale-control">
+                <input
+                  className="settings-input"
+                  type="range"
+                  aria-label="Todo Pet 大小"
+                  min={75}
+                  max={125}
+                  step={5}
+                  value={appSettings.floating.scalePercent}
+                  onChange={(event) =>
+                    setAppSettings((current) => ({
+                      ...current,
                       floating: {
-                        ...appSettings.floating,
-                        shape: event.target
-                          .value as AppSettings["floating"]["shape"],
+                        ...current.floating,
+                        scalePercent: Number(event.target.value),
                       },
-                    },
-                    "悬浮形态已更新",
-                  )
-                }
-              >
-                <option value="capsule">任务胶囊</option>
-                <option value="orb">小悬浮球</option>
-              </select>
+                    }))
+                  }
+                  onPointerUp={() =>
+                    void persist(appSettings, "Todo Pet 大小已更新")
+                  }
+                  onKeyUp={() =>
+                    void persist(appSettings, "Todo Pet 大小已更新")
+                  }
+                />
+                <span>{appSettings.floating.scalePercent}%</span>
+              </div>
             </div>
             <div className="settings-row">
               <div>
@@ -4402,7 +4414,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>始终置顶</strong>
-                <p>胶囊和悬浮球会持续显示在普通窗口上方</p>
+                <p>Todo Pet 会持续显示在普通窗口上方</p>
               </div>
               <span className="status-pill success">
                 <Check size={15} aria-hidden="true" />
@@ -4412,7 +4424,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>锁定位置</strong>
-                <p>避免拖动悬浮入口时误触</p>
+                <p>避免拖动 Todo Pet 时误触</p>
               </div>
               <Switch
                 checked={appSettings.floating.locked}
@@ -4422,7 +4434,7 @@ function SettingsPage({
                     floating: { ...appSettings.floating, locked: value },
                   })
                 }
-                label="锁定悬浮入口位置"
+                label="锁定 Todo Pet 位置"
               />
             </div>
             <div className="settings-row">
@@ -4441,13 +4453,13 @@ function SettingsPage({
                     },
                   })
                 }
-                label="全屏时隐藏悬浮入口"
+                label="全屏时隐藏 Todo Pet"
               />
             </div>
             <div className="settings-row">
               <div>
                 <strong>演示隐私模式</strong>
-                <p>隐藏胶囊、Today、对话建议和动态中的任务信息</p>
+                <p>隐藏 Todo Pet、Today、对话建议和动态中的任务信息</p>
               </div>
               <Switch
                 checked={appSettings.floating.privacyMode}
@@ -6934,25 +6946,27 @@ function FloatingWindow() {
   const todayController = useTaskController("today", "");
   const allController = useTaskController("all", "");
   const [expanded, setExpanded] = useState(false);
-  const [shape, setShape] =
-    useState<AppSettings["floating"]["shape"]>("capsule");
-  const shapeRef = useRef<AppSettings["floating"]["shape"]>("capsule");
   const hoverExpandTimerRef = useRef<number | undefined>(undefined);
   const compactActivateTimerRef = useRef<number | undefined>(undefined);
   const contextMenuReturnExpandedRef = useRef(false);
   const hoverExpandDelayMsRef = useRef(
     defaultSettings.floating.hoverExpandDelayMs,
   );
+  const floatingSettingsLoadedRef = useRef(false);
   const hoveringFloatingRef = useRef(false);
   const expandTriggerRef = useRef<"hover" | "click" | undefined>(undefined);
   const [hoverExpandDelayMs, setHoverExpandDelayMs] = useState(
     defaultSettings.floating.hoverExpandDelayMs,
   );
+  const [scalePercent, setScalePercent] = useState(
+    defaultSettings.floating.scalePercent,
+  );
+  const [petName, setPetName] = useState(defaultSettings.persona.name);
   const [privacyMode, setPrivacyMode] = useState(false);
   const [floatingLocked, setFloatingLocked] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [isFloatingHovered, setIsFloatingHovered] = useState(false);
-  const [tab, setTab] = useState<FloatingTab>(readFloatingTab);
+  const [tab, setTab] = useState<PetTab>(readFloatingTab);
   const [input, setInput] = useState("");
   const [creatingFloatingTask, setCreatingFloatingTask] = useState(false);
   const floatingCreateRef = useRef(false);
@@ -6969,8 +6983,8 @@ function FloatingWindow() {
     focusedTask,
     isFloatingHovered || expanded || contextMenuOpen || privacyMode,
   );
-  // The compact completion action follows the visible title. A rotating
-  // capsule must never complete a different, hidden task.
+  // The compact completion action follows the visible title. A rotating task
+  // bubble must never complete a different, hidden task.
   const current = carousel.task;
   const floatingChat = useAgentChat({
     initialMessage:
@@ -7003,6 +7017,15 @@ function FloatingWindow() {
       // Persisting the focus is a convenience; the active in-memory tab still
       // works if a platform policy blocks local storage.
     }
+    if (window.desktopApi && floatingSettingsLoadedRef.current) {
+      void window.desktopApi.settings.get().then((settings) => {
+        if (settings.floating.selectedTab === tab) return;
+        return window.desktopApi?.settings.replace({
+          ...settings,
+          floating: { ...settings.floating, selectedTab: tab },
+        });
+      });
+    }
   }, [tab]);
   useEffect(
     () => () => {
@@ -7020,32 +7043,21 @@ function FloatingWindow() {
   useEffect(() => {
     if (!window.desktopApi) return undefined;
     const apply = (settings: AppSettings) => {
-      const shapeChanged = shapeRef.current !== settings.floating.shape;
       const nextHoverExpandDelayMs = settings.floating.hoverExpandDelayMs;
       const delayChanged =
         hoverExpandDelayMsRef.current !== nextHoverExpandDelayMs;
       hoverExpandDelayMsRef.current = nextHoverExpandDelayMs;
-      if (shapeChanged) {
-        shapeRef.current = settings.floating.shape;
-        if (hoverExpandTimerRef.current !== undefined) {
-          window.clearTimeout(hoverExpandTimerRef.current);
-          hoverExpandTimerRef.current = undefined;
-        }
-        setExpanded(false);
-        setContextMenuOpen(false);
-        contextMenuReturnExpandedRef.current = false;
-        expandTriggerRef.current = undefined;
-        void window.desktopApi?.shell.setFloatingExpanded(false);
-      }
-      setShape(settings.floating.shape);
       setHoverExpandDelayMs(nextHoverExpandDelayMs);
+      setScalePercent(settings.floating.scalePercent);
+      setPetName(settings.persona.name || defaultSettings.persona.name);
+      floatingSettingsLoadedRef.current = true;
+      setTab(settings.floating.selectedTab);
       setPrivacyMode(settings.floating.privacyMode);
       setFloatingLocked(settings.floating.locked);
       // Settings load asynchronously on every floating renderer. If the
       // pointer entered before that read completed (or the delay is edited
       // while the pointer is still there), the old timer must not win.
       if (
-        !shapeChanged &&
         delayChanged &&
         hoverExpandTimerRef.current !== undefined
       ) {
@@ -7220,7 +7232,15 @@ function FloatingWindow() {
     // to the full app. Keep the floating entry compact while the main window
     // is restored so it does not leave an unexpectedly expanded panel behind.
     setPanelExpanded(false);
-    void window.desktopApi?.shell.showMain("today");
+    const route: MainRoute =
+      tab === "today"
+        ? "today"
+        : tab === "chat"
+          ? "agent"
+          : tab === "home"
+            ? "settings"
+            : "all";
+    void window.desktopApi?.shell.showMain(route);
   }
   function handleCompactActivate(
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -7267,7 +7287,6 @@ function FloatingWindow() {
       setPanelExpanded(false);
     }
   };
-  const orbMode = shape === "orb" && !expanded;
   const syncLabel = feishuStatus?.connected
     ? feishuStatus.state === "syncing"
       ? "飞书正在同步"
@@ -7275,9 +7294,28 @@ function FloatingWindow() {
     : feishuStatus?.configured
       ? "飞书等待重新连接"
       : "飞书未连接 · 本地任务正常";
+  const overdueCount = todayController.tasks.filter(
+    (task) =>
+      task.status === "open" &&
+      Boolean(task.dueAt && task.dueAt.slice(0, 10) < dateKey()),
+  ).length;
+  const petMood: PetMood = current?.focusStartedAt
+    ? "focus"
+    : feishuStatus?.state === "syncing"
+      ? "syncing"
+      : overdueCount > 0
+        ? "alert"
+        : todayController.tasks.length === 0
+          ? "happy"
+          : "idle";
   return (
     <div
-      className={`floating-shell ${orbMode ? "orb-only" : ""} ${privacyMode ? "privacy-mode" : ""} ${floatingLocked ? "position-locked" : ""} ${current?.focusStartedAt ? "focus-mode" : ""}`}
+      className={`floating-shell pet-shell ${expanded ? "is-expanded" : "is-compact"} ${privacyMode ? "privacy-mode" : ""} ${floatingLocked ? "position-locked" : ""} ${current?.focusStartedAt ? "focus-mode" : ""}`}
+      style={
+        {
+          "--pet-scale": Math.max(75, Math.min(125, scalePercent)) / 100,
+        } as CSSProperties
+      }
     >
       <div
         className="floating-stack"
@@ -7291,9 +7329,9 @@ function FloatingWindow() {
         }}
       >
         <div
-          // The compact grip remains an affordance, but every passive pixel
-          // of this frameless capsule should move the window too.
-          className="floating-capsule drag-region"
+          // The pet and its task bubble form one native drag surface. Buttons
+          // opt out so task controls and panel expansion remain clickable.
+          className="pet-compact drag-region"
           onContextMenu={openFloatingContextMenu}
         >
           <span
@@ -7303,94 +7341,80 @@ function FloatingWindow() {
           >
             <GripVertical size={15} />
           </span>
-          {orbMode ? (
-            <button
-              type="button"
-              className="agent-orb floating-expand-trigger no-drag"
-              aria-label="展开 Todo Agent"
-              aria-expanded={expanded}
-              title={`停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`}
-              onClick={handleCompactActivate}
-            >
-              <Sparkles size={18} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="agent-orb floating-expand-trigger floating-capsule-icon no-drag"
-              aria-label={expanded ? "打开 Todo Agent 主窗口" : "Todo Agent 图标"}
-              aria-expanded={expanded}
-              title={
-                expanded
-                  ? "打开主窗口"
-                  : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
+          <button
+            type="button"
+            className="pet-avatar-button floating-expand-trigger no-drag"
+            aria-label={`与${petName}互动`}
+            aria-expanded={expanded}
+            title={
+              expanded
+                ? "点击收起"
+                : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
+            }
+            onClick={(event) => {
+              if (expanded) {
+                setPanelExpanded(false, "click");
+                return;
               }
-              onClick={(event) => {
-                if (expanded) {
-                  void window.desktopApi?.shell.showMain("today");
-                  return;
-                }
-                handleCompactActivate(event);
-              }}
+              handleCompactActivate(event);
+            }}
+          >
+            <PetCharacter
+              mood={petMood}
+              name={petName}
+              scalePercent={expanded ? 100 : scalePercent}
+              compact
+            />
+          </button>
+          <button
+            type="button"
+            className="pet-task-bubble floating-summary no-drag"
+            aria-label={expanded ? `收起 ${petName}` : `展开 ${petName}`}
+            aria-expanded={expanded}
+            title={
+              expanded
+                ? "点击收起"
+                : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
+            }
+            onClick={(event) => {
+              if (expanded) {
+                setPanelExpanded(false, "click");
+                return;
+              }
+              handleCompactActivate(event);
+            }}
+          >
+            <div className="floating-copy">
+              <FloatingTodayCarousel
+                task={current}
+                index={carousel.index}
+                count={carousel.count}
+                paused={carousel.paused}
+                static={carousel.static}
+                privacyMode={privacyMode}
+              />
+              <small>
+                {current
+                  ? `${current.focusStartedAt ? `${petName}陪你专注` : `${petName}提醒你`} · ${current.source.type === "feishu" ? "飞书" : "本地"}${privacyMode ? " · 隐私模式" : ""}`
+                  : `${petName}说：今天可以轻松一点`}
+              </small>
+            </div>
+            <span className="focus-time">
+              {current ? humanDuration(elapsed) : "✓"}
+            </span>
+          </button>
+          {current && (
+            <button
+              type="button"
+              className="icon-button pet-complete-button no-drag"
+              disabled={!canToggleTaskCompletion(current)}
+              aria-label={
+                privacyMode ? "完成当前私人任务" : `完成${current.title}`
+              }
+              onClick={() => void todayController.toggleComplete(current)}
             >
-              <Sparkles size={18} />
+              <Check size={17} />
             </button>
-          )}
-          {!orbMode && (
-            <>
-              <button
-                type="button"
-                className="floating-summary no-drag"
-                aria-label={
-                  expanded ? "收起 Todo Agent" : "展开 Todo Agent"
-                }
-                aria-expanded={expanded}
-                title={
-                  expanded
-                    ? "点击收起"
-                    : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
-                }
-                onClick={(event) => {
-                  if (expanded) {
-                    setPanelExpanded(false, "click");
-                    return;
-                  }
-                  handleCompactActivate(event);
-                }}
-              >
-                <div className="floating-copy">
-                  <FloatingTodayCarousel
-                    task={current}
-                    index={carousel.index}
-                    count={carousel.count}
-                    paused={carousel.paused}
-                    static={carousel.static}
-                    privacyMode={privacyMode}
-                  />
-                  <small>
-                    {current
-                      ? `${current.focusStartedAt ? "专注中" : "下一项"} · ${current.source.type === "feishu" ? "飞书" : "本地"}${privacyMode ? " · 隐私模式" : ""}`
-                      : "休息一下也很好"}
-                  </small>
-                </div>
-                <span className="focus-time">
-                  {current ? humanDuration(elapsed) : "✓"}
-                </span>
-              </button>
-              {current && (
-                <button
-                  type="button"
-                  className="icon-button no-drag"
-                  disabled={!canToggleTaskCompletion(current)}
-                  aria-label={
-                    privacyMode ? "完成当前私人任务" : `完成${current.title}`
-                  }
-                  onClick={() => void todayController.toggleComplete(current)}
-                >
-                  <Check size={17} />
-                </button>
-              )}
-            </>
           )}
         </div>
         {contextMenuOpen && (
@@ -7398,7 +7422,7 @@ function FloatingWindow() {
             <button
               type="button"
               className="floating-context-backdrop no-drag"
-              aria-label="关闭悬浮快捷菜单"
+              aria-label="关闭 Todo Pet 快捷菜单"
               onClick={closeFloatingContextMenu}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -7408,7 +7432,7 @@ function FloatingWindow() {
             <div
               className="floating-context-menu no-drag"
               role="menu"
-              aria-label="悬浮快捷菜单"
+              aria-label="Todo Pet 快捷菜单"
               onContextMenu={(event) => event.preventDefault()}
             >
               <div className="floating-context-heading">
@@ -7469,7 +7493,7 @@ function FloatingWindow() {
                 onClick={() => showMainFromFloatingMenu("settings")}
               >
                 <Settings size={16} />
-                <span>悬浮窗设置</span>
+                <span>Todo Pet 设置</span>
                 <small>外观与提醒</small>
               </button>
             </div>
@@ -7483,14 +7507,21 @@ function FloatingWindow() {
                 className={tab === "all" ? "active" : ""}
                 onClick={() => setTab("all")}
               >
-                全部任务
+                全部
               </button>
               <button
                 type="button"
                 className={tab === "today" ? "active" : ""}
                 onClick={() => setTab("today")}
               >
-                今日任务
+                今天
+              </button>
+              <button
+                type="button"
+                className={tab === "focus" ? "active" : ""}
+                onClick={() => setTab("focus")}
+              >
+                专注
               </button>
               <button
                 type="button"
@@ -7500,21 +7531,21 @@ function FloatingWindow() {
                   setTab("chat");
                 }}
               >
-                对话
+                聊聊
               </button>
               <button
                 type="button"
-                className={tab === "activity" ? "active" : ""}
-                onClick={() => setTab("activity")}
+                className={tab === "home" ? "active" : ""}
+                onClick={() => setTab("home")}
               >
-                动态
+                小窝
               </button>
               <button
                 type="button"
                 className="icon-button mini-open-main no-drag"
                 aria-label="打开主窗口"
                 title="打开主窗口"
-                onClick={() => void window.desktopApi?.shell.showMain("today")}
+                onClick={openMainFromCompact}
               >
                 <ExternalLink size={15} />
               </button>
@@ -7683,37 +7714,97 @@ function FloatingWindow() {
                   )}
                 </div>
                 ))}
-              {tab === "activity" && (
-                <>
-                  <div className="context-line">
-                    <CloudCheck size={16} />
-                    {syncLabel}
-                  </div>
-                  {activity.map((record) => (
-                    <div
-                      className="context-line"
-                      key={record.eventHash || record.sequence}
-                    >
-                      <ShieldCheck size={16} />
-                      <span>
-                        {privacyMode
-                          ? `${record.toolName ?? "Agent"} · ${record.outcome ?? "已记录"}`
-                          : record.toolName
-                            ? `${record.toolName} · ${record.outcome ?? record.event}`
-                            : record.event}
-                      </span>
-                    </div>
-                  ))}
-                  {activity.length === 0 && (
-                    <div className="context-line">
-                      <Info size={16} />
-                      暂无 Agent 工具活动
+              {tab === "focus" && (
+                <div className="pet-focus-view">
+                  <PetCharacter
+                    mood={current?.focusStartedAt ? "focus" : "idle"}
+                    name={petName}
+                  />
+                  <p className="pet-focus-kicker">
+                    {current?.focusStartedAt ? `${petName}正在陪你` : "选择下一件要专心的事"}
+                  </p>
+                  <strong className="pet-focus-timer">
+                    {current ? humanDuration(elapsed) : "00:00"}
+                  </strong>
+                  <p className="pet-focus-task">
+                    {current ? titleFor(current) : "今天没有待办，可以安心休息"}
+                  </p>
+                  {current && (
+                    <div className="pet-focus-actions">
+                      <button
+                        type="button"
+                        className="soft-button"
+                        onClick={() => void todayController.resetFocus(current.id)}
+                      >
+                        <RotateCcw size={15} />
+                        重置
+                      </button>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() =>
+                          void (current.focusStartedAt
+                            ? todayController.pauseFocus(current.id)
+                            : todayController.startFocus(current.id))
+                        }
+                      >
+                        {current.focusStartedAt ? (
+                          <Pause size={16} />
+                        ) : (
+                          <Play size={16} />
+                        )}
+                        {current.focusStartedAt ? "暂停" : "开始专注"}
+                      </button>
                     </div>
                   )}
-                </>
+                </div>
+              )}
+              {tab === "home" && (
+                <div className="pet-home-view">
+                  <div className="pet-home-hero">
+                    <PetCharacter mood={petMood} name={petName} />
+                    <div>
+                      <span>Todo Pet</span>
+                      <h3>{petName}的小窝</h3>
+                      <p>
+                        今天还有 {todayController.tasks.length} 项，逾期 {overdueCount} 项。
+                      </p>
+                    </div>
+                  </div>
+                  <div className="pet-home-card">
+                    <CloudCheck size={17} />
+                    <div>
+                      <strong>任务同步</strong>
+                      <p>{syncLabel}</p>
+                    </div>
+                  </div>
+                  <div className="pet-home-card">
+                    <ShieldCheck size={17} />
+                    <div>
+                      <strong>最近活动</strong>
+                      <p>
+                        {activity[0]
+                          ? privacyMode
+                            ? `${activity[0].toolName ?? "Agent"} · 已记录`
+                            : activity[0].toolName
+                              ? `${activity[0].toolName} · ${activity[0].outcome ?? activity[0].event}`
+                              : activity[0].event
+                          : "暂无 Agent 工具活动"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="soft-button pet-home-settings"
+                    onClick={() => showMainFromFloatingMenu("settings")}
+                  >
+                    <Settings size={16} />
+                    打开 Todo Pet 设置
+                  </button>
+                </div>
               )}
             </div>
-            {tab !== "activity" && !privacyMode && (
+            {(isTaskTab || tab === "chat") && !privacyMode && (
               <div className="mini-composer">
                 {isTaskTab ? (
                   <input

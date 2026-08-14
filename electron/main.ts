@@ -80,6 +80,9 @@ function requestMainWindow(route?: string): void {
     pendingMainRoute = route ?? pendingMainRoute ?? "today";
     return;
   }
+  // Dock activation and a second launch should make the full application the
+  // active macOS app even while the always-on-top Todo Pet remains visible.
+  if (process.platform === "darwin") app.focus({ steal: true });
   windows.showMain(route);
 }
 
@@ -213,11 +216,25 @@ async function startApplication(): Promise<void> {
   const tasks = new TaskService(store);
   await tasks.initialize();
 
-  settingsService = new SettingsService(userDataPath, {
-    isAvailable: () => safeStorage.isEncryptionAvailable(),
-    encryptString: (value) => safeStorage.encryptString(value),
-    decryptString: (value) => safeStorage.decryptString(value),
-  });
+  // End-to-end profiles are disposable and must never block on a developer
+  // machine's interactive Keychain prompt. Production builds always keep the
+  // OS-backed safeStorage adapter; the deterministic adapter exists only in
+  // explicitly marked test processes and writes only inside their temp profile.
+  const settingsEncryption =
+    process.env.TODO_AGENT_E2E === "1"
+      ? {
+          isAvailable: () => true,
+          encryptString: (value: string) =>
+            Buffer.from(`todo-agent-e2e:${value}`, "utf8"),
+          decryptString: (value: Buffer) =>
+            value.toString("utf8").replace(/^todo-agent-e2e:/u, ""),
+        }
+      : {
+          isAvailable: () => safeStorage.isEncryptionAvailable(),
+          encryptString: (value: string) => safeStorage.encryptString(value),
+          decryptString: (value: Buffer) => safeStorage.decryptString(value),
+        };
+  settingsService = new SettingsService(userDataPath, settingsEncryption);
   await settingsService.load();
   nativeTheme.themeSource = settingsService.get().theme;
   applyLoginItemSetting(settingsService.get().launchAtLogin);
