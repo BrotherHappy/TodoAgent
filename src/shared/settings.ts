@@ -41,6 +41,33 @@ export interface FloatingSettings {
   positions: Record<string, { x: number; y: number }>;
 }
 
+export interface FocusSettings {
+  focusMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  cycles: number;
+  autoStartBreak: boolean;
+  autoStartNextRound: boolean;
+  environmentSound: 'off' | 'rain' | 'forest' | 'cafe' | 'white-noise';
+}
+
+export interface WeatherSettings {
+  enabled: boolean;
+  city: string;
+  latitude?: number;
+  longitude?: number;
+  resolvedName?: string;
+  cacheMinutes: number;
+}
+
+export interface PetBehaviorSettings {
+  interactionsEnabled: boolean;
+  proactiveMessages: boolean;
+  wellbeingReminders: boolean;
+  autoDiary: boolean;
+  relationshipMemory: boolean;
+}
+
 export interface AiProviderSettings {
   enabled: boolean;
   endpoint: string;
@@ -98,6 +125,9 @@ export interface AppSettings {
   quickCaptureShortcut: string;
   notifications: NotificationSettings;
   floating: FloatingSettings;
+  focus: FocusSettings;
+  weather: WeatherSettings;
+  pet: PetBehaviorSettings;
   ai: AiProviderSettings;
   feishu: FeishuIntegrationSettings;
   modelDataScope: ModelDataScope;
@@ -133,6 +163,27 @@ export const defaultSettings: AppSettings = {
     selectedTab: 'all',
     scalePercent: 100,
     positions: {},
+  },
+  focus: {
+    focusMinutes: 25,
+    shortBreakMinutes: 5,
+    longBreakMinutes: 15,
+    cycles: 4,
+    autoStartBreak: false,
+    autoStartNextRound: false,
+    environmentSound: 'off',
+  },
+  weather: {
+    enabled: false,
+    city: '',
+    cacheMinutes: 45,
+  },
+  pet: {
+    interactionsEnabled: true,
+    proactiveMessages: true,
+    wellbeingReminders: true,
+    autoDiary: true,
+    relationshipMemory: false,
   },
   ai: {
     enabled: false,

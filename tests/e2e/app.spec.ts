@@ -744,6 +744,35 @@ test.describe("Todo Agent desktop shell", () => {
     expect(scaledVisual.height).toBeGreaterThanOrEqual(70);
   });
 
+  test("runs the native Todo Pet focus loop and exposes the shared growth home", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const navigation = main.getByRole("navigation", { name: "主导航" });
+    await navigation.getByRole("button", { name: "小窝", exact: true }).click();
+    await expect(main.getByRole("heading", { name: "小序的小窝" })).toBeVisible();
+    await expect(main.getByRole("button", { name: "成长" })).toHaveClass(/active/u);
+    await expect(main.getByText(/亲密度 0/u)).toBeVisible();
+
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+    await floating.getByRole("button", { name: "展开 小序" }).click();
+    await floating.getByRole("button", { name: "专注", exact: true }).click();
+    await expect(floating.locator(".pet-focus-timer")).toHaveText("25:00");
+    await floating
+      .getByRole("button", { name: /25.*轻专注/u })
+      .click();
+    await expect(floating.getByText(/专注 · 第 1\/4 轮/u)).toBeVisible();
+    await expect(floating.getByRole("button", { name: "暂停" })).toBeVisible();
+    await floating.getByRole("button", { name: "暂停" }).click();
+    await expect(floating.getByRole("button", { name: "继续" })).toBeVisible();
+    await floating.getByRole("button", { name: "继续" }).click();
+    await expect(floating.getByRole("button", { name: "暂停" })).toBeVisible();
+    await floating.getByRole("button", { name: "结束" }).click();
+    await expect(floating.locator(".pet-focus-timer")).toHaveText("25:00");
+  });
+
   test("keeps Todo Pet available after the main window closes and reopens the remembered task page", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
@@ -1281,6 +1310,7 @@ test.describe("Todo Agent desktop shell", () => {
       "events",
       "feishu",
       "notifications",
+      "pet",
       "settings",
       "shell",
       "tasks",

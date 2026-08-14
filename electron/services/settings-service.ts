@@ -46,6 +46,9 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     ...value,
     notifications: { ...defaultSettings.notifications, ...value?.notifications },
     floating: { ...defaultSettings.floating, ...value?.floating },
+    focus: { ...defaultSettings.focus, ...value?.focus },
+    weather: { ...defaultSettings.weather, ...value?.weather },
+    pet: { ...defaultSettings.pet, ...value?.pet },
     ai: { ...defaultSettings.ai, ...value?.ai },
     feishu: { ...defaultSettings.feishu, ...value?.feishu },
     modelDataScope: { ...defaultSettings.modelDataScope, ...value?.modelDataScope },
@@ -87,6 +90,11 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   merged.floating.scalePercent = Number.isFinite(merged.floating.scalePercent)
     ? Math.min(125, Math.max(75, Math.round(merged.floating.scalePercent)))
     : defaultSettings.floating.scalePercent;
+  merged.focus.focusMinutes = Math.min(240, Math.max(1, Math.round(merged.focus.focusMinutes)));
+  merged.focus.shortBreakMinutes = Math.min(60, Math.max(1, Math.round(merged.focus.shortBreakMinutes)));
+  merged.focus.longBreakMinutes = Math.min(120, Math.max(1, Math.round(merged.focus.longBreakMinutes)));
+  merged.focus.cycles = Math.min(12, Math.max(1, Math.round(merged.focus.cycles)));
+  merged.weather.cacheMinutes = Math.min(120, Math.max(30, Math.round(merged.weather.cacheMinutes)));
 
   // Keep the ordinary settings document on an explicit allow-list. Types and
   // the renderer IPC schema are useful boundaries, but callers in the main
@@ -122,6 +130,30 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       scalePercent: merged.floating.scalePercent,
       lastDisplayId: merged.floating.lastDisplayId,
       positions: clone(merged.floating.positions),
+    },
+    focus: {
+      focusMinutes: merged.focus.focusMinutes,
+      shortBreakMinutes: merged.focus.shortBreakMinutes,
+      longBreakMinutes: merged.focus.longBreakMinutes,
+      cycles: merged.focus.cycles,
+      autoStartBreak: merged.focus.autoStartBreak,
+      autoStartNextRound: merged.focus.autoStartNextRound,
+      environmentSound: merged.focus.environmentSound,
+    },
+    weather: {
+      enabled: merged.weather.enabled,
+      city: merged.weather.city,
+      latitude: merged.weather.latitude,
+      longitude: merged.weather.longitude,
+      resolvedName: merged.weather.resolvedName,
+      cacheMinutes: merged.weather.cacheMinutes,
+    },
+    pet: {
+      interactionsEnabled: merged.pet.interactionsEnabled,
+      proactiveMessages: merged.pet.proactiveMessages,
+      wellbeingReminders: merged.pet.wellbeingReminders,
+      autoDiary: merged.pet.autoDiary,
+      relationshipMemory: merged.pet.relationshipMemory,
     },
     ai: {
       enabled: merged.ai.enabled,
