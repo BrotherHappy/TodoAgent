@@ -661,7 +661,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   const settings = expectRecord(value, path);
   assertOnlyKeys(settings, [
     'schemaVersion', 'theme', 'launchAtLogin', 'closeToTray', 'quickCaptureShortcut',
-    'notifications', 'floating', 'ai', 'feishu', 'modelDataScope', 'persona', 'permissionMode',
+    'notifications', 'floating', 'focus', 'weather', 'pet', 'ai', 'feishu', 'modelDataScope', 'persona', 'permissionMode',
     'onboardingComplete',
   ], path);
   if (settings.schemaVersion !== 1) throw new DataImportValidationError('Unsupported settings schema', `${path}.schemaVersion`);
@@ -684,11 +684,23 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectOptional(notifications, 'mutedUntil', `${path}.notifications`, expectIsoDateTime);
 
   const floating = expectRecord(settings.floating, `${path}.floating`);
-  assertOnlyKeys(floating, ['enabled', 'shape', 'hoverExpandDelayMs', 'topMode', 'locked', 'hideInFullscreen', 'privacyMode', 'lastDisplayId', 'positions'], `${path}.floating`);
+  assertOnlyKeys(floating, ['enabled', 'hoverExpandDelayMs', 'topMode', 'locked', 'hideInFullscreen', 'privacyMode', 'selectedTab', 'scalePercent', 'lastDisplayId', 'positions', 'shape'], `${path}.floating`);
   ['enabled', 'locked', 'hideInFullscreen', 'privacyMode'].forEach((key) =>
     expectBoolean(floating[key], `${path}.floating.${key}`),
   );
-  expectEnum(floating.shape, ['capsule', 'orb'] as const, `${path}.floating.shape`);
+  if (floating.selectedTab !== undefined) {
+    expectEnum(floating.selectedTab, ['all', 'today', 'focus', 'chat', 'home'] as const, `${path}.floating.selectedTab`);
+  }
+  if (floating.scalePercent !== undefined) {
+    expectNumber(floating.scalePercent, `${path}.floating.scalePercent`, {
+      integer: true,
+      minimum: 75,
+      maximum: 125,
+    });
+  }
+  if (floating.shape !== undefined) {
+    expectEnum(floating.shape, ['capsule', 'orb'] as const, `${path}.floating.shape`);
+  }
   if (floating.hoverExpandDelayMs !== undefined) {
     expectNumber(floating.hoverExpandDelayMs, `${path}.floating.hoverExpandDelayMs`, {
       integer: true,
@@ -708,6 +720,45 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     expectNumber(position.x, `${path}.floating.positions.${displayId}.x`);
     expectNumber(position.y, `${path}.floating.positions.${displayId}.y`);
   });
+
+  const focus = settings.focus === undefined
+    ? expectRecord(clone(defaultSettings.focus), `${path}.focus`)
+    : expectRecord(settings.focus, `${path}.focus`);
+  assertOnlyKeys(focus, [
+    'focusMinutes', 'shortBreakMinutes', 'longBreakMinutes', 'cycles',
+    'autoStartBreak', 'autoStartNextRound', 'environmentSound',
+  ], `${path}.focus`);
+  expectNumber(focus.focusMinutes, `${path}.focus.focusMinutes`, { integer: true, minimum: 1, maximum: 240 });
+  expectNumber(focus.shortBreakMinutes, `${path}.focus.shortBreakMinutes`, { integer: true, minimum: 1, maximum: 60 });
+  expectNumber(focus.longBreakMinutes, `${path}.focus.longBreakMinutes`, { integer: true, minimum: 1, maximum: 120 });
+  expectNumber(focus.cycles, `${path}.focus.cycles`, { integer: true, minimum: 1, maximum: 12 });
+  expectBoolean(focus.autoStartBreak, `${path}.focus.autoStartBreak`);
+  expectBoolean(focus.autoStartNextRound, `${path}.focus.autoStartNextRound`);
+  expectEnum(focus.environmentSound, ['off', 'rain', 'forest', 'cafe', 'white-noise'] as const, `${path}.focus.environmentSound`);
+
+  const weather = settings.weather === undefined
+    ? expectRecord(clone(defaultSettings.weather), `${path}.weather`)
+    : expectRecord(settings.weather, `${path}.weather`);
+  assertOnlyKeys(weather, [
+    'enabled', 'city', 'latitude', 'longitude', 'resolvedName', 'cacheMinutes',
+  ], `${path}.weather`);
+  expectBoolean(weather.enabled, `${path}.weather.enabled`);
+  expectString(weather.city, `${path}.weather.city`);
+  if (weather.latitude !== undefined) expectNumber(weather.latitude, `${path}.weather.latitude`, { minimum: -90, maximum: 90 });
+  if (weather.longitude !== undefined) expectNumber(weather.longitude, `${path}.weather.longitude`, { minimum: -180, maximum: 180 });
+  expectOptional(weather, 'resolvedName', `${path}.weather`, expectString);
+  expectNumber(weather.cacheMinutes, `${path}.weather.cacheMinutes`, { integer: true, minimum: 30, maximum: 120 });
+
+  const pet = settings.pet === undefined
+    ? expectRecord(clone(defaultSettings.pet), `${path}.pet`)
+    : expectRecord(settings.pet, `${path}.pet`);
+  assertOnlyKeys(pet, [
+    'interactionsEnabled', 'proactiveMessages', 'wellbeingReminders',
+    'autoDiary', 'relationshipMemory',
+  ], `${path}.pet`);
+  Object.keys(defaultSettings.pet).forEach((key) =>
+    expectBoolean(pet[key], `${path}.pet.${key}`),
+  );
 
   const ai = expectRecord(settings.ai, `${path}.ai`);
   assertOnlyKeys(ai, [
@@ -772,11 +823,15 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectEnum(settings.permissionMode, ['read-only', 'standard', 'full-access'] as const, `${path}.permissionMode`);
   expectBoolean(settings.onboardingComplete, `${path}.onboardingComplete`);
   const validated = clone(settings) as unknown as AppSettings;
+  const { shape: _legacyShape, ...portableFloating } = floating;
   validated.floating = {
     ...clone(defaultSettings.floating),
-    ...clone(floating),
+    ...clone(portableFloating),
     topMode: 'always',
   } as AppSettings['floating'];
+  validated.focus = clone(focus) as unknown as AppSettings['focus'];
+  validated.weather = clone(weather) as unknown as AppSettings['weather'];
+  validated.pet = clone(pet) as unknown as AppSettings['pet'];
   validated.ai = {
     ...clone(defaultSettings.ai),
     ...clone(ai),

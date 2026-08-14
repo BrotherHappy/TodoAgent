@@ -6,6 +6,7 @@ import {
   type DataDesktopApi,
   type FeishuDesktopApi,
   type NotificationDesktopApi,
+  type PetDesktopApi,
 } from "../src/shared/desktop-api";
 import {
   FLOATING_HOVER_EXPAND_DELAY_MAX_MS,
@@ -49,7 +50,6 @@ const settingsSchema = z
     floating: z
       .object({
         enabled: z.boolean(),
-        shape: z.enum(["capsule", "orb"]),
         hoverExpandDelayMs: z
           .number()
           .int()
@@ -59,11 +59,49 @@ const settingsSchema = z
         locked: z.boolean(),
         hideInFullscreen: z.boolean(),
         privacyMode: z.boolean(),
+        selectedTab: z.enum(["all", "today", "focus", "chat", "home"]),
+        scalePercent: z.number().int().min(75).max(125),
         lastDisplayId: z.string().trim().min(1).max(512).optional(),
         positions: z.record(
           z.string(),
           z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
         ),
+      })
+      .strict(),
+    focus: z
+      .object({
+        focusMinutes: z.number().int().min(1).max(240),
+        shortBreakMinutes: z.number().int().min(1).max(60),
+        longBreakMinutes: z.number().int().min(1).max(120),
+        cycles: z.number().int().min(1).max(12),
+        autoStartBreak: z.boolean(),
+        autoStartNextRound: z.boolean(),
+        environmentSound: z.enum([
+          "off",
+          "rain",
+          "forest",
+          "cafe",
+          "white-noise",
+        ]),
+      })
+      .strict(),
+    weather: z
+      .object({
+        enabled: z.boolean(),
+        city: z.string().trim().max(160),
+        latitude: z.number().finite().min(-90).max(90).optional(),
+        longitude: z.number().finite().min(-180).max(180).optional(),
+        resolvedName: z.string().trim().max(240).optional(),
+        cacheMinutes: z.number().int().min(30).max(120),
+      })
+      .strict(),
+    pet: z
+      .object({
+        interactionsEnabled: z.boolean(),
+        proactiveMessages: z.boolean(),
+        wellbeingReminders: z.boolean(),
+        autoDiary: z.boolean(),
+        relationshipMemory: z.boolean(),
       })
       .strict(),
     ai: z
@@ -141,6 +179,7 @@ export interface DesktopIpcDependencies {
   agent: AgentDesktopService;
   feishu: FeishuDesktopApi;
   notifications: NotificationDesktopApi;
+  pet: PetDesktopApi;
   data: DataDesktopApi;
   devServerUrl?: string;
   rendererPath: string;
@@ -566,6 +605,116 @@ export function registerDesktopIpc(
   });
   handle(DESKTOP_CHANNELS.notificationRefresh, () =>
     dependencies.notifications.refresh(),
+  );
+  handle(DESKTOP_CHANNELS.petSnapshot, () => dependencies.pet.snapshot());
+  handle(DESKTOP_CHANNELS.petRename, (_event, input) =>
+    dependencies.pet.rename(z.string().trim().min(1).max(80).parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.petInteract, (_event, input) =>
+    dependencies.pet.interact(
+      input === undefined
+        ? undefined
+        : z.string().trim().min(1).max(80).parse(input),
+    ),
+  );
+  const focusPresetSchema = z
+    .object({
+      focusMinutes: z.number().int().min(1).max(240),
+      shortBreakMinutes: z.number().int().min(1).max(60),
+      longBreakMinutes: z.number().int().min(1).max(120),
+      cycles: z.number().int().min(1).max(12),
+    })
+    .strict();
+  handle(DESKTOP_CHANNELS.petFocusStart, (_event, input) => {
+    const request = z
+      .object({
+        mode: z.enum(["pomodoro", "count-up"]),
+        taskId: idSchema.optional(),
+        taskTitle: z.string().trim().max(500).optional(),
+        preset: focusPresetSchema.optional(),
+        autoStartBreak: z.boolean().optional(),
+        autoStartNextRound: z.boolean().optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.startFocus(request);
+  });
+  handle(DESKTOP_CHANNELS.petFocusPause, (_event, input) =>
+    dependencies.pet.pauseFocus(
+      input === undefined
+        ? undefined
+        : z.string().trim().max(240).parse(input),
+    ),
+  );
+  handle(DESKTOP_CHANNELS.petFocusResume, () =>
+    dependencies.pet.resumeFocus(),
+  );
+  handle(DESKTOP_CHANNELS.petFocusAdvance, () =>
+    dependencies.pet.advanceFocus(),
+  );
+  handle(DESKTOP_CHANNELS.petFocusFinish, (_event, input) =>
+    dependencies.pet.finishFocus(
+      z.enum(["completed", "abandoned"]).parse(input),
+    ),
+  );
+  handle(DESKTOP_CHANNELS.petWeatherGet, () => dependencies.pet.weather());
+  handle(DESKTOP_CHANNELS.petWeatherRefresh, (_event, input) =>
+    dependencies.pet.refreshWeather(
+      input === undefined ? undefined : z.boolean().parse(input),
+    ),
+  );
+  handle(DESKTOP_CHANNELS.petDiaryGenerate, (_event, input) =>
+    dependencies.pet.generateDiary(
+      input === undefined
+        ? undefined
+        : z.string().trim().max(10_000).parse(input),
+    ),
+  );
+  handle(DESKTOP_CHANNELS.petDiaryUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            title: z.string().trim().min(1).max(200),
+            content: z.string().trim().max(50_000),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.updateDiary(request.id, request.patch);
+  });
+  handle(DESKTOP_CHANNELS.petDiaryDelete, (_event, input) =>
+    dependencies.pet.deleteDiary(idSchema.parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.petMemoryAdd, (_event, input) => {
+    const request = z
+      .object({
+        kind: z.enum(["preference", "relationship", "shared-experience"]),
+        content: z.string().trim().min(1).max(2_000),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.addMemory(request);
+  });
+  handle(DESKTOP_CHANNELS.petMemoryUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            content: z.string().trim().min(1).max(2_000).optional(),
+            enabled: z.boolean().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.updateMemory(request.id, request.patch);
+  });
+  handle(DESKTOP_CHANNELS.petMemoryDelete, (_event, input) =>
+    dependencies.pet.deleteMemory(idSchema.parse(input)),
   );
   handle(DESKTOP_CHANNELS.dataExport, (_event, input) => {
     const request = z

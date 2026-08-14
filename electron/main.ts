@@ -2,6 +2,7 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import {
   Menu,
+  Notification,
   app,
   dialog,
   globalShortcut,
@@ -18,8 +19,10 @@ import type {
   FeishuConfigureRequest,
   FeishuDesktopApi,
   FeishuStatusView,
+  PetDesktopApi,
 } from "../src/shared/desktop-api";
 import { defaultSettings, type AppSettings } from "../src/shared/settings";
+import type { WeatherSnapshot } from "../src/shared/pet-types";
 import { registerDesktopIpc } from "./ipc-router";
 import { LocalStore } from "./services/local-store";
 import { SettingsService } from "./services/settings-service";
@@ -53,6 +56,8 @@ import {
 import { DataDesktopController } from "./services/data-desktop-controller";
 import { DesktopDataRepository } from "./services/desktop-data-repository";
 import { NodeDataDesktopFilePort } from "./services/node-data-desktop-file-port";
+import { PetService } from "./services/pet-service";
+import { WeatherService } from "./services/weather-service";
 
 const hasInstanceLock = app.requestSingleInstanceLock();
 if (!hasInstanceLock) app.quit();
@@ -67,7 +72,67 @@ let feishuController: FeishuDesktopController | undefined;
 let feishuAutoSync: FeishuAutoSyncCoordinator | undefined;
 let feishuMutationSync: FeishuMutationSyncCoordinator | undefined;
 let notificationRuntime: ElectronNotificationRuntime | undefined;
+let petService: PetService | undefined;
+let weatherService: WeatherService | undefined;
+let petTickTimer: ReturnType<typeof setInterval> | undefined;
+let weatherRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let pendingMainRoute: string | undefined;
+let lastSevereWeatherNotificationKey: string | undefined;
+
+function minuteOfDay(value: string): number | undefined {
+  const match = /^(\d{2}):(\d{2})$/u.exec(value);
+  if (!match) return undefined;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return undefined;
+  return hour * 60 + minute;
+}
+
+function systemNotificationAllowed(
+  settings: AppSettings,
+  now = new Date(),
+): boolean {
+  if (!settings.notifications.enabled || !settings.notifications.banners) {
+    return false;
+  }
+  if (
+    settings.notifications.mutedUntil &&
+    new Date(settings.notifications.mutedUntil).getTime() > now.getTime()
+  ) {
+    return false;
+  }
+  if (!settings.notifications.quietHoursEnabled) return true;
+  const start = minuteOfDay(settings.notifications.quietHoursStart);
+  const end = minuteOfDay(settings.notifications.quietHoursEnd);
+  if (start === undefined || end === undefined || start === end) return true;
+  const current = now.getHours() * 60 + now.getMinutes();
+  const quiet =
+    start < end
+      ? current >= start && current < end
+      : current >= start || current < end;
+  return !quiet;
+}
+
+function notifySevereWeather(weather?: WeatherSnapshot): void {
+  if (
+    !weather?.severe ||
+    !settingsService ||
+    !settingsService.get().pet.proactiveMessages ||
+    !systemNotificationAllowed(settingsService.get()) ||
+    !Notification.isSupported() ||
+    process.env.TODO_AGENT_E2E === "1"
+  ) {
+    return;
+  }
+  const key = `${localDateKey()}:${weather.city}:${weather.conditionCode}`;
+  if (key === lastSevereWeatherNotificationKey) return;
+  lastSevereWeatherNotificationKey = key;
+  new Notification({
+    title: `${settingsService.get().persona.name}的天气提醒`,
+    body: `${weather.city}当前为${weather.conditionLabel}，外出前请留意官方预警。`,
+    silent: !settingsService.get().notifications.sound,
+  }).show();
+}
 
 /**
  * Dock/Finder activation and a second launch can arrive while the main
@@ -80,6 +145,9 @@ function requestMainWindow(route?: string): void {
     pendingMainRoute = route ?? pendingMainRoute ?? "today";
     return;
   }
+  // Dock activation and a second launch should make the full application the
+  // active macOS app even while the always-on-top Todo Pet remains visible.
+  if (process.platform === "darwin") app.focus({ steal: true });
   windows.showMain(route);
 }
 
@@ -207,20 +275,96 @@ function traySyncState(status: FeishuStatusView): TrayStatus["sync"] {
   return status.connected ? "synced" : "local";
 }
 
+function localDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 async function startApplication(): Promise<void> {
   const userDataPath = app.getPath("userData");
   const store = new LocalStore(path.join(userDataPath, "data"));
   const tasks = new TaskService(store);
   await tasks.initialize();
 
-  settingsService = new SettingsService(userDataPath, {
-    isAvailable: () => safeStorage.isEncryptionAvailable(),
-    encryptString: (value) => safeStorage.encryptString(value),
-    decryptString: (value) => safeStorage.decryptString(value),
-  });
+  // End-to-end profiles are disposable and must never block on a developer
+  // machine's interactive Keychain prompt. Production builds always keep the
+  // OS-backed safeStorage adapter; the deterministic adapter exists only in
+  // explicitly marked test processes and writes only inside their temp profile.
+  const settingsEncryption =
+    process.env.TODO_AGENT_E2E === "1"
+      ? {
+          isAvailable: () => true,
+          encryptString: (value: string) =>
+            Buffer.from(`todo-agent-e2e:${value}`, "utf8"),
+          decryptString: (value: Buffer) =>
+            value.toString("utf8").replace(/^todo-agent-e2e:/u, ""),
+        }
+      : {
+          isAvailable: () => safeStorage.isEncryptionAvailable(),
+          encryptString: (value: string) => safeStorage.encryptString(value),
+          decryptString: (value: Buffer) => safeStorage.decryptString(value),
+        };
+  settingsService = new SettingsService(userDataPath, settingsEncryption);
   await settingsService.load();
   nativeTheme.themeSource = settingsService.get().theme;
   applyLoginItemSetting(settingsService.get().launchAtLogin);
+
+  petService = new PetService({
+    userDataPath,
+    initialName: settingsService.get().persona.name,
+    onEvent: (event) => {
+      windows?.broadcast(DESKTOP_CHANNELS.eventPet, event);
+      if (event.type === "state-changed") {
+        const focus = petService?.snapshot().focus;
+        windows?.setFocusActive(
+          focus?.phase === "focus" && focus.status === "running",
+        );
+      }
+      if (
+        event.type === "focus-phase-completed" &&
+        event.focus?.phase === "focus" &&
+        event.focus.taskId
+      ) {
+        void tasks.pauseFocus(event.focus.taskId).then(() => {
+          windows?.broadcast(DESKTOP_CHANNELS.eventTasksChanged);
+        }).catch(() => undefined);
+      }
+      if (
+        event.type === "focus-phase-started" &&
+        event.focus?.phase === "focus" &&
+        event.focus.taskId
+      ) {
+        void tasks.startFocus(event.focus.taskId).then(() => {
+          windows?.broadcast(DESKTOP_CHANNELS.eventTasksChanged);
+        }).catch(() => undefined);
+      }
+      if (
+        event.type === "focus-phase-completed" &&
+        settingsService &&
+        systemNotificationAllowed(settingsService.get()) &&
+        Notification.isSupported() &&
+        process.env.TODO_AGENT_E2E !== "1"
+      ) {
+        const phase = event.focus?.phase;
+        new Notification({
+          title: phase === "focus" ? "专注完成" : "休息结束",
+          body:
+            phase === "focus"
+              ? `${settingsService.get().persona.name}陪你完成了这一轮，休息一下吧。`
+              : "准备好后，可以开始下一轮。",
+          silent: !settingsService.get().notifications.sound,
+        }).show();
+      }
+    },
+  });
+  await petService.initialize();
+  weatherService = new WeatherService({
+    userDataPath,
+    settings: () => settingsService!.get().weather,
+  });
+  await weatherService.initialize();
 
   const preloadPath = path.join(__dirname, "preload.cjs");
   const rendererPath = path.join(app.getAppPath(), "dist", "index.html");
@@ -419,6 +563,15 @@ async function startApplication(): Promise<void> {
     windows?.broadcast(DESKTOP_CHANNELS.eventTasksChanged);
     refreshFloatingFocusMode();
     schedulePendingFeishuChanges();
+    void tasks
+      .listTasks({ statuses: ["completed"], includeDeleted: false })
+      .then((items) => petService?.reconcileCompletedTasks(items))
+      .catch((error: unknown) => {
+        console.error(
+          "Failed to reconcile Todo Pet task rewards",
+          error instanceof Error ? error.message : error,
+        );
+      });
     if (notificationRuntime?.isStarted) {
       void notificationRuntime
         .refresh("task-change")
@@ -766,6 +919,104 @@ async function startApplication(): Promise<void> {
     },
   };
 
+  const petApi: PetDesktopApi = {
+    snapshot: async () => petService!.snapshot(),
+    rename: async (name) => {
+      const snapshot = await petService!.rename(name);
+      const current = settingsService!.get();
+      const settings = await settingsService!.replace({
+        ...current,
+        persona: { ...current.persona, name: snapshot.profile.name },
+      });
+      broadcastSettings(settings);
+      return snapshot;
+    },
+    interact: (kind) => petService!.recordInteraction(kind),
+    startFocus: async (request) => {
+      const task = request.taskId
+        ? await tasks.getTask(request.taskId, false)
+        : undefined;
+      if (request.taskId && !task) throw new Error("FOCUS_TASK_NOT_FOUND");
+      const snapshot = await petService!.startFocus({
+        ...request,
+        taskTitle: task?.title ?? request.taskTitle,
+      });
+      if (task) {
+        await tasks.startFocus(task.id);
+        handleTasksChanged();
+      }
+      windows?.setFocusActive(true);
+      return snapshot;
+    },
+    pauseFocus: async (reason) => {
+      const before = petService!.snapshot().focus;
+      const snapshot = await petService!.pauseFocus(reason);
+      if (before?.taskId) {
+        await tasks.pauseFocus(before.taskId);
+        handleTasksChanged();
+      }
+      return snapshot;
+    },
+    resumeFocus: async () => {
+      const before = petService!.snapshot().focus;
+      const snapshot = await petService!.resumeFocus();
+      if (before?.taskId) {
+        await tasks.startFocus(before.taskId);
+        handleTasksChanged();
+      }
+      windows?.setFocusActive(true);
+      return snapshot;
+    },
+    advanceFocus: () => petService!.advanceFocus(),
+    finishFocus: async (outcome) => {
+      const before = petService!.snapshot().focus;
+      const snapshot = await petService!.finishFocus(outcome);
+      if (before?.taskId) {
+        await tasks.pauseFocus(before.taskId).catch(() => undefined);
+        handleTasksChanged();
+      }
+      windows?.setFocusActive(false);
+      return snapshot;
+    },
+    weather: async () => weatherService!.get(),
+    refreshWeather: async (force) => {
+      const weather = await weatherService!.refresh(force);
+      if (weather) {
+        windows?.broadcast(DESKTOP_CHANNELS.eventPet, {
+          type: "weather-updated",
+          at: new Date().toISOString(),
+          weather,
+        });
+        notifySevereWeather(weather);
+      }
+      return weather;
+    },
+    generateDiary: async (userNote) => {
+      const localDate = localDateKey();
+      const completedTasks = (
+        await tasks.listTasks({
+          statuses: ["completed"],
+          includeDeleted: false,
+        })
+      ).filter((task) => task.completedAt?.slice(0, 10) === localDate);
+      const weather = weatherService!.get();
+      return petService!.generateDiary({
+        localDate,
+        completedTasks,
+        weatherSummary: weather
+          ? `${weather.city} ${weather.conditionLabel} ${Math.round(weather.temperatureC)}℃`
+          : undefined,
+        userNote,
+      });
+    },
+    updateDiary: (id, patch) => petService!.updateDiary(id, patch),
+    deleteDiary: (id) => petService!.deleteDiary(id),
+    addMemory: (input) => petService!.addMemory(input),
+    updateMemory: (id, patch) => petService!.updateMemory(id, patch),
+    deleteMemory: (id) => petService!.deleteMemory(id),
+  };
+  let weatherSettingsKey = JSON.stringify(settingsService.get().weather);
+
   unregisterIpc = registerDesktopIpc({
     tasks,
     settings: settingsService,
@@ -779,6 +1030,7 @@ async function startApplication(): Promise<void> {
         await notificationRuntime!.refresh("manual");
       },
     },
+    pet: petApi,
     data: dataApi,
     devServerUrl,
     rendererPath,
@@ -787,7 +1039,15 @@ async function startApplication(): Promise<void> {
       arch: process.arch,
       version: app.getVersion(),
       isPackaged: app.isPackaged,
-      secureStorageAvailable: safeStorage.isEncryptionAvailable(),
+      // `safeStorage.isEncryptionAvailable()` can synchronously wait for an
+      // interactive Keychain response in an unsigned packaged macOS app. An
+      // IPC health check must never hold the main process open on that prompt.
+      // Todo Agent targets macOS and Windows, where Electron provides the
+      // native credential backend once the app is ready; actual credential
+      // reads/writes still go through the adapter above and surface a concrete
+      // error if the OS backend cannot be used.
+      secureStorageAvailable:
+        process.platform === "darwin" || process.platform === "win32",
     }),
     showMain: (route) => requestMainWindow(route),
     showQuickCapture: () => windows?.showQuick(),
@@ -815,6 +1075,14 @@ async function startApplication(): Promise<void> {
     onSettingsChanged: (settings) => {
       status.agent = settings.ai.enabled ? "ready" : "disabled";
       registerQuickCaptureShortcut(settings);
+      if (petService?.snapshot().profile.name !== settings.persona.name) {
+        void petService?.rename(settings.persona.name).catch(() => undefined);
+      }
+      const nextWeatherSettingsKey = JSON.stringify(settings.weather);
+      if (nextWeatherSettingsKey !== weatherSettingsKey) {
+        weatherSettingsKey = nextWeatherSettingsKey;
+        void weatherService?.refresh(true).catch(() => undefined);
+      }
       if (!settings.feishu.configured) {
         feishuController?.stopPolling();
         const connection = feishuController?.status();
@@ -884,6 +1152,47 @@ async function startApplication(): Promise<void> {
   screen.on("display-metrics-changed", ensureFloatingVisible);
   registerQuickCaptureShortcut(settingsService.get());
   await notificationRuntime.start();
+  petTickTimer = setInterval(() => {
+    void petService?.tick().catch((error: unknown) => {
+      console.error(
+        "Failed to advance Todo Pet focus timer",
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }, 1_000);
+  weatherRefreshTimer = setInterval(() => {
+    void weatherService?.refresh(false).then((weather) => {
+      if (!weather) return;
+      windows?.broadcast(DESKTOP_CHANNELS.eventPet, {
+        type: "weather-updated",
+        at: new Date().toISOString(),
+        weather,
+      });
+      notifySevereWeather(weather);
+    }).catch(() => undefined);
+  }, 30 * 60_000);
+  void tasks
+    .listTasks({ statuses: ["completed"], includeDeleted: false })
+    .then(async (items) => {
+      await petService?.reconcileCompletedTasks(items);
+      if (!settingsService?.get().pet.autoDiary) return;
+      const localDate = localDateKey();
+      const weather = weatherService?.get();
+      await petService?.generateDiary({
+        localDate,
+        completedTasks: items.filter(
+          (task) => task.completedAt?.slice(0, 10) === localDate,
+        ),
+        weatherSummary: weather
+          ? `${weather.city} ${weather.conditionLabel} ${Math.round(weather.temperatureC)}℃`
+          : undefined,
+      });
+    })
+    .catch(() => undefined);
+  void weatherService
+    ?.refresh(false)
+    .then(notifySevereWeather)
+    .catch(() => undefined);
   const revokeFullAccessForSystemState = (): void => {
     agentService?.revokeFullAccess();
   };
@@ -891,6 +1200,11 @@ async function startApplication(): Promise<void> {
   powerMonitor.on("suspend", revokeFullAccessForSystemState);
   powerMonitor.on("resume", () => {
     windows?.ensureFloatingVisible();
+    void petService?.tick().catch(() => undefined);
+    void weatherService
+      ?.refresh(false)
+      .then(notifySevereWeather)
+      .catch(() => undefined);
     if (
       settingsService?.get().feishu.autoSync &&
       feishuController?.status().connected
@@ -927,6 +1241,8 @@ app.on("before-quit", () => {
 });
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  if (petTickTimer) clearInterval(petTickTimer);
+  if (weatherRefreshTimer) clearInterval(weatherRefreshTimer);
   feishuMutationSync?.dispose();
   feishuController?.stopPolling();
   void feishuController?.cancelOAuth().catch(() => undefined);

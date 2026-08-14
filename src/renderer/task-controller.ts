@@ -140,6 +140,7 @@ export interface TaskController {
   moveToToday(id: TaskId): Promise<string | undefined>;
   startFocus(id: TaskId): Promise<string | undefined>;
   pauseFocus(id: TaskId): Promise<string | undefined>;
+  resetFocus(id: TaskId): Promise<string | undefined>;
   trash(id: TaskId): Promise<string | undefined>;
   restore(id: TaskId): Promise<string | undefined>;
   purge(id: TaskId): Promise<string | undefined>;
@@ -417,6 +418,7 @@ export function useTaskController(
         | "moveToToday"
         | "startFocus"
         | "pauseFocus"
+        | "resetFocus"
         | "moveToTrash"
         | "restore",
       id: TaskId,
@@ -450,6 +452,11 @@ export function useTaskController(
         applyFallback(id, { focusStartedAt: new Date().toISOString() });
       if (name === "pauseFocus")
         applyFallback(id, { focusStartedAt: undefined });
+      if (name === "resetFocus")
+        applyFallback(id, {
+          focusStartedAt: undefined,
+          focusElapsedSeconds: 0,
+        });
       if (name === "moveToTrash")
         applyFallback(id, { deletedAt: new Date().toISOString() });
       if (name === "restore") applyFallback(id, { deletedAt: undefined });
@@ -513,6 +520,7 @@ export function useTaskController(
       moveToToday: (id) => runMutation("moveToToday", id),
       startFocus: (id) => runMutation("startFocus", id),
       pauseFocus: (id) => runMutation("pauseFocus", id),
+      resetFocus: (id) => runMutation("resetFocus", id),
       trash: (id) => runMutation("moveToTrash", id),
       restore: (id) => runMutation("restore", id),
       purge,

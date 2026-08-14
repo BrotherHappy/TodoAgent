@@ -5,6 +5,7 @@ import type { AgentRunEvent } from "../src/shared/agent-types";
 import type { AgentApprovalView } from "../src/shared/desktop-api";
 import type { FeishuStatusView } from "../src/shared/desktop-api";
 import type { InAppNotificationView } from "../src/shared/desktop-api";
+import type { PetEvent } from "../src/shared/pet-types";
 
 function subscribe<Payload>(
   channel: string,
@@ -152,6 +153,35 @@ const desktopApi: DesktopApi = {
       }),
     refresh: () => ipcRenderer.invoke(DESKTOP_CHANNELS.notificationRefresh),
   },
+  pet: {
+    snapshot: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petSnapshot),
+    rename: (name) => ipcRenderer.invoke(DESKTOP_CHANNELS.petRename, name),
+    interact: (kind) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petInteract, kind),
+    startFocus: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petFocusStart, request),
+    pauseFocus: (reason) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petFocusPause, reason),
+    resumeFocus: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petFocusResume),
+    advanceFocus: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petFocusAdvance),
+    finishFocus: (outcome) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petFocusFinish, outcome),
+    weather: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petWeatherGet),
+    refreshWeather: (force) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petWeatherRefresh, force),
+    generateDiary: (userNote) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryGenerate, userNote),
+    updateDiary: (id, patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryUpdate, { id, patch }),
+    deleteDiary: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryDelete, id),
+    addMemory: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryAdd, input),
+    updateMemory: (id, patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryUpdate, { id, patch }),
+    deleteMemory: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryDelete, id),
+  },
   data: {
     exportToFile: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.dataExport, request),
@@ -190,6 +220,8 @@ const desktopApi: DesktopApi = {
         DESKTOP_CHANNELS.eventNotification,
         listener,
       ),
+    onPetEvent: (listener) =>
+      subscribe<PetEvent>(DESKTOP_CHANNELS.eventPet, listener),
   },
 };
 

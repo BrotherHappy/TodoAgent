@@ -6,7 +6,7 @@ import {
 } from '../electron/window-manager';
 
 describe('floatingWindowInteractionOptions', () => {
-  it('accepts the first click on an inactive macOS floating capsule', () => {
+  it('accepts the first click on an inactive macOS Todo Pet', () => {
     expect(floatingWindowInteractionOptions('darwin')).toEqual({
       acceptFirstMouse: true,
     });
