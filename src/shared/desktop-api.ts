@@ -29,6 +29,14 @@ import type {
   FullAccessToolScope,
 } from "./agent-types";
 import type { AppSettings, PublicCredentialState } from "./settings";
+import type {
+  PetDiaryEntry,
+  PetEvent,
+  PetMemoryEntry,
+  PetSnapshot,
+  StartFocusRequest,
+  WeatherSnapshot,
+} from "./pet-types";
 
 export interface UpdateTaskRequest {
   id: TaskId;
@@ -413,6 +421,33 @@ export interface NotificationDesktopApi {
   refresh(): Promise<void>;
 }
 
+export interface PetDesktopApi {
+  snapshot(): Promise<PetSnapshot>;
+  rename(name: string): Promise<PetSnapshot>;
+  interact(kind?: string): Promise<PetSnapshot>;
+  startFocus(request: StartFocusRequest): Promise<PetSnapshot>;
+  pauseFocus(reason?: string): Promise<PetSnapshot>;
+  resumeFocus(): Promise<PetSnapshot>;
+  advanceFocus(): Promise<PetSnapshot>;
+  finishFocus(outcome: "completed" | "abandoned"): Promise<PetSnapshot>;
+  weather(): Promise<WeatherSnapshot | undefined>;
+  refreshWeather(force?: boolean): Promise<WeatherSnapshot | undefined>;
+  generateDiary(userNote?: string): Promise<PetDiaryEntry>;
+  updateDiary(
+    id: string,
+    patch: Pick<PetDiaryEntry, "title" | "content">,
+  ): Promise<PetDiaryEntry>;
+  deleteDiary(id: string): Promise<boolean>;
+  addMemory(
+    input: Pick<PetMemoryEntry, "kind" | "content">,
+  ): Promise<PetMemoryEntry>;
+  updateMemory(
+    id: string,
+    patch: Partial<Pick<PetMemoryEntry, "content" | "enabled">>,
+  ): Promise<PetMemoryEntry>;
+  deleteMemory(id: string): Promise<boolean>;
+}
+
 export type DataRedactionView = "none" | "private" | "strict";
 export type DataImportStrategyView = "skip" | "overwrite" | "copy";
 
@@ -515,6 +550,7 @@ export interface DesktopEventApi {
   onAgentApproval(listener: (approval: AgentApprovalView) => void): () => void;
   onFeishuStatus(listener: (status: FeishuStatusView) => void): () => void;
   onNotification(listener: (event: InAppNotificationView) => void): () => void;
+  onPetEvent(listener: (event: PetEvent) => void): () => void;
 }
 
 export interface DesktopApi {
@@ -525,6 +561,7 @@ export interface DesktopApi {
   agent: AgentDesktopApi;
   feishu: FeishuDesktopApi;
   notifications: NotificationDesktopApi;
+  pet: PetDesktopApi;
   data: DataDesktopApi;
   events: DesktopEventApi;
 }
@@ -586,6 +623,22 @@ export const DESKTOP_CHANNELS = {
   notificationAction: "notifications:action",
   notificationSnoozeUntil: "notifications:snooze-until",
   notificationRefresh: "notifications:refresh",
+  petSnapshot: "pet:snapshot",
+  petRename: "pet:rename",
+  petInteract: "pet:interact",
+  petFocusStart: "pet:focus-start",
+  petFocusPause: "pet:focus-pause",
+  petFocusResume: "pet:focus-resume",
+  petFocusAdvance: "pet:focus-advance",
+  petFocusFinish: "pet:focus-finish",
+  petWeatherGet: "pet:weather-get",
+  petWeatherRefresh: "pet:weather-refresh",
+  petDiaryGenerate: "pet:diary-generate",
+  petDiaryUpdate: "pet:diary-update",
+  petDiaryDelete: "pet:diary-delete",
+  petMemoryAdd: "pet:memory-add",
+  petMemoryUpdate: "pet:memory-update",
+  petMemoryDelete: "pet:memory-delete",
   dataExport: "data:export",
   dataPreviewImport: "data:preview-import",
   dataCommitImport: "data:commit-import",
@@ -600,6 +653,7 @@ export const DESKTOP_CHANNELS = {
   eventAgentApproval: "event:agent-approval",
   eventFeishuStatus: "event:feishu-status",
   eventNotification: "event:notification",
+  eventPet: "event:pet",
 } as const;
 
 declare global {

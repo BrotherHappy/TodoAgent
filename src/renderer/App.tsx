@@ -60,6 +60,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -82,6 +83,7 @@ import {
   defaultSettings,
   type AiAuthenticationMode,
   type AppSettings,
+  type PetTab,
 } from "../shared/settings";
 import type {
   AgentApprovalView,
@@ -97,16 +99,30 @@ import type {
   ModelUsageStatus,
   SetCredentialRequest,
 } from "../shared/desktop-api";
+import type {
+  FocusSessionView,
+  PetDiaryEntry,
+  PetMemoryEntry,
+  PetSnapshot,
+  WeatherSnapshot,
+} from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
 import {
   localDateTimeInputToIso,
   toLocalDateTimeInput,
 } from "./local-datetime";
 import { feishuCreationBlockedMessage } from "./feishu-create-guard";
+import { PetCharacter, type PetMood } from "./PetCharacter";
 import { useTaskController, type TaskController } from "./task-controller";
 import { useAgentChat } from "./use-agent-chat";
 
-type MainRoute = TaskView | "agent" | "activity" | "sync" | "settings";
+type MainRoute =
+  | TaskView
+  | "pet"
+  | "agent"
+  | "activity"
+  | "sync"
+  | "settings";
 type ToastKind = "success" | "error" | "info";
 type TaskEditorDirtyField =
   | "title"
@@ -138,21 +154,23 @@ const floatingAgentDraftId = "floating-agent-prompt";
 const floatingTabStorageKey = "todoAgentFloatingTab";
 const mainNavigationStateKey = "todoAgentMainNavigation";
 
-type FloatingTab = "all" | "today" | "chat" | "activity";
-
-function isFloatingTab(value: unknown): value is FloatingTab {
+function isPetTab(value: unknown): value is PetTab {
   return (
     value === "all" ||
     value === "today" ||
+    value === "focus" ||
     value === "chat" ||
-    value === "activity"
+    value === "home"
   );
 }
 
-function readFloatingTab(): FloatingTab {
+function readFloatingTab(): PetTab {
   try {
     const saved = localStorage.getItem(floatingTabStorageKey);
-    return isFloatingTab(saved) ? saved : "all";
+    // `activity` was the final tab in the legacy capsule. Migrate it to the
+    // pet's home instead of discarding the user's remembered navigation.
+    if (saved === "activity") return "home";
+    return isPetTab(saved) ? saved : "all";
   } catch {
     // A disabled or unavailable storage area must never make the desktop
     // entry unusable. The first-run default remains the all-task overview.
@@ -167,6 +185,7 @@ const routeTitles: Record<MainRoute, string> = {
   all: "全部任务",
   completed: "已完成",
   trash: "回收站",
+  pet: "小窝",
   agent: "Agent",
   activity: "动态",
   sync: "同步问题",
@@ -756,6 +775,7 @@ function Sidebar({
       </button>
       {item("sync", <AlertTriangle size={17} />, counts.conflicts, "warning")}
       <div className="nav-section-label">工作台</div>
+      {item("pet", <UserRound size={17} />)}
       {item("agent", <Sparkles size={17} />)}
       {item("activity", <Activity size={17} />)}
       <div className="sidebar-footer">
@@ -3859,6 +3879,420 @@ function Switch({
   );
 }
 
+function usePetData() {
+  const [snapshot, setSnapshot] = useState<PetSnapshot>();
+  const [weather, setWeather] = useState<WeatherSnapshot>();
+  const refresh = useCallback(async () => {
+    if (!window.desktopApi) return;
+    const [nextSnapshot, nextWeather] = await Promise.all([
+      window.desktopApi.pet.snapshot(),
+      window.desktopApi.pet.weather().catch(() => undefined),
+    ]);
+    setSnapshot(nextSnapshot);
+    setWeather(nextWeather);
+  }, []);
+  useEffect(() => {
+    void refresh();
+    return window.desktopApi?.events.onPetEvent((event) => {
+      if (event.weather) setWeather(event.weather);
+      void refresh();
+    });
+  }, [refresh]);
+  return { snapshot, weather, refresh, setWeather };
+}
+
+function focusElapsedNow(focus: FocusSessionView | undefined, now: number): number {
+  if (!focus) return 0;
+  if (focus.status !== "running" || !focus.startedAt) return focus.elapsedSeconds;
+  return (
+    focus.accumulatedSeconds +
+    Math.max(0, Math.floor((now - new Date(focus.startedAt).getTime()) / 1_000))
+  );
+}
+
+function focusRemainingNow(
+  focus: FocusSessionView | undefined,
+  now: number,
+): number | undefined {
+  if (!focus?.targetSeconds) return undefined;
+  return Math.max(0, focus.targetSeconds - focusElapsedNow(focus, now));
+}
+
+function clockDuration(seconds: number): string {
+  const safe = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(safe / 3_600);
+  const minutes = Math.floor((safe % 3_600) / 60);
+  const remainder = safe % 60;
+  return hours
+    ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function PetHomePage({
+  notify,
+}: {
+  notify: (message: string, kind?: ToastKind) => void;
+}) {
+  const { snapshot, weather, refresh, setWeather } = usePetData();
+  const [section, setSection] = useState<"home" | "diary" | "memory">("home");
+  const [busy, setBusy] = useState(false);
+  const [memoryText, setMemoryText] = useState("");
+  const [editingDiary, setEditingDiary] = useState<PetDiaryEntry>();
+  const [editingMemory, setEditingMemory] = useState<PetMemoryEntry>();
+
+  const run = async (operation: () => Promise<void>, success: string) => {
+    setBusy(true);
+    try {
+      await operation();
+      await refresh();
+      notify(success, "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "操作失败", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!snapshot) {
+    return (
+      <main className="pet-page loading-page">
+        <RefreshCw size={26} />
+        正在布置小窝…
+      </main>
+    );
+  }
+  const profile = snapshot.profile;
+  const levelProgress = profile.experience % 100;
+  const recentRewards = snapshot.rewards.slice(0, 6);
+  return (
+    <main className="pet-page">
+      <header className="pet-page-heading">
+        <div>
+          <span className="pet-page-eyebrow">TODO PET HOME</span>
+          <h1>{profile.name}的小窝</h1>
+          <p>你的任务、专注和共同经历，会在这里留下温和而真实的成长。</p>
+        </div>
+        <div className="pet-page-character">
+          <PetCharacter
+            name={profile.name}
+            mood={snapshot.focus?.status === "running" ? "focus" : "happy"}
+          />
+        </div>
+      </header>
+      <nav className="pet-page-tabs" aria-label="小窝导航">
+        {([
+          ["home", "成长"],
+          ["diary", "日记"],
+          ["memory", "记忆"],
+        ] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            className={section === value ? "active" : ""}
+            onClick={() => setSection(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {section === "home" && (
+        <div className="pet-dashboard">
+          <section className="pet-level-card">
+            <div className="pet-level-number">Lv.{profile.level}</div>
+            <div>
+              <strong>
+                {profile.stage === "seed"
+                  ? "初见精灵"
+                  : profile.stage === "companion"
+                    ? "默契伙伴"
+                    : profile.stage === "partner"
+                      ? "执行搭档"
+                      : "守护伙伴"}
+              </strong>
+              <p>亲密度 {profile.intimacy} · 总经验 {profile.experience}</p>
+              <div className="pet-level-track" aria-label={`等级进度 ${levelProgress}%`}>
+                <i style={{ width: `${levelProgress}%` }} />
+              </div>
+            </div>
+          </section>
+          <section className="pet-weather-card">
+            <div className="pet-weather-icon">
+              {weather?.conditionLabel.includes("雨") ? "☂" : weather?.conditionLabel.includes("雪") ? "❄" : "☀"}
+            </div>
+            <div>
+              <strong>{weather ? `${Math.round(weather.temperatureC)}℃ · ${weather.conditionLabel}` : "天气未开启"}</strong>
+              <p>
+                {weather
+                  ? `${weather.city}${weather.stale ? " · 缓存已过期" : ` · 降水 ${weather.precipitationProbability ?? "—"}%`}`
+                  : "可在设置中填写城市，不需要精确定位。"}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="icon-button"
+              disabled={busy}
+              aria-label="刷新天气"
+              onClick={() =>
+                void run(async () => {
+                  const next = await window.desktopApi?.pet.refreshWeather(true);
+                  setWeather(next);
+                }, "天气已更新")
+              }
+            >
+              <RefreshCw size={15} />
+            </button>
+          </section>
+          <section className="pet-attributes-card">
+            <h2>成长属性</h2>
+            <div className="pet-attribute-grid">
+              {([
+                ["knowledge", "知识", "📖"],
+                ["energy", "活力", "🌱"],
+                ["creativity", "创造", "✨"],
+                ["organization", "整理", "🧺"],
+                ["courage", "勇气", "🧭"],
+              ] as const).map(([key, label, icon]) => (
+                <div key={key}>
+                  <span>{icon}</span>
+                  <small>{label}</small>
+                  <strong>{profile.attributes[key]}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="pet-rewards-card">
+            <div className="pet-section-heading">
+              <div>
+                <h2>最近收获</h2>
+                <p>只奖励真实完成，不会因逾期或中断扣除。</p>
+              </div>
+            </div>
+            {recentRewards.length ? (
+              <div className="pet-reward-list">
+                {recentRewards.map((reward) => (
+                  <div key={reward.id}>
+                    <span>{reward.source === "focus" ? "⏱" : reward.source === "task" ? "✓" : "♡"}</span>
+                    <div>
+                      <strong>{reward.source === "focus" ? "完成专注" : reward.source === "task" ? "完成任务" : "温馨互动"}</strong>
+                      <small>{formatDateTime(reward.grantedAt)}</small>
+                    </div>
+                    <b>+{reward.experience} XP</b>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="pet-page-empty">完成第一件任务后，成长记录会出现在这里。</div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {section === "diary" && (
+        <section className="pet-journal-section">
+          <div className="pet-section-heading">
+            <div>
+              <h2>共同日记</h2>
+              <p>默认由本地事实模板生成；你可以随时编辑或删除。</p>
+            </div>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  const entry = await window.desktopApi?.pet.generateDiary();
+                  if (entry) setEditingDiary(entry);
+                }, "今天的日记已生成")
+              }
+            >
+              <FileText size={16} />
+              生成今日日记
+            </button>
+          </div>
+          {editingDiary && (
+            <div className="pet-diary-editor">
+              <input
+                value={editingDiary.title}
+                onChange={(event) =>
+                  setEditingDiary((current) =>
+                    current ? { ...current, title: event.target.value } : current,
+                  )
+                }
+                aria-label="日记标题"
+              />
+              <textarea
+                rows={8}
+                value={editingDiary.content}
+                onChange={(event) =>
+                  setEditingDiary((current) =>
+                    current ? { ...current, content: event.target.value } : current,
+                  )
+                }
+                aria-label="日记内容"
+              />
+              <div>
+                <button type="button" className="soft-button" onClick={() => setEditingDiary(undefined)}>取消</button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const saved = await window.desktopApi?.pet.updateDiary(
+                        editingDiary.id,
+                        { title: editingDiary.title, content: editingDiary.content },
+                      );
+                      if (saved) setEditingDiary(saved);
+                    }, "日记已保存")
+                  }
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="pet-diary-list">
+            {snapshot.diary.map((entry) => (
+              <article key={entry.id}>
+                <div>
+                  <span>{entry.localDate}</span>
+                  <small>{entry.generation === "local-template" ? "本地事实模板" : entry.generation === "model" ? "AI 增强" : "手写"}</small>
+                </div>
+                <h3>{entry.title}</h3>
+                <p>{entry.content}</p>
+                <footer>
+                  <span>完成 {entry.completedTaskCount} · 专注 {Math.round(entry.focusSeconds / 60)} 分钟</span>
+                  <button type="button" className="ghost-button" onClick={() => setEditingDiary(entry)}>编辑</button>
+                  <button
+                    type="button"
+                    className="ghost-button danger-text"
+                    onClick={() =>
+                      void run(async () => {
+                        await window.desktopApi?.pet.deleteDiary(entry.id);
+                        if (editingDiary?.id === entry.id) setEditingDiary(undefined);
+                      }, "日记已删除")
+                    }
+                  >删除</button>
+                </footer>
+              </article>
+            ))}
+            {!snapshot.diary.length && <div className="pet-page-empty">还没有日记。生成今日记录，看看你们一起完成了什么。</div>}
+          </div>
+        </section>
+      )}
+
+      {section === "memory" && (
+        <section className="pet-memory-section">
+          <div className="pet-section-heading">
+            <div>
+              <h2>可控记忆</h2>
+              <p>只有你明确保存的内容才进入长期记忆，可暂停、编辑或删除。</p>
+            </div>
+          </div>
+          <div className="pet-memory-composer">
+            <input
+              value={memoryText}
+              onChange={(event) => setMemoryText(event.target.value)}
+              placeholder={`例如：我喜欢在上午处理需要深度思考的任务`}
+              aria-label="新增长期记忆"
+            />
+            <button
+              type="button"
+              className="primary-button"
+              disabled={busy || !memoryText.trim()}
+              onClick={() =>
+                void run(async () => {
+                  await window.desktopApi?.pet.addMemory({
+                    kind: "preference",
+                    content: memoryText,
+                  });
+                  setMemoryText("");
+                }, "记忆已保存")
+              }
+            >
+              保存记忆
+            </button>
+          </div>
+          <div className="pet-memory-list">
+            {snapshot.memories.map((memory) => (
+              <div key={memory.id} className={!memory.enabled ? "is-paused" : ""}>
+                <Switch
+                  checked={memory.enabled}
+                  onChange={(enabled) =>
+                    void run(async () => {
+                      await window.desktopApi?.pet.updateMemory(memory.id, { enabled });
+                    }, enabled ? "记忆已启用" : "记忆已暂停")
+                  }
+                  label={`${memory.enabled ? "暂停" : "启用"}记忆`}
+                />
+                {editingMemory?.id === memory.id ? (
+                  <input
+                    className="pet-memory-edit"
+                    value={editingMemory.content}
+                    aria-label="编辑记忆"
+                    onChange={(event) =>
+                      setEditingMemory((current) =>
+                        current
+                          ? { ...current, content: event.target.value }
+                          : current,
+                      )
+                    }
+                  />
+                ) : (
+                  <p>{memory.content}</p>
+                )}
+                <small>{memory.kind === "preference" ? "偏好" : memory.kind === "relationship" ? "关系记忆" : "共同经历"} · 用户批准</small>
+                <div className="pet-memory-actions">
+                  {editingMemory?.id === memory.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => setEditingMemory(undefined)}
+                      >取消</button>
+                      <button
+                        type="button"
+                        className="soft-button"
+                        disabled={busy || !editingMemory.content.trim()}
+                        onClick={() =>
+                          void run(async () => {
+                            await window.desktopApi?.pet.updateMemory(memory.id, {
+                              content: editingMemory.content,
+                            });
+                            setEditingMemory(undefined);
+                          }, "记忆已更新")
+                        }
+                      >保存</button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => setEditingMemory(memory)}
+                    >编辑</button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="删除记忆"
+                    onClick={() =>
+                      void run(async () => {
+                        await window.desktopApi?.pet.deleteMemory(memory.id);
+                        if (editingMemory?.id === memory.id) setEditingMemory(undefined);
+                      }, "记忆已删除")
+                    }
+                  ><Trash2 size={15} /></button>
+                </div>
+              </div>
+            ))}
+            {!snapshot.memories.length && <div className="pet-page-empty">这里是空的。Todo Pet 不会擅自把任务或对话升级为长期记忆。</div>}
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}
+
 function SettingsPage({
   notify,
 }: {
@@ -4209,7 +4643,7 @@ function SettingsPage({
   };
   const nav: Array<[SettingsSection, ReactNode, string]> = [
     ["general", <Settings size={17} />, "通用"],
-    ["floating", <PanelTop size={17} />, "悬浮与桌面"],
+    ["floating", <PanelTop size={17} />, "Todo Pet"],
     ["notifications", <Bell size={17} />, "提醒"],
     ["integrations", <Cloud size={17} />, "飞书"],
     ["ai", <Sparkles size={17} />, "模型与 Agent"],
@@ -4302,7 +4736,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>关闭主窗口后驻留</strong>
-                <p>提醒、同步和悬浮入口继续工作</p>
+                <p>提醒、同步和 Todo Pet 继续工作</p>
               </div>
               <Switch
                 checked={appSettings.closeToTray}
@@ -4316,12 +4750,35 @@ function SettingsPage({
         )}
         {section === "floating" && (
           <section className="settings-section">
-            <h1>悬浮与桌面</h1>
-            <p>悬浮胶囊、迷你面板和主应用保持同一任务语境。</p>
+            <h1>Todo Pet 与桌面</h1>
+            <p>桌面宠物、随身面板和主应用保持同一任务语境。</p>
+            <div className="settings-subheading">
+              <span>身份与外观</span>
+              <p>同一个名字会用于桌面陪伴、提醒和对话。</p>
+            </div>
             <div className="settings-row">
               <div>
-                <strong>显示悬浮入口</strong>
-                <p>可随时从菜单栏或托盘重新打开</p>
+                <strong>宠物名字</strong>
+                <p>默认叫“小序”，可以随时更改</p>
+              </div>
+              <input
+                className="settings-input"
+                aria-label="宠物名字"
+                maxLength={80}
+                value={appSettings.persona.name}
+                onChange={(event) =>
+                  setAppSettings((current) => ({
+                    ...current,
+                    persona: { ...current.persona, name: event.target.value },
+                  }))
+                }
+                onBlur={() => void persist(appSettings, "宠物名字已更新")}
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>显示 Todo Pet</strong>
+                <p>让小序留在桌面陪伴；也可从菜单栏或托盘重新打开</p>
               </div>
               <Switch
                 checked={appSettings.floating.enabled}
@@ -4336,34 +4793,41 @@ function SettingsPage({
                       floating: { ...appSettings.floating, enabled: value },
                     });
                 }}
-                label="显示悬浮入口"
+                label="显示 Todo Pet"
               />
             </div>
             <div className="settings-row">
               <div>
-                <strong>收起形态</strong>
-                <p>悬浮球更轻，胶囊会保留当前任务</p>
+                <strong>宠物大小</strong>
+                <p>只调整收起后的宠物与任务气泡，不影响展开面板</p>
               </div>
-              <select
-                className="settings-input"
-                value={appSettings.floating.shape}
-                onChange={(event) =>
-                  void persist(
-                    {
-                      ...appSettings,
+              <div className="settings-number-control pet-scale-control">
+                <input
+                  className="settings-input"
+                  type="range"
+                  aria-label="Todo Pet 大小"
+                  min={75}
+                  max={125}
+                  step={5}
+                  value={appSettings.floating.scalePercent}
+                  onChange={(event) =>
+                    setAppSettings((current) => ({
+                      ...current,
                       floating: {
-                        ...appSettings.floating,
-                        shape: event.target
-                          .value as AppSettings["floating"]["shape"],
+                        ...current.floating,
+                        scalePercent: Number(event.target.value),
                       },
-                    },
-                    "悬浮形态已更新",
-                  )
-                }
-              >
-                <option value="capsule">任务胶囊</option>
-                <option value="orb">小悬浮球</option>
-              </select>
+                    }))
+                  }
+                  onPointerUp={() =>
+                    void persist(appSettings, "Todo Pet 大小已更新")
+                  }
+                  onKeyUp={() =>
+                    void persist(appSettings, "Todo Pet 大小已更新")
+                  }
+                />
+                <span>{appSettings.floating.scalePercent}%</span>
+              </div>
             </div>
             <div className="settings-row">
               <div>
@@ -4402,7 +4866,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>始终置顶</strong>
-                <p>胶囊和悬浮球会持续显示在普通窗口上方</p>
+                <p>Todo Pet 会持续显示在普通窗口上方</p>
               </div>
               <span className="status-pill success">
                 <Check size={15} aria-hidden="true" />
@@ -4412,7 +4876,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>锁定位置</strong>
-                <p>避免拖动悬浮入口时误触</p>
+                <p>避免拖动 Todo Pet 时误触</p>
               </div>
               <Switch
                 checked={appSettings.floating.locked}
@@ -4422,7 +4886,7 @@ function SettingsPage({
                     floating: { ...appSettings.floating, locked: value },
                   })
                 }
-                label="锁定悬浮入口位置"
+                label="锁定 Todo Pet 位置"
               />
             </div>
             <div className="settings-row">
@@ -4441,13 +4905,13 @@ function SettingsPage({
                     },
                   })
                 }
-                label="全屏时隐藏悬浮入口"
+                label="全屏时隐藏 Todo Pet"
               />
             </div>
             <div className="settings-row">
               <div>
                 <strong>演示隐私模式</strong>
-                <p>隐藏胶囊、Today、对话建议和动态中的任务信息</p>
+                <p>隐藏 Todo Pet、Today、对话建议和动态中的任务信息</p>
               </div>
               <Switch
                 checked={appSettings.floating.privacyMode}
@@ -4458,6 +4922,204 @@ function SettingsPage({
                   })
                 }
                 label="演示隐私模式"
+              />
+            </div>
+            <div className="settings-subheading">
+              <span>陪伴行为</span>
+              <p>互动默认克制，不使用惩罚、连续签到压力或负面措辞。</p>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>点击互动</strong>
+                <p>每天首次主动互动会留下少量亲密度记录</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.interactionsEnabled}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, interactionsEnabled: value },
+                  })
+                }
+                label="点击互动"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>主动陪伴</strong>
+                <p>允许低频的计划、休息、天气与同步提示</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.proactiveMessages}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, proactiveMessages: value },
+                  })
+                }
+                label="主动陪伴"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>身心休息提醒</strong>
+                <p>长时间专注时提醒喝水、远眺和活动</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.wellbeingReminders}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, wellbeingReminders: value },
+                  })
+                }
+                label="身心休息提醒"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>关系记忆</strong>
+                <p>关闭时不会从对话自动形成长期记忆；手工记忆仍由你管理</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.relationshipMemory}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, relationshipMemory: value },
+                  })
+                }
+                label="关系记忆"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>共同日记</strong>
+                <p>每天首次启动时用本地任务与专注事实生成，可随时编辑或删除</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.autoDiary}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, autoDiary: value },
+                  })
+                }
+                label="自动生成共同日记"
+              />
+            </div>
+            <div className="settings-subheading">
+              <span>专注节奏</span>
+              <p>桌面宠物会陪伴计时；休息与下一轮是否自动开始由你决定。</p>
+            </div>
+            {([
+              ["focusMinutes", "专注", 1, 240],
+              ["shortBreakMinutes", "短休息", 1, 60],
+              ["longBreakMinutes", "长休息", 1, 120],
+              ["cycles", "每组轮数", 1, 12],
+            ] as const).map(([key, label, min, max]) => (
+              <div className="settings-row" key={key}>
+                <div>
+                  <strong>{label}</strong>
+                  <p>{key === "cycles" ? "完成后进入长休息" : "默认预设，可在专注页快速改选"}</p>
+                </div>
+                <div className="settings-number-control">
+                  <input
+                    className="settings-input"
+                    type="number"
+                    aria-label={label}
+                    min={min}
+                    max={max}
+                    value={appSettings.focus[key]}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      if (!Number.isFinite(value)) return;
+                      setAppSettings((current) => ({
+                        ...current,
+                        focus: { ...current.focus, [key]: value },
+                      }));
+                    }}
+                    onBlur={() => void persist(appSettings)}
+                  />
+                  <span>{key === "cycles" ? "轮" : "分钟"}</span>
+                </div>
+              </div>
+            ))}
+            <div className="settings-row">
+              <div>
+                <strong>自动开始休息</strong>
+                <p>专注结束后不等待手动确认</p>
+              </div>
+              <Switch
+                checked={appSettings.focus.autoStartBreak}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    focus: { ...appSettings.focus, autoStartBreak: value },
+                  })
+                }
+                label="自动开始休息"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>自动开始下一轮</strong>
+                <p>休息结束后继续下一轮专注</p>
+              </div>
+              <Switch
+                checked={appSettings.focus.autoStartNextRound}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    focus: { ...appSettings.focus, autoStartNextRound: value },
+                  })
+                }
+                label="自动开始下一轮"
+              />
+            </div>
+            <div className="settings-subheading">
+              <span>天气卡片</span>
+              <p>只需城市名，不申请精确位置权限；结果会在本机缓存。</p>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>显示天气</strong>
+                <p>在小窝和随身面板展示当前天气与降水概率</p>
+              </div>
+              <Switch
+                checked={appSettings.weather.enabled}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    weather: { ...appSettings.weather, enabled: value },
+                  })
+                }
+                label="显示天气"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>城市</strong>
+                <p>例如：上海、杭州或 San Francisco</p>
+              </div>
+              <input
+                className="settings-input"
+                aria-label="天气城市"
+                placeholder="填写城市"
+                value={appSettings.weather.city}
+                onChange={(event) =>
+                  setAppSettings((current) => ({
+                    ...current,
+                    weather: {
+                      ...current.weather,
+                      city: event.target.value,
+                      latitude: undefined,
+                      longitude: undefined,
+                      resolvedName: undefined,
+                    },
+                  }))
+                }
+                onBlur={() => void persist(appSettings, "天气城市已更新")}
               />
             </div>
           </section>
@@ -6607,6 +7269,11 @@ function MainWindow() {
           <div className="route-workspace" hidden={route !== "settings"}>
             <SettingsPage notify={notify} />
           </div>
+          {route === "pet" && (
+            <div className="route-workspace">
+              <PetHomePage notify={notify} />
+            </div>
+          )}
           {route === "activity" && (
             <div className="route-workspace">
               <ActivityPage controller={controller} notify={notify} />
@@ -6934,43 +7601,50 @@ function FloatingWindow() {
   const todayController = useTaskController("today", "");
   const allController = useTaskController("all", "");
   const [expanded, setExpanded] = useState(false);
-  const [shape, setShape] =
-    useState<AppSettings["floating"]["shape"]>("capsule");
-  const shapeRef = useRef<AppSettings["floating"]["shape"]>("capsule");
   const hoverExpandTimerRef = useRef<number | undefined>(undefined);
   const compactActivateTimerRef = useRef<number | undefined>(undefined);
   const contextMenuReturnExpandedRef = useRef(false);
   const hoverExpandDelayMsRef = useRef(
     defaultSettings.floating.hoverExpandDelayMs,
   );
+  const floatingSettingsLoadedRef = useRef(false);
   const hoveringFloatingRef = useRef(false);
   const expandTriggerRef = useRef<"hover" | "click" | undefined>(undefined);
   const [hoverExpandDelayMs, setHoverExpandDelayMs] = useState(
     defaultSettings.floating.hoverExpandDelayMs,
   );
+  const [scalePercent, setScalePercent] = useState(
+    defaultSettings.floating.scalePercent,
+  );
+  const [petName, setPetName] = useState(defaultSettings.persona.name);
   const [privacyMode, setPrivacyMode] = useState(false);
   const [floatingLocked, setFloatingLocked] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [isFloatingHovered, setIsFloatingHovered] = useState(false);
-  const [tab, setTab] = useState<FloatingTab>(readFloatingTab);
+  const [tab, setTab] = useState<PetTab>(readFloatingTab);
   const [input, setInput] = useState("");
   const [creatingFloatingTask, setCreatingFloatingTask] = useState(false);
   const floatingCreateRef = useRef(false);
   const [activity, setActivity] = useState<AuditRecord[]>([]);
   const [feishuStatus, setFeishuStatus] = useState<FeishuStatusView>();
   const [now, setNow] = useState(Date.now());
+  const [petSettings, setPetSettings] = useState(defaultSettings);
+  const [focusBusy, setFocusBusy] = useState(false);
+  const [focusError, setFocusError] = useState("");
+  const petData = usePetData();
   const miniContentRef = useRef<HTMLDivElement>(null);
   const chatFollowsOutputRef = useRef(true);
+  const petFocus = petData.snapshot?.focus;
   const focusedTask = todayController.tasks.find(
-    (task) => task.focusStartedAt,
+    (task) => task.id === petFocus?.taskId || task.focusStartedAt,
   );
   const carousel = useFloatingTodayCarousel(
     todayController.tasks,
     focusedTask,
     isFloatingHovered || expanded || contextMenuOpen || privacyMode,
   );
-  // The compact completion action follows the visible title. A rotating
-  // capsule must never complete a different, hidden task.
+  // The compact completion action follows the visible title. A rotating task
+  // bubble must never complete a different, hidden task.
   const current = carousel.task;
   const floatingChat = useAgentChat({
     initialMessage:
@@ -7003,6 +7677,15 @@ function FloatingWindow() {
       // Persisting the focus is a convenience; the active in-memory tab still
       // works if a platform policy blocks local storage.
     }
+    if (window.desktopApi && floatingSettingsLoadedRef.current) {
+      void window.desktopApi.settings.get().then((settings) => {
+        if (settings.floating.selectedTab === tab) return;
+        return window.desktopApi?.settings.replace({
+          ...settings,
+          floating: { ...settings.floating, selectedTab: tab },
+        });
+      });
+    }
   }, [tab]);
   useEffect(
     () => () => {
@@ -7020,32 +7703,22 @@ function FloatingWindow() {
   useEffect(() => {
     if (!window.desktopApi) return undefined;
     const apply = (settings: AppSettings) => {
-      const shapeChanged = shapeRef.current !== settings.floating.shape;
       const nextHoverExpandDelayMs = settings.floating.hoverExpandDelayMs;
       const delayChanged =
         hoverExpandDelayMsRef.current !== nextHoverExpandDelayMs;
       hoverExpandDelayMsRef.current = nextHoverExpandDelayMs;
-      if (shapeChanged) {
-        shapeRef.current = settings.floating.shape;
-        if (hoverExpandTimerRef.current !== undefined) {
-          window.clearTimeout(hoverExpandTimerRef.current);
-          hoverExpandTimerRef.current = undefined;
-        }
-        setExpanded(false);
-        setContextMenuOpen(false);
-        contextMenuReturnExpandedRef.current = false;
-        expandTriggerRef.current = undefined;
-        void window.desktopApi?.shell.setFloatingExpanded(false);
-      }
-      setShape(settings.floating.shape);
       setHoverExpandDelayMs(nextHoverExpandDelayMs);
+      setScalePercent(settings.floating.scalePercent);
+      setPetName(settings.persona.name || defaultSettings.persona.name);
+      setPetSettings(settings);
+      floatingSettingsLoadedRef.current = true;
+      setTab(settings.floating.selectedTab);
       setPrivacyMode(settings.floating.privacyMode);
       setFloatingLocked(settings.floating.locked);
       // Settings load asynchronously on every floating renderer. If the
       // pointer entered before that read completed (or the delay is edited
       // while the pointer is still there), the old timer must not win.
       if (
-        !shapeChanged &&
         delayChanged &&
         hoverExpandTimerRef.current !== undefined
       ) {
@@ -7099,6 +7772,18 @@ function FloatingWindow() {
           )
         : 0)
     : 0;
+  const petFocusElapsed = focusElapsedNow(petFocus, now);
+  const petFocusRemaining = focusRemainingNow(petFocus, now);
+  const petFocusClock =
+    petFocus?.mode === "pomodoro" && petFocusRemaining !== undefined
+      ? petFocusRemaining
+      : petFocusElapsed;
+  const focusPhaseLabel =
+    petFocus?.phase === "short-break"
+      ? "短休息"
+      : petFocus?.phase === "long-break"
+        ? "长休息"
+        : "专注";
   const titleFor = (task?: Task) =>
     task ? (privacyMode ? "私人任务" : task.title) : "今天已清空";
   const submit = async (suggestion?: string) => {
@@ -7201,6 +7886,66 @@ function FloatingWindow() {
       )
       .finally(closeFloatingContextMenu);
   }
+  function mutePetUntil(until: Date): void {
+    if (!window.desktopApi) return;
+    void window.desktopApi.settings
+      .get()
+      .then((settings) =>
+        window.desktopApi!.settings.replace({
+          ...settings,
+          notifications: {
+            ...settings.notifications,
+            mutedUntil: until.toISOString(),
+          },
+        }),
+      )
+      .then(() => window.desktopApi?.notifications.refresh())
+      .finally(closeFloatingContextMenu);
+  }
+  function mutePetForOneHour(): void {
+    mutePetUntil(new Date(Date.now() + 60 * 60 * 1_000));
+  }
+  function mutePetForToday(): void {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    mutePetUntil(tomorrow);
+  }
+  async function runFocusAction(operation: () => Promise<unknown>) {
+    setFocusBusy(true);
+    setFocusError("");
+    try {
+      await operation();
+      await petData.refresh();
+    } catch (reason) {
+      setFocusError(
+        reason instanceof Error ? reason.message : "专注操作暂时失败",
+      );
+    } finally {
+      setFocusBusy(false);
+    }
+  }
+  function startPetFocus(
+    mode: "pomodoro" | "count-up",
+    focusMinutes = petSettings.focus.focusMinutes,
+  ): void {
+    const task = current;
+    void runFocusAction(async () => {
+      await window.desktopApi?.pet.startFocus({
+        mode,
+        taskId: task?.id,
+        taskTitle: task?.title,
+        preset: {
+          focusMinutes,
+          shortBreakMinutes: petSettings.focus.shortBreakMinutes,
+          longBreakMinutes: petSettings.focus.longBreakMinutes,
+          cycles: petSettings.focus.cycles,
+        },
+        autoStartBreak: petSettings.focus.autoStartBreak,
+        autoStartNextRound: petSettings.focus.autoStartNextRound,
+      });
+    });
+  }
   useEffect(() => {
     if (!contextMenuOpen) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -7220,7 +7965,15 @@ function FloatingWindow() {
     // to the full app. Keep the floating entry compact while the main window
     // is restored so it does not leave an unexpectedly expanded panel behind.
     setPanelExpanded(false);
-    void window.desktopApi?.shell.showMain("today");
+    const route: MainRoute =
+      tab === "today"
+        ? "today"
+        : tab === "chat"
+          ? "agent"
+          : tab === "home"
+            ? "pet"
+            : "all";
+    void window.desktopApi?.shell.showMain(route);
   }
   function handleCompactActivate(
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -7267,7 +8020,6 @@ function FloatingWindow() {
       setPanelExpanded(false);
     }
   };
-  const orbMode = shape === "orb" && !expanded;
   const syncLabel = feishuStatus?.connected
     ? feishuStatus.state === "syncing"
       ? "飞书正在同步"
@@ -7275,9 +8027,28 @@ function FloatingWindow() {
     : feishuStatus?.configured
       ? "飞书等待重新连接"
       : "飞书未连接 · 本地任务正常";
+  const overdueCount = todayController.tasks.filter(
+    (task) =>
+      task.status === "open" &&
+      Boolean(task.dueAt && task.dueAt.slice(0, 10) < dateKey()),
+  ).length;
+  const petMood: PetMood = petFocus?.status === "running"
+    ? "focus"
+    : feishuStatus?.state === "syncing"
+      ? "syncing"
+      : overdueCount > 0
+        ? "alert"
+        : todayController.tasks.length === 0
+          ? "happy"
+          : "idle";
   return (
     <div
-      className={`floating-shell ${orbMode ? "orb-only" : ""} ${privacyMode ? "privacy-mode" : ""} ${floatingLocked ? "position-locked" : ""} ${current?.focusStartedAt ? "focus-mode" : ""}`}
+      className={`floating-shell pet-shell ${expanded ? "is-expanded" : "is-compact"} ${privacyMode ? "privacy-mode" : ""} ${floatingLocked ? "position-locked" : ""} ${petFocus?.status === "running" ? "focus-mode" : ""}`}
+      style={
+        {
+          "--pet-scale": Math.max(75, Math.min(125, scalePercent)) / 100,
+        } as CSSProperties
+      }
     >
       <div
         className="floating-stack"
@@ -7291,9 +8062,9 @@ function FloatingWindow() {
         }}
       >
         <div
-          // The compact grip remains an affordance, but every passive pixel
-          // of this frameless capsule should move the window too.
-          className="floating-capsule drag-region"
+          // The pet and its task bubble form one native drag surface. Buttons
+          // opt out so task controls and panel expansion remain clickable.
+          className="pet-compact drag-region"
           onContextMenu={openFloatingContextMenu}
         >
           <span
@@ -7303,94 +8074,87 @@ function FloatingWindow() {
           >
             <GripVertical size={15} />
           </span>
-          {orbMode ? (
-            <button
-              type="button"
-              className="agent-orb floating-expand-trigger no-drag"
-              aria-label="展开 Todo Agent"
-              aria-expanded={expanded}
-              title={`停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`}
-              onClick={handleCompactActivate}
-            >
-              <Sparkles size={18} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="agent-orb floating-expand-trigger floating-capsule-icon no-drag"
-              aria-label={expanded ? "打开 Todo Agent 主窗口" : "Todo Agent 图标"}
-              aria-expanded={expanded}
-              title={
-                expanded
-                  ? "打开主窗口"
-                  : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
+          <button
+            type="button"
+            className="pet-avatar-button floating-expand-trigger no-drag"
+            aria-label={`与${petName}互动`}
+            aria-expanded={expanded}
+            title={
+              expanded
+                ? "点击收起"
+                : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
+            }
+            onClick={(event) => {
+              if (expanded) {
+                setPanelExpanded(false, "click");
+                return;
               }
-              onClick={(event) => {
-                if (expanded) {
-                  void window.desktopApi?.shell.showMain("today");
-                  return;
-                }
-                handleCompactActivate(event);
-              }}
+              if (petSettings.pet.interactionsEnabled) {
+                void window.desktopApi?.pet.interact("avatar-click");
+              }
+              handleCompactActivate(event);
+            }}
+          >
+            <PetCharacter
+              mood={petMood}
+              name={petName}
+              scalePercent={expanded ? 100 : scalePercent}
+              compact
+            />
+          </button>
+          <button
+            type="button"
+            className="pet-task-bubble floating-summary no-drag"
+            aria-label={expanded ? `收起 ${petName}` : `展开 ${petName}`}
+            aria-expanded={expanded}
+            title={
+              expanded
+                ? "点击收起"
+                : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
+            }
+            onClick={(event) => {
+              if (expanded) {
+                setPanelExpanded(false, "click");
+                return;
+              }
+              handleCompactActivate(event);
+            }}
+          >
+            <div className="floating-copy">
+              <FloatingTodayCarousel
+                task={current}
+                index={carousel.index}
+                count={carousel.count}
+                paused={carousel.paused}
+                static={carousel.static}
+                privacyMode={privacyMode}
+              />
+              <small>
+                {current
+                  ? `${current.focusStartedAt ? `${petName}陪你专注` : `${petName}提醒你`} · ${current.source.type === "feishu" ? "飞书" : "本地"}${privacyMode ? " · 隐私模式" : ""}`
+                  : `${petName}说：今天可以轻松一点`}
+              </small>
+            </div>
+            <span className="focus-time">
+              {petFocus
+                ? clockDuration(petFocusClock)
+                : current
+                  ? humanDuration(elapsed)
+                  : "✓"}
+            </span>
+          </button>
+          {current && (
+            <button
+              type="button"
+              className="icon-button pet-complete-button no-drag"
+              disabled={!canToggleTaskCompletion(current)}
+              aria-label={
+                privacyMode ? "完成当前私人任务" : `完成${current.title}`
+              }
+              onClick={() => void todayController.toggleComplete(current)}
             >
-              <Sparkles size={18} />
+              <Check size={17} />
             </button>
-          )}
-          {!orbMode && (
-            <>
-              <button
-                type="button"
-                className="floating-summary no-drag"
-                aria-label={
-                  expanded ? "收起 Todo Agent" : "展开 Todo Agent"
-                }
-                aria-expanded={expanded}
-                title={
-                  expanded
-                    ? "点击收起"
-                    : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
-                }
-                onClick={(event) => {
-                  if (expanded) {
-                    setPanelExpanded(false, "click");
-                    return;
-                  }
-                  handleCompactActivate(event);
-                }}
-              >
-                <div className="floating-copy">
-                  <FloatingTodayCarousel
-                    task={current}
-                    index={carousel.index}
-                    count={carousel.count}
-                    paused={carousel.paused}
-                    static={carousel.static}
-                    privacyMode={privacyMode}
-                  />
-                  <small>
-                    {current
-                      ? `${current.focusStartedAt ? "专注中" : "下一项"} · ${current.source.type === "feishu" ? "飞书" : "本地"}${privacyMode ? " · 隐私模式" : ""}`
-                      : "休息一下也很好"}
-                  </small>
-                </div>
-                <span className="focus-time">
-                  {current ? humanDuration(elapsed) : "✓"}
-                </span>
-              </button>
-              {current && (
-                <button
-                  type="button"
-                  className="icon-button no-drag"
-                  disabled={!canToggleTaskCompletion(current)}
-                  aria-label={
-                    privacyMode ? "完成当前私人任务" : `完成${current.title}`
-                  }
-                  onClick={() => void todayController.toggleComplete(current)}
-                >
-                  <Check size={17} />
-                </button>
-              )}
-            </>
           )}
         </div>
         {contextMenuOpen && (
@@ -7398,7 +8162,7 @@ function FloatingWindow() {
             <button
               type="button"
               className="floating-context-backdrop no-drag"
-              aria-label="关闭悬浮快捷菜单"
+              aria-label="关闭 Todo Pet 快捷菜单"
               onClick={closeFloatingContextMenu}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -7408,7 +8172,7 @@ function FloatingWindow() {
             <div
               className="floating-context-menu no-drag"
               role="menu"
-              aria-label="悬浮快捷菜单"
+              aria-label="Todo Pet 快捷菜单"
               onContextMenu={(event) => event.preventDefault()}
             >
               <div className="floating-context-heading">
@@ -7463,13 +8227,23 @@ function FloatingWindow() {
                 <span>{floatingLocked ? "解锁位置" : "锁定位置"}</span>
                 <small>{floatingLocked ? "不可拖动" : "防止误拖"}</small>
               </button>
+              <button type="button" role="menuitem" onClick={mutePetForOneHour}>
+                <Bell size={16} />
+                <span>安静一小时</span>
+                <small>暂停主动提醒</small>
+              </button>
+              <button type="button" role="menuitem" onClick={mutePetForToday}>
+                <Clock3 size={16} />
+                <span>今天安静</span>
+                <small>明天自动恢复</small>
+              </button>
               <button
                 type="button"
                 role="menuitem"
                 onClick={() => showMainFromFloatingMenu("settings")}
               >
                 <Settings size={16} />
-                <span>悬浮窗设置</span>
+                <span>Todo Pet 设置</span>
                 <small>外观与提醒</small>
               </button>
             </div>
@@ -7483,14 +8257,21 @@ function FloatingWindow() {
                 className={tab === "all" ? "active" : ""}
                 onClick={() => setTab("all")}
               >
-                全部任务
+                全部
               </button>
               <button
                 type="button"
                 className={tab === "today" ? "active" : ""}
                 onClick={() => setTab("today")}
               >
-                今日任务
+                今天
+              </button>
+              <button
+                type="button"
+                className={tab === "focus" ? "active" : ""}
+                onClick={() => setTab("focus")}
+              >
+                专注
               </button>
               <button
                 type="button"
@@ -7500,21 +8281,21 @@ function FloatingWindow() {
                   setTab("chat");
                 }}
               >
-                对话
+                聊聊
               </button>
               <button
                 type="button"
-                className={tab === "activity" ? "active" : ""}
-                onClick={() => setTab("activity")}
+                className={tab === "home" ? "active" : ""}
+                onClick={() => setTab("home")}
               >
-                动态
+                小窝
               </button>
               <button
                 type="button"
                 className="icon-button mini-open-main no-drag"
                 aria-label="打开主窗口"
                 title="打开主窗口"
-                onClick={() => void window.desktopApi?.shell.showMain("today")}
+                onClick={openMainFromCompact}
               >
                 <ExternalLink size={15} />
               </button>
@@ -7683,37 +8464,180 @@ function FloatingWindow() {
                   )}
                 </div>
                 ))}
-              {tab === "activity" && (
-                <>
-                  <div className="context-line">
-                    <CloudCheck size={16} />
-                    {syncLabel}
-                  </div>
-                  {activity.map((record) => (
-                    <div
-                      className="context-line"
-                      key={record.eventHash || record.sequence}
-                    >
-                      <ShieldCheck size={16} />
-                      <span>
-                        {privacyMode
-                          ? `${record.toolName ?? "Agent"} · ${record.outcome ?? "已记录"}`
-                          : record.toolName
-                            ? `${record.toolName} · ${record.outcome ?? record.event}`
-                            : record.event}
-                      </span>
+              {tab === "focus" && (
+                <div className="pet-focus-view">
+                  <PetCharacter
+                    mood={petFocus?.status === "running" ? "focus" : "idle"}
+                    name={petName}
+                  />
+                  <p className="pet-focus-kicker">
+                    {petFocus
+                      ? `${focusPhaseLabel} · 第 ${petFocus.cycle}/${petFocus.preset.cycles} 轮`
+                      : "选择一个节奏，和我一起开始"}
+                  </p>
+                  <strong className="pet-focus-timer">
+                    {petFocus ? clockDuration(petFocusClock) : "25:00"}
+                  </strong>
+                  <p className="pet-focus-task">
+                    {petFocus?.taskTitle
+                      ? privacyMode
+                        ? "私人任务"
+                        : petFocus.taskTitle
+                      : petFocus?.phase && petFocus.phase !== "focus"
+                        ? "站起来走走，喝口水吧"
+                        : current
+                          ? `将关联：${titleFor(current)}`
+                          : "无任务专注也可以，时间仍会被记录"}
+                  </p>
+                  {!petFocus ? (
+                    <div className="pet-focus-presets" aria-label="专注预设">
+                      <button
+                        type="button"
+                        disabled={focusBusy}
+                        onClick={() => startPetFocus("pomodoro", 25)}
+                      >
+                        <strong>25</strong><span>轻专注</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={focusBusy}
+                        onClick={() => startPetFocus("pomodoro", 50)}
+                      >
+                        <strong>50</strong><span>深专注</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={focusBusy}
+                        onClick={() => startPetFocus("pomodoro", 90)}
+                      >
+                        <strong>90</strong><span>沉浸</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={focusBusy}
+                        onClick={() => startPetFocus("count-up")}
+                      >
+                        <strong>∞</strong><span>正计时</span>
+                      </button>
                     </div>
-                  ))}
-                  {activity.length === 0 && (
-                    <div className="context-line">
-                      <Info size={16} />
-                      暂无 Agent 工具活动
+                  ) : (
+                    <div className="pet-focus-actions">
+                      <button
+                        type="button"
+                        className="soft-button"
+                        disabled={focusBusy}
+                        onClick={() =>
+                          void runFocusAction(() =>
+                            window.desktopApi!.pet.finishFocus("abandoned"),
+                          )
+                        }
+                      >
+                        <Square size={15} />
+                        结束
+                      </button>
+                      {petFocus.status === "awaiting-completion" ? (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={focusBusy}
+                          onClick={() =>
+                            void runFocusAction(() =>
+                              window.desktopApi!.pet.advanceFocus(),
+                            )
+                          }
+                        >
+                          <Play size={16} />
+                          {petFocus.phase === "focus" ? "开始休息" : "下一轮"}
+                        </button>
+                      ) : (
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={focusBusy}
+                        onClick={() =>
+                          void runFocusAction(() =>
+                            petFocus.status === "running"
+                              ? window.desktopApi!.pet.pauseFocus()
+                              : window.desktopApi!.pet.resumeFocus(),
+                          )
+                        }
+                      >
+                        {petFocus.status === "running" ? (
+                          <Pause size={16} />
+                        ) : (
+                          <Play size={16} />
+                        )}
+                        {petFocus.status === "running" ? "暂停" : "继续"}
+                      </button>
+                      )}
                     </div>
                   )}
-                </>
+                  {focusError && <p className="pet-focus-error">{focusError}</p>}
+                </div>
+              )}
+              {tab === "home" && (
+                <div className="pet-home-view">
+                  <div className="pet-home-hero">
+                    <PetCharacter mood={petMood} name={petName} />
+                    <div>
+                      <span>Todo Pet</span>
+                      <h3>{petName}的小窝</h3>
+                      <p>
+                        Lv.{petData.snapshot?.profile.level ?? 1} · 亲密度 {petData.snapshot?.profile.intimacy ?? 0}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="pet-home-card pet-weather-mini">
+                    <Sun size={17} />
+                    <div>
+                      <strong>
+                        {petData.weather
+                          ? `${Math.round(petData.weather.temperatureC)}℃ · ${petData.weather.conditionLabel}`
+                          : "天气卡片"}
+                      </strong>
+                      <p>
+                        {petData.weather
+                          ? `${petData.weather.city}${petData.weather.precipitationProbability !== undefined ? ` · 降水 ${petData.weather.precipitationProbability}%` : ""}`
+                          : petSettings.weather.enabled
+                            ? "天气暂时不可用"
+                            : "可在设置中填写城市开启"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="pet-home-card">
+                    <CloudCheck size={17} />
+                    <div>
+                      <strong>任务同步</strong>
+                      <p>{syncLabel}</p>
+                    </div>
+                  </div>
+                  <div className="pet-home-card">
+                    <ShieldCheck size={17} />
+                    <div>
+                      <strong>最近活动</strong>
+                      <p>
+                        {activity[0]
+                          ? privacyMode
+                            ? `${activity[0].toolName ?? "Agent"} · 已记录`
+                            : activity[0].toolName
+                              ? `${activity[0].toolName} · ${activity[0].outcome ?? activity[0].event}`
+                              : activity[0].event
+                          : "暂无 Agent 工具活动"}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="soft-button pet-home-settings"
+                    onClick={() => showMainFromFloatingMenu("pet")}
+                  >
+                    <UserRound size={16} />
+                    进入完整小窝
+                  </button>
+                </div>
               )}
             </div>
-            {tab !== "activity" && !privacyMode && (
+            {(isTaskTab || tab === "chat") && !privacyMode && (
               <div className="mini-composer">
                 {isTaskTab ? (
                   <input

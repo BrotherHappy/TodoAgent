@@ -1,6 +1,6 @@
 export type ThemePreference = 'system' | 'light' | 'dark';
-export type FloatingShape = 'capsule' | 'orb';
 export type FloatingTopMode = 'always' | 'focus-only' | 'never';
+export type PetTab = 'all' | 'today' | 'focus' | 'chat' | 'home';
 /** How the OpenAI-compatible model endpoint authenticates requests. */
 export type AiAuthenticationMode = 'bearer' | 'none';
 export const FLOATING_HOVER_EXPAND_DELAY_MIN_MS = 200;
@@ -29,15 +29,43 @@ export interface NotificationSettings {
 
 export interface FloatingSettings {
   enabled: boolean;
-  shape: FloatingShape;
   hoverExpandDelayMs: number;
   topMode: FloatingTopMode;
   locked: boolean;
   hideInFullscreen: boolean;
   privacyMode: boolean;
+  selectedTab: PetTab;
+  scalePercent: number;
   /** The most recently used display, so multi-monitor positions survive restart. */
   lastDisplayId?: string;
   positions: Record<string, { x: number; y: number }>;
+}
+
+export interface FocusSettings {
+  focusMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  cycles: number;
+  autoStartBreak: boolean;
+  autoStartNextRound: boolean;
+  environmentSound: 'off' | 'rain' | 'forest' | 'cafe' | 'white-noise';
+}
+
+export interface WeatherSettings {
+  enabled: boolean;
+  city: string;
+  latitude?: number;
+  longitude?: number;
+  resolvedName?: string;
+  cacheMinutes: number;
+}
+
+export interface PetBehaviorSettings {
+  interactionsEnabled: boolean;
+  proactiveMessages: boolean;
+  wellbeingReminders: boolean;
+  autoDiary: boolean;
+  relationshipMemory: boolean;
 }
 
 export interface AiProviderSettings {
@@ -97,6 +125,9 @@ export interface AppSettings {
   quickCaptureShortcut: string;
   notifications: NotificationSettings;
   floating: FloatingSettings;
+  focus: FocusSettings;
+  weather: WeatherSettings;
+  pet: PetBehaviorSettings;
   ai: AiProviderSettings;
   feishu: FeishuIntegrationSettings;
   modelDataScope: ModelDataScope;
@@ -124,13 +155,35 @@ export const defaultSettings: AppSettings = {
   },
   floating: {
     enabled: true,
-    shape: 'capsule',
     hoverExpandDelayMs: FLOATING_HOVER_EXPAND_DELAY_DEFAULT_MS,
     topMode: 'always',
     locked: false,
     hideInFullscreen: true,
     privacyMode: false,
+    selectedTab: 'all',
+    scalePercent: 100,
     positions: {},
+  },
+  focus: {
+    focusMinutes: 25,
+    shortBreakMinutes: 5,
+    longBreakMinutes: 15,
+    cycles: 4,
+    autoStartBreak: false,
+    autoStartNextRound: false,
+    environmentSound: 'off',
+  },
+  weather: {
+    enabled: false,
+    city: '',
+    cacheMinutes: 45,
+  },
+  pet: {
+    interactionsEnabled: true,
+    proactiveMessages: true,
+    wellbeingReminders: true,
+    autoDiary: true,
+    relationshipMemory: false,
   },
   ai: {
     enabled: false,
