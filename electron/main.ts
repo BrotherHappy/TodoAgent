@@ -22,6 +22,7 @@ import type {
   PetDesktopApi,
 } from "../src/shared/desktop-api";
 import { defaultSettings, type AppSettings } from "../src/shared/settings";
+import type { WeatherSnapshot } from "../src/shared/pet-types";
 import { registerDesktopIpc } from "./ipc-router";
 import { LocalStore } from "./services/local-store";
 import { SettingsService } from "./services/settings-service";
@@ -76,6 +77,62 @@ let weatherService: WeatherService | undefined;
 let petTickTimer: ReturnType<typeof setInterval> | undefined;
 let weatherRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let pendingMainRoute: string | undefined;
+let lastSevereWeatherNotificationKey: string | undefined;
+
+function minuteOfDay(value: string): number | undefined {
+  const match = /^(\d{2}):(\d{2})$/u.exec(value);
+  if (!match) return undefined;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return undefined;
+  return hour * 60 + minute;
+}
+
+function systemNotificationAllowed(
+  settings: AppSettings,
+  now = new Date(),
+): boolean {
+  if (!settings.notifications.enabled || !settings.notifications.banners) {
+    return false;
+  }
+  if (
+    settings.notifications.mutedUntil &&
+    new Date(settings.notifications.mutedUntil).getTime() > now.getTime()
+  ) {
+    return false;
+  }
+  if (!settings.notifications.quietHoursEnabled) return true;
+  const start = minuteOfDay(settings.notifications.quietHoursStart);
+  const end = minuteOfDay(settings.notifications.quietHoursEnd);
+  if (start === undefined || end === undefined || start === end) return true;
+  const current = now.getHours() * 60 + now.getMinutes();
+  const quiet =
+    start < end
+      ? current >= start && current < end
+      : current >= start || current < end;
+  return !quiet;
+}
+
+function notifySevereWeather(weather?: WeatherSnapshot): void {
+  if (
+    !weather?.severe ||
+    !settingsService ||
+    !settingsService.get().pet.proactiveMessages ||
+    !systemNotificationAllowed(settingsService.get()) ||
+    !Notification.isSupported() ||
+    process.env.TODO_AGENT_E2E === "1"
+  ) {
+    return;
+  }
+  const key = `${localDateKey()}:${weather.city}:${weather.conditionCode}`;
+  if (key === lastSevereWeatherNotificationKey) return;
+  lastSevereWeatherNotificationKey = key;
+  new Notification({
+    title: `${settingsService.get().persona.name}的天气提醒`,
+    body: `${weather.city}当前为${weather.conditionLabel}，外出前请留意官方预警。`,
+    silent: !settingsService.get().notifications.sound,
+  }).show();
+}
 
 /**
  * Dock/Finder activation and a second launch can arrive while the main
@@ -259,6 +316,12 @@ async function startApplication(): Promise<void> {
     initialName: settingsService.get().persona.name,
     onEvent: (event) => {
       windows?.broadcast(DESKTOP_CHANNELS.eventPet, event);
+      if (event.type === "state-changed") {
+        const focus = petService?.snapshot().focus;
+        windows?.setFocusActive(
+          focus?.phase === "focus" && focus.status === "running",
+        );
+      }
       if (
         event.type === "focus-phase-completed" &&
         event.focus?.phase === "focus" &&
@@ -279,7 +342,8 @@ async function startApplication(): Promise<void> {
       }
       if (
         event.type === "focus-phase-completed" &&
-        settingsService?.get().notifications.enabled &&
+        settingsService &&
+        systemNotificationAllowed(settingsService.get()) &&
         Notification.isSupported() &&
         process.env.TODO_AGENT_E2E !== "1"
       ) {
@@ -923,6 +987,7 @@ async function startApplication(): Promise<void> {
           at: new Date().toISOString(),
           weather,
         });
+        notifySevereWeather(weather);
       }
       return weather;
     },
@@ -1095,13 +1160,31 @@ async function startApplication(): Promise<void> {
         at: new Date().toISOString(),
         weather,
       });
+      notifySevereWeather(weather);
     }).catch(() => undefined);
   }, 30 * 60_000);
   void tasks
     .listTasks({ statuses: ["completed"], includeDeleted: false })
-    .then((items) => petService?.reconcileCompletedTasks(items))
+    .then(async (items) => {
+      await petService?.reconcileCompletedTasks(items);
+      if (!settingsService?.get().pet.autoDiary) return;
+      const localDate = localDateKey();
+      const weather = weatherService?.get();
+      await petService?.generateDiary({
+        localDate,
+        completedTasks: items.filter(
+          (task) => task.completedAt?.slice(0, 10) === localDate,
+        ),
+        weatherSummary: weather
+          ? `${weather.city} ${weather.conditionLabel} ${Math.round(weather.temperatureC)}℃`
+          : undefined,
+      });
+    })
     .catch(() => undefined);
-  void weatherService?.refresh(false).catch(() => undefined);
+  void weatherService
+    ?.refresh(false)
+    .then(notifySevereWeather)
+    .catch(() => undefined);
   const revokeFullAccessForSystemState = (): void => {
     agentService?.revokeFullAccess();
   };
@@ -1110,7 +1193,10 @@ async function startApplication(): Promise<void> {
   powerMonitor.on("resume", () => {
     windows?.ensureFloatingVisible();
     void petService?.tick().catch(() => undefined);
-    void weatherService?.refresh(false).catch(() => undefined);
+    void weatherService
+      ?.refresh(false)
+      .then(notifySevereWeather)
+      .catch(() => undefined);
     if (
       settingsService?.get().feishu.autoSync &&
       feishuController?.status().connected

@@ -1900,7 +1900,22 @@ select {
 .pet-memory-list > div.is-paused { opacity: 0.62; }
 .pet-memory-list p { margin: 0; }
 .pet-memory-list small { grid-column: 2; color: var(--app-text-soft); }
-.pet-memory-list .icon-button { grid-column: 3; grid-row: 1 / span 2; }
+.pet-memory-edit {
+  min-width: 0;
+  border: 1px solid var(--app-brand);
+  border-radius: 10px;
+  padding: 8px 9px;
+  background: var(--app-surface-raised);
+  color: var(--app-text);
+}
+.pet-memory-actions {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pet-memory-actions button { min-height: 34px; padding: 6px 9px; }
 .pet-page-empty {
   min-height: 100px;
   display: grid;

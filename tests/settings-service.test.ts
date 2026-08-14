@@ -110,6 +110,52 @@ describe('SettingsService', () => {
     expect(reloaded.get().floating.hoverExpandDelayMs).toBe(5_000);
   });
 
+  it('migrates missing Todo Pet domains and normalizes malformed focus and weather values', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-pet-settings-'));
+    const service = new SettingsService(root, encryption);
+    await service.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const raw = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>;
+    delete raw.focus;
+    delete raw.weather;
+    delete raw.pet;
+    await writeFile(settingsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().focus).toMatchObject({ focusMinutes: 25, cycles: 4 });
+    expect(migrated.get().weather).toMatchObject({ enabled: false, cacheMinutes: 45 });
+    expect(migrated.get().pet).toMatchObject({
+      interactionsEnabled: true,
+      proactiveMessages: true,
+    });
+
+    const current = migrated.get();
+    await migrated.replace({
+      ...current,
+      focus: {
+        ...current.focus,
+        focusMinutes: Number.NaN,
+        shortBreakMinutes: 9_999,
+        cycles: -4,
+        environmentSound: 'invalid' as typeof current.focus.environmentSound,
+      },
+      weather: {
+        ...current.weather,
+        cacheMinutes: Number.NaN,
+        latitude: Number.POSITIVE_INFINITY,
+      },
+    });
+    expect(migrated.get().focus).toMatchObject({
+      focusMinutes: 25,
+      shortBreakMinutes: 60,
+      cycles: 1,
+      environmentSound: 'off',
+    });
+    expect(migrated.get().weather.cacheMinutes).toBe(45);
+    expect(migrated.get().weather.latitude).toBeUndefined();
+  });
+
   it('stores credentials encrypted and never exposes ciphertext metadata', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-secrets-'));
     const service = new SettingsService(root, encryption);

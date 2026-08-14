@@ -3938,6 +3938,7 @@ function PetHomePage({
   const [busy, setBusy] = useState(false);
   const [memoryText, setMemoryText] = useState("");
   const [editingDiary, setEditingDiary] = useState<PetDiaryEntry>();
+  const [editingMemory, setEditingMemory] = useState<PetMemoryEntry>();
 
   const run = async (operation: () => Promise<void>, success: string) => {
     setBusy(true);
@@ -4224,18 +4225,64 @@ function PetHomePage({
                   }
                   label={`${memory.enabled ? "暂停" : "启用"}记忆`}
                 />
-                <p>{memory.content}</p>
+                {editingMemory?.id === memory.id ? (
+                  <input
+                    className="pet-memory-edit"
+                    value={editingMemory.content}
+                    aria-label="编辑记忆"
+                    onChange={(event) =>
+                      setEditingMemory((current) =>
+                        current
+                          ? { ...current, content: event.target.value }
+                          : current,
+                      )
+                    }
+                  />
+                ) : (
+                  <p>{memory.content}</p>
+                )}
                 <small>{memory.kind === "preference" ? "偏好" : memory.kind === "relationship" ? "关系记忆" : "共同经历"} · 用户批准</small>
-                <button
-                  type="button"
-                  className="icon-button"
-                  aria-label="删除记忆"
-                  onClick={() =>
-                    void run(async () => {
-                      await window.desktopApi?.pet.deleteMemory(memory.id);
-                    }, "记忆已删除")
-                  }
-                ><Trash2 size={15} /></button>
+                <div className="pet-memory-actions">
+                  {editingMemory?.id === memory.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => setEditingMemory(undefined)}
+                      >取消</button>
+                      <button
+                        type="button"
+                        className="soft-button"
+                        disabled={busy || !editingMemory.content.trim()}
+                        onClick={() =>
+                          void run(async () => {
+                            await window.desktopApi?.pet.updateMemory(memory.id, {
+                              content: editingMemory.content,
+                            });
+                            setEditingMemory(undefined);
+                          }, "记忆已更新")
+                        }
+                      >保存</button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={() => setEditingMemory(memory)}
+                    >编辑</button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="删除记忆"
+                    onClick={() =>
+                      void run(async () => {
+                        await window.desktopApi?.pet.deleteMemory(memory.id);
+                        if (editingMemory?.id === memory.id) setEditingMemory(undefined);
+                      }, "记忆已删除")
+                    }
+                  ><Trash2 size={15} /></button>
+                </div>
               </div>
             ))}
             {!snapshot.memories.length && <div className="pet-page-empty">这里是空的。Todo Pet 不会擅自把任务或对话升级为长期记忆。</div>}
@@ -4943,6 +4990,22 @@ function SettingsPage({
                   })
                 }
                 label="关系记忆"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>共同日记</strong>
+                <p>每天首次启动时用本地任务与专注事实生成，可随时编辑或删除</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.autoDiary}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, autoDiary: value },
+                  })
+                }
+                label="自动生成共同日记"
               />
             </div>
             <div className="settings-subheading">

@@ -26,6 +26,18 @@ interface StoredSecrets {
 
 const clone = <T>(value: T): T => structuredClone(value);
 const petTabs = new Set(['all', 'today', 'focus', 'chat', 'home']);
+const environmentSounds = new Set(['off', 'rain', 'forest', 'cafe', 'white-noise']);
+
+function clampInteger(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, Math.round(value)))
+    : fallback;
+}
 
 async function atomicJsonWrite(filePath: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -90,11 +102,41 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   merged.floating.scalePercent = Number.isFinite(merged.floating.scalePercent)
     ? Math.min(125, Math.max(75, Math.round(merged.floating.scalePercent)))
     : defaultSettings.floating.scalePercent;
-  merged.focus.focusMinutes = Math.min(240, Math.max(1, Math.round(merged.focus.focusMinutes)));
-  merged.focus.shortBreakMinutes = Math.min(60, Math.max(1, Math.round(merged.focus.shortBreakMinutes)));
-  merged.focus.longBreakMinutes = Math.min(120, Math.max(1, Math.round(merged.focus.longBreakMinutes)));
-  merged.focus.cycles = Math.min(12, Math.max(1, Math.round(merged.focus.cycles)));
-  merged.weather.cacheMinutes = Math.min(120, Math.max(30, Math.round(merged.weather.cacheMinutes)));
+  merged.focus.focusMinutes = clampInteger(
+    merged.focus.focusMinutes,
+    defaultSettings.focus.focusMinutes,
+    1,
+    240,
+  );
+  merged.focus.shortBreakMinutes = clampInteger(
+    merged.focus.shortBreakMinutes,
+    defaultSettings.focus.shortBreakMinutes,
+    1,
+    60,
+  );
+  merged.focus.longBreakMinutes = clampInteger(
+    merged.focus.longBreakMinutes,
+    defaultSettings.focus.longBreakMinutes,
+    1,
+    120,
+  );
+  merged.focus.cycles = clampInteger(
+    merged.focus.cycles,
+    defaultSettings.focus.cycles,
+    1,
+    12,
+  );
+  if (!environmentSounds.has(merged.focus.environmentSound)) {
+    merged.focus.environmentSound = defaultSettings.focus.environmentSound;
+  }
+  merged.weather.cacheMinutes = clampInteger(
+    merged.weather.cacheMinutes,
+    defaultSettings.weather.cacheMinutes,
+    30,
+    120,
+  );
+  if (!Number.isFinite(merged.weather.latitude)) delete merged.weather.latitude;
+  if (!Number.isFinite(merged.weather.longitude)) delete merged.weather.longitude;
 
   // Keep the ordinary settings document on an explicit allow-list. Types and
   // the renderer IPC schema are useful boundaries, but callers in the main
@@ -223,6 +265,9 @@ export class SettingsService {
         raw.ai?.authMode !== this.#settings.ai.authMode ||
         raw.floating?.selectedTab !== this.#settings.floating.selectedTab ||
         raw.floating?.scalePercent !== this.#settings.floating.scalePercent ||
+        raw.focus === undefined ||
+        raw.weather === undefined ||
+        raw.pet === undefined ||
         Object.prototype.hasOwnProperty.call(raw.floating ?? {}, 'shape')
       ) {
         await this.saveSettings();
