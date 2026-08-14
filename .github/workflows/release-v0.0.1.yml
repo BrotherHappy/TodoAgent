@@ -22,7 +22,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run package:mac:current
+      - run: npm run package:mac:current -- --publish never
       - name: Normalize release asset names
         run: |
           mkdir -p release-upload
@@ -44,7 +44,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run package:win
+      - run: npm run package:win -- --publish never
       - name: Normalize release asset names
         shell: pwsh
         run: |
