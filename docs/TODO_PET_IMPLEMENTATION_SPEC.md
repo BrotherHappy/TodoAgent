@@ -7,12 +7,12 @@
 
 ## 1. 实现目标
 
-本文档把 Todo Pet 产品设计转换为可实现、可测试的工程合同。实现者必须遵守以下优先级：
+本文档把统一 PRD 和 Todo Pet 产品设计转换为可实现、可测试的工程合同。实现者必须遵守以下优先级：
 
 1. 用户明确要求与最新确认。
-2. 本实现规范。
+2. Todo Agent 统一 [PRD.md](./PRD.md)。
 3. Todo Pet 产品设计文档。
-4. Todo Agent 现有 PRD、交互和代码约定。
+4. 本实现规范。
 5. 实现者自行补充的合理默认值。
 
 如果代码现状与本文不一致，应先记录差异；除非存在数据安全风险，不应擅自删除现有能力。
@@ -104,10 +104,7 @@ flowchart TB
 新增设置：
 
 ```ts
-type FloatingAppearance = "orb" | "capsule" | "pet";
-
 interface PetFeatureFlags {
-  petModeEnabled: boolean;
   petAgentEnabled: boolean;
   petProgressionEnabled: boolean;
   petDiaryEnabled: boolean;
@@ -118,18 +115,18 @@ interface PetFeatureFlags {
 
 要求：
 
-- 默认升级用户继续使用原有悬浮外观，不强制切换宠物。
-- 新用户可在引导中选择宠物模式。
-- 关闭宠物模式后保留宠物档案，不删除进度。
+- Todo Pet 是唯一桌面悬浮形态，发布版不提供旧悬浮球或胶囊入口。
+- 新用户在首次引导中完成领养或直接使用默认宠物。
+- 用户隐藏或关闭桌面宠物后保留宠物档案，不删除进度。
 - 提供单独的“删除宠物档案与记忆”操作并二次确认。
 
 ### 5.2 数据迁移
 
-- 原悬浮窗位置可作为宠物首次位置。
-- 原悬浮窗上次选中入口映射到新导航。
+- 旧悬浮球或胶囊位置作为宠物首次位置。
+- 旧悬浮窗口上次选中入口映射到新导航。
 - 原 hover 延迟、透明度、置顶和隐私设置继续生效。
 - 迁移必须幂等；应用重复启动不能重复创建宠物或奖励。
-- 迁移失败时继续使用旧悬浮模式并记录错误。
+- 迁移失败时不得覆盖旧数据；使用默认静态宠物和安全位置，并提供恢复或导出入口。
 
 ## 6. 窗口状态机
 
@@ -412,7 +409,6 @@ interface PetProgression {
 ```ts
 interface PetSettings {
   enabled: boolean;
-  appearanceMode: "orb" | "capsule" | "pet";
   alwaysOnTop: boolean;
   lockedPosition: boolean;
   hoverExpandDelayMs: number;
@@ -1102,7 +1098,7 @@ function canPresentNudge(nudge: PetNudge, context: PetContextSnapshot): boolean 
 ### 场景 A：首次与后续焦点
 
 ```gherkin
-Given 用户第一次启用宠物模式
+Given 用户第一次使用 Todo Pet 或完成旧悬浮形态迁移
 When 用户单击宠物展开小窗
 Then 默认选中“全部”
 
@@ -1197,7 +1193,7 @@ And 不泄露任务正文
 - 找到现有悬浮窗口、任务控制器、Agent、设置和飞书同步入口。
 - 运行现有类型检查、单元测试和 E2E。
 - 记录现有窗口行为和性能基线。
-- 增加 `petModeEnabled` 功能开关，默认关闭。
+- 增加旧悬浮数据到 Todo Pet 的幂等迁移，并移除旧形态的用户入口。
 
 ### 阶段 1：宠物壳与兼容
 
@@ -1259,7 +1255,7 @@ And 不泄露任务正文
 - 产品行为符合产品文档和本规范。
 - 模型不可用时基础功能可用。
 - Windows 和 macOS 打包版真实验证。
-- 没有破坏原悬浮球/胶囊模式。
+- 发布路径中不再存在可切换的旧悬浮球或胶囊形态。
 - 没有复制并分叉任务业务规则。
 - 所有写操作具有正确权限和确认。
 - 飞书操作具有可见同步状态。

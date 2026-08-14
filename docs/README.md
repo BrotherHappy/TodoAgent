@@ -1,6 +1,6 @@
 # 产品设计文档
 
-- [产品需求文档（PRD v1.1）](./PRD.md)
+- [统一产品需求文档（PRD v2.0，Todo Pet 原生桌面形态）](./PRD.md)
 - [页面信息架构、核心流程与低保真线框图](./UX_INFORMATION_ARCHITECTURE.md)
 - [视觉设计规范（参考 FloGravity Mac 的轻盈桌面语言）](./UI_VISUAL_DIRECTION.md)
 - [技术架构与测试门禁](./TECHNICAL_ARCHITECTURE.md)
