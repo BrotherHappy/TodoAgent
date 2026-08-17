@@ -66,6 +66,11 @@ export interface PetBehaviorSettings {
   wellbeingReminders: boolean;
   autoDiary: boolean;
   relationshipMemory: boolean;
+  actionPack: 'balanced' | 'calm' | 'playful' | 'focused';
+  animationIntensity: 'gentle' | 'lively';
+  proactiveIntervalMinutes: number;
+  meetingMode: boolean;
+  seasonalEvents: boolean;
 }
 
 export interface AiProviderSettings {
@@ -184,6 +189,11 @@ export const defaultSettings: AppSettings = {
     wellbeingReminders: true,
     autoDiary: true,
     relationshipMemory: false,
+    actionPack: 'balanced',
+    animationIntensity: 'lively',
+    proactiveIntervalMinutes: 45,
+    meetingMode: false,
+    seasonalEvents: true,
   },
   ai: {
     enabled: false,

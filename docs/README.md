@@ -10,6 +10,7 @@
 ## Todo Pet
 
 - [Todo Pet 产品与体验设计文档](./TODO_PET_PRODUCT_DESIGN.md)
+- [Todo Pet 动作与互动设计规范](./TODO_PET_ACTION_INTERACTION_SPEC.md)
 - [Todo Pet 实现规范与验收标准](./TODO_PET_IMPLEMENTATION_SPEC.md)
 - [Todo Pet AI 实现交接说明](./TODO_PET_AI_HANDOFF.md)
 

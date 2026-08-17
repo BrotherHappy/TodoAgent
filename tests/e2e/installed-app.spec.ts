@@ -48,7 +48,11 @@ test("installed macOS bundle starts securely and persists a local task", async (
     app = await electron.launch({
       executablePath,
       args: [`--user-data-dir=${profilePath}`],
-      env: { ...process.env, TODO_AGENT_E2E: "1" },
+      env: {
+        ...process.env,
+        TODO_AGENT_E2E: "1",
+        TODO_AGENT_E2E_BACKGROUND: "1",
+      },
     });
     let main = await mainWindow(app);
     await main.waitForLoadState("domcontentloaded");
@@ -82,7 +86,11 @@ test("installed macOS bundle starts securely and persists a local task", async (
     app = await electron.launch({
       executablePath,
       args: [`--user-data-dir=${profilePath}`],
-      env: { ...process.env, TODO_AGENT_E2E: "1" },
+      env: {
+        ...process.env,
+        TODO_AGENT_E2E: "1",
+        TODO_AGENT_E2E_BACKGROUND: "1",
+      },
     });
     main = await mainWindow(app);
     await main.waitForLoadState("domcontentloaded");

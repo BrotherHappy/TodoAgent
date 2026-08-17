@@ -30,10 +30,14 @@ import type {
 } from "./agent-types";
 import type { AppSettings, PublicCredentialState } from "./settings";
 import type {
+  PetAdventure,
+  PetCustomizationPatch,
   PetDiaryEntry,
   PetEvent,
   PetMemoryEntry,
   PetSnapshot,
+  PetMiniGameRecord,
+  ProactiveMessageRecord,
   StartFocusRequest,
   WeatherSnapshot,
 } from "./pet-types";
@@ -106,6 +110,10 @@ export interface ShellDesktopApi {
   hideCurrentWindow(): Promise<void>;
   setFloatingVisible(visible: boolean): Promise<AppSettings>;
   setFloatingExpanded(expanded: boolean): Promise<void>;
+  setFloatingPetOnly(petOnly: boolean): Promise<void>;
+  beginFloatingDrag(screenX: number, screenY: number): Promise<boolean>;
+  updateFloatingDrag(screenX: number, screenY: number): Promise<boolean>;
+  endFloatingDrag(): Promise<void>;
   setLaunchAtLogin(enabled: boolean): Promise<AppSettings>;
   openExternal(url: string): Promise<void>;
 }
@@ -424,7 +432,21 @@ export interface NotificationDesktopApi {
 export interface PetDesktopApi {
   snapshot(): Promise<PetSnapshot>;
   rename(name: string): Promise<PetSnapshot>;
+  customize(patch: PetCustomizationPatch): Promise<PetSnapshot>;
   interact(kind?: string): Promise<PetSnapshot>;
+  dailyAdventure(localDate?: string): Promise<PetAdventure>;
+  completeAdventure(
+    adventureId: string,
+    choiceId: string,
+  ): Promise<PetSnapshot>;
+  recordMiniGame(input: {
+    game: PetMiniGameRecord["game"];
+    score: number;
+    durationSeconds: number;
+  }): Promise<PetSnapshot>;
+  recordProactiveMessage(
+    input: Pick<ProactiveMessageRecord, "kind" | "reason" | "dismissed">,
+  ): Promise<PetSnapshot>;
   startFocus(request: StartFocusRequest): Promise<PetSnapshot>;
   pauseFocus(reason?: string): Promise<PetSnapshot>;
   resumeFocus(): Promise<PetSnapshot>;
@@ -598,6 +620,10 @@ export const DESKTOP_CHANNELS = {
   shellHideCurrent: "shell:hide-current",
   shellSetFloatingVisible: "shell:set-floating-visible",
   shellSetFloatingExpanded: "shell:set-floating-expanded",
+  shellSetFloatingPetOnly: "shell:set-floating-pet-only",
+  shellBeginFloatingDrag: "shell:begin-floating-drag",
+  shellUpdateFloatingDrag: "shell:update-floating-drag",
+  shellEndFloatingDrag: "shell:end-floating-drag",
   shellSetLaunchAtLogin: "shell:set-launch-at-login",
   shellOpenExternal: "shell:open-external",
   captureParse: "capture:parse",
@@ -625,7 +651,12 @@ export const DESKTOP_CHANNELS = {
   notificationRefresh: "notifications:refresh",
   petSnapshot: "pet:snapshot",
   petRename: "pet:rename",
+  petCustomize: "pet:customize",
   petInteract: "pet:interact",
+  petAdventureDaily: "pet:adventure-daily",
+  petAdventureComplete: "pet:adventure-complete",
+  petMiniGameRecord: "pet:mini-game-record",
+  petProactiveRecord: "pet:proactive-record",
   petFocusStart: "pet:focus-start",
   petFocusPause: "pet:focus-pause",
   petFocusResume: "pet:focus-resume",

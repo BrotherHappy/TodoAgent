@@ -17,16 +17,28 @@ interface WindowManagerOptions {
 }
 
 const SAFE_EXTERNAL_PROTOCOLS = new Set(["https:", "mailto:"]);
+const e2eBackgroundWindows =
+  process.env.TODO_AGENT_E2E_BACKGROUND === "1";
 
-const floatingWindowSize = (
+export const floatingWindowSize = (
   expanded: boolean,
   scalePercent = 100,
+  petOnly = false,
 ): { width: number; height: number } => {
-  if (expanded) return { width: 480, height: 600 };
+  if (petOnly) {
+    const scale = Math.max(0.75, Math.min(1.25, scalePercent / 100));
+    return {
+      width: Math.max(112, Math.round(148 * scale)),
+      height: Math.max(112, Math.round(148 * scale)),
+    };
+  }
+  if (expanded) return { width: 480, height: 640 };
   const scale = Math.max(0.75, Math.min(1.25, scalePercent / 100));
   return {
-    width: Math.round(410 * scale),
-    height: Math.round(116 * scale),
+    width: Math.round(438 * scale),
+    // Keep enough vertical room for the independent task and focus speech
+    // bubbles at the smallest pet scale. Empty pixels remain transparent.
+    height: Math.max(184, Math.round(184 * scale)),
   };
 };
 
@@ -87,7 +99,19 @@ export class WindowManager {
   #quick?: BrowserWindow;
   #floating?: BrowserWindow;
   #floatingExpanded = false;
+  #floatingPetOnly = false;
   #floatingPositionSaveTimer?: ReturnType<typeof setTimeout>;
+  #floatingPointerDrag?: {
+    screenX: number;
+    screenY: number;
+    bounds: Rectangle;
+    lastScreenX: number;
+    lastScreenY: number;
+    startedAt: number;
+    lastMovementAt: number;
+    hasMoved: boolean;
+  };
+  #floatingPointerDragTimer?: ReturnType<typeof setInterval>;
 
   constructor(options: WindowManagerOptions) {
     this.#options = options;
@@ -112,6 +136,7 @@ export class WindowManager {
       minWidth: 760,
       minHeight: 600,
       show: false,
+      opacity: e2eBackgroundWindows ? 0 : 1,
       title: "Todo Agent",
       backgroundColor: "#00000000",
       vibrancy: isMac ? "under-window" : undefined,
@@ -125,7 +150,10 @@ export class WindowManager {
     });
     this.#secureWebContents(this.#main);
     this.#load(this.#main, "main");
-    this.#main.once("ready-to-show", () => this.#main?.show());
+    this.#main.once("ready-to-show", () => {
+      if (e2eBackgroundWindows) this.#main?.showInactive();
+      else this.#main?.show();
+    });
     this.#main.on("close", (event) => {
       if (!this.#options.onMainCloseRequested()) {
         event.preventDefault();
@@ -150,8 +178,11 @@ export class WindowManager {
     const window = this.createMain();
     if (route) this.#sendWhenReady(window, "navigation:route", route);
     if (window.isMinimized()) window.restore();
-    window.show();
-    window.focus();
+    if (e2eBackgroundWindows) window.showInactive();
+    else {
+      window.show();
+      window.focus();
+    }
   }
 
   createQuick(): BrowserWindow {
@@ -162,6 +193,7 @@ export class WindowManager {
       minWidth: 360,
       minHeight: 220,
       show: false,
+      opacity: e2eBackgroundWindows ? 0 : 1,
       frame: false,
       transparent: true,
       resizable: true,
@@ -198,8 +230,11 @@ export class WindowManager {
         cursorDisplay.workArea.y + cursorDisplay.workArea.height * 0.18,
       ),
     });
-    window.show();
-    window.focus();
+    if (e2eBackgroundWindows) window.showInactive();
+    else {
+      window.show();
+      window.focus();
+    }
     this.#sendWhenReady(window, "quick-capture:focus");
   }
 
@@ -213,6 +248,7 @@ export class WindowManager {
     const size = floatingWindowSize(
       this.#floatingExpanded,
       settings.scalePercent,
+      this.#floatingPetOnly,
     );
     const display =
       (settings.lastDisplayId
@@ -234,6 +270,7 @@ export class WindowManager {
     this.#floating = new BrowserWindow({
       ...initial,
       show: false,
+      opacity: e2eBackgroundWindows ? 0 : 1,
       frame: false,
       transparent: true,
       backgroundColor: "#00000000",
@@ -279,6 +316,11 @@ export class WindowManager {
         clearTimeout(this.#floatingPositionSaveTimer);
         this.#floatingPositionSaveTimer = undefined;
       }
+      if (this.#floatingPointerDragTimer) {
+        clearInterval(this.#floatingPointerDragTimer);
+        this.#floatingPointerDragTimer = undefined;
+      }
+      this.#floatingPointerDrag = undefined;
       this.#floating = undefined;
     });
     if (settings.enabled)
@@ -307,15 +349,20 @@ export class WindowManager {
 
   setFloatingExpanded(expanded: boolean): void {
     this.#floatingExpanded = expanded;
+    if (expanded) this.#floatingPetOnly = false;
     const window = this.createFloating();
     const settings = this.#options.settings().floating;
     const current = window.getBounds();
     // A compact desktop pet must not keep keyboard focus away from the main
     // application. The expanded panel becomes focusable again for chat,
     // approvals and task input.
-    window.setFocusable(expanded);
+    window.setFocusable(expanded && !this.#floatingPetOnly);
     const display = screen.getDisplayMatching(current);
-    const size = floatingWindowSize(expanded, settings.scalePercent);
+    const size = floatingWindowSize(
+      expanded,
+      settings.scalePercent,
+      this.#floatingPetOnly,
+    );
     const anchoredRight =
       current.x + current.width >
       display.workArea.x + display.workArea.width / 2;
@@ -329,6 +376,123 @@ export class WindowManager {
     );
     window.setBounds(next, true);
     this.#keepFloatingOnTop(window);
+  }
+
+  setFloatingPetOnly(petOnly: boolean): void {
+    this.#floatingPetOnly = petOnly;
+    if (petOnly) this.#floatingExpanded = false;
+    const window = this.createFloating();
+    const settings = this.#options.settings().floating;
+    const current = window.getBounds();
+    window.setFocusable(false);
+    const display = screen.getDisplayMatching(current);
+    const size = floatingWindowSize(
+      this.#floatingExpanded,
+      settings.scalePercent,
+      petOnly,
+    );
+    // The task rail grows to the pet's right, so preserve the pet's own
+    // screen position while the rail is hidden or restored. Clamp only when
+    // the restored rail would otherwise leave the active display.
+    const next = clampWindowToWorkArea(
+      { ...size, x: current.x, y: current.y },
+      display.workArea,
+    );
+    window.setBounds(next, true);
+    this.#keepFloatingOnTop(window);
+  }
+
+  /**
+   * Renderer-driven dragging powers the visible six-dot handle. Native
+   * `app-region: drag` cannot reliably be interactive at the same time, so a
+   * handle that listened for pointer feedback could appear draggable without
+   * moving the BrowserWindow on macOS.
+   */
+  beginFloatingDrag(screenX: number, screenY: number): boolean {
+    if (this.#options.settings().floating.locked) return false;
+    const window = this.createFloating();
+    this.endFloatingDrag();
+    const pointer =
+      process.env.TODO_AGENT_E2E === "1"
+        ? { x: screenX, y: screenY }
+        : screen.getCursorScreenPoint();
+    const now = Date.now();
+    this.#floatingPointerDrag = {
+      screenX: pointer.x,
+      screenY: pointer.y,
+      bounds: window.getBounds(),
+      lastScreenX: pointer.x,
+      lastScreenY: pointer.y,
+      startedAt: now,
+      lastMovementAt: now,
+      hasMoved: false,
+    };
+    // Real transparent macOS windows can lose renderer pointer capture as
+    // soon as the BrowserWindow begins moving. Poll the OS cursor in
+    // production so dragging keeps working even after that handoff. E2E uses
+    // explicit renderer coordinates to remain deterministic.
+    if (process.env.TODO_AGENT_E2E !== "1") {
+      this.#floatingPointerDragTimer = setInterval(() => {
+        const drag = this.#floatingPointerDrag;
+        if (!drag) return;
+        const cursor = screen.getCursorScreenPoint();
+        if (
+          cursor.x !== drag.lastScreenX ||
+          cursor.y !== drag.lastScreenY
+        ) {
+          this.updateFloatingDrag(cursor.x, cursor.y);
+          return;
+        }
+        const idleFor = Date.now() - drag.lastMovementAt;
+        const totalFor = Date.now() - drag.startedAt;
+        if ((drag.hasMoved && idleFor > 1_200) || totalFor > 8_000) {
+          this.endFloatingDrag();
+        }
+      }, 16);
+    }
+    return true;
+  }
+
+  updateFloatingDrag(screenX: number, screenY: number): boolean {
+    const drag = this.#floatingPointerDrag;
+    const window = this.#floating;
+    if (
+      !drag ||
+      !window ||
+      window.isDestroyed() ||
+      this.#options.settings().floating.locked
+    ) {
+      this.#floatingPointerDrag = undefined;
+      return false;
+    }
+    const candidate = {
+      ...drag.bounds,
+      x: Math.round(drag.bounds.x + screenX - drag.screenX),
+      y: Math.round(drag.bounds.y + screenY - drag.screenY),
+    };
+    const display = screen.getDisplayNearestPoint({
+      x: Math.round(screenX),
+      y: Math.round(screenY),
+    });
+    const next = clampWindowToWorkArea(candidate, display.workArea);
+    if (screenX !== drag.lastScreenX || screenY !== drag.lastScreenY) {
+      drag.lastScreenX = screenX;
+      drag.lastScreenY = screenY;
+      drag.lastMovementAt = Date.now();
+      drag.hasMoved = true;
+    }
+    window.setPosition(next.x, next.y, false);
+    return true;
+  }
+
+  endFloatingDrag(): void {
+    if (this.#floatingPointerDragTimer) {
+      clearInterval(this.#floatingPointerDragTimer);
+      this.#floatingPointerDragTimer = undefined;
+    }
+    if (!this.#floatingPointerDrag) return;
+    this.#floatingPointerDrag = undefined;
+    this.#scheduleFloatingPositionSave();
   }
 
   setFocusActive(_active: boolean): void {

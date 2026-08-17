@@ -481,20 +481,23 @@ async function startApplication(): Promise<void> {
   const initialFeishuConfiguration = feishuConfigurationFromSettings(
     settingsService.get(),
   );
-  if (initialFeishuConfiguration) {
-    try {
-      await feishuController.configure(initialFeishuConfiguration);
-      // Configuration can restore an already-connected token without a fresh
-      // status edge. Reconcile explicitly so startup and OAuth completion use
-      // the same automatic first-sync path.
-      feishuAutoSync.reconcile();
-    } catch (error) {
-      console.error(
-        "Failed to restore Feishu integration",
-        error instanceof Error ? error.message : error,
-      );
-    }
-  }
+  const restoreInitialFeishuConfiguration = (): void => {
+    if (!initialFeishuConfiguration) return;
+    void feishuController!
+      .configure(initialFeishuConfiguration)
+      .then(() => {
+        // Configuration can restore an already-connected token without a
+        // fresh status edge. Reconcile explicitly so startup and OAuth
+        // completion use the same automatic first-sync path.
+        feishuAutoSync?.reconcile();
+      })
+      .catch((error: unknown) => {
+        console.error(
+          "Failed to restore Feishu integration",
+          error instanceof Error ? error.message : error,
+        );
+      });
+  };
 
   const enqueuePendingFeishuChanges = async (): Promise<number> => {
     const controller = feishuController;
@@ -931,7 +934,14 @@ async function startApplication(): Promise<void> {
       broadcastSettings(settings);
       return snapshot;
     },
+    customize: (patch) => petService!.customize(patch),
     interact: (kind) => petService!.recordInteraction(kind),
+    dailyAdventure: (localDate) => petService!.dailyAdventure(localDate),
+    completeAdventure: (adventureId, choiceId) =>
+      petService!.completeAdventure(adventureId, choiceId),
+    recordMiniGame: (input) => petService!.recordMiniGame(input),
+    recordProactiveMessage: (input) =>
+      petService!.recordProactiveMessage(input),
     startFocus: async (request) => {
       const task = request.taskId
         ? await tasks.getTask(request.taskId, false)
@@ -1061,6 +1071,12 @@ async function startApplication(): Promise<void> {
       return next;
     },
     setFloatingExpanded: (expanded) => windows?.setFloatingExpanded(expanded),
+    setFloatingPetOnly: (petOnly) => windows?.setFloatingPetOnly(petOnly),
+    beginFloatingDrag: (screenX, screenY) =>
+      windows?.beginFloatingDrag(screenX, screenY) ?? false,
+    updateFloatingDrag: (screenX, screenY) =>
+      windows?.updateFloatingDrag(screenX, screenY) ?? false,
+    endFloatingDrag: () => windows?.endFloatingDrag(),
     setLaunchAtLogin: async (enabled) => {
       applyLoginItemSetting(enabled);
       const next = await settingsService!.replace({
@@ -1146,6 +1162,11 @@ async function startApplication(): Promise<void> {
   windows.createMain();
   refreshFloatingFocusMode();
   windows.createFloating();
+  // Never block first paint on Keychain access or Feishu networking. This is
+  // especially important after a local development build is re-signed: the
+  // OS may need to re-authorize secure storage, while the task UI and pet
+  // should remain available immediately.
+  setTimeout(restoreInitialFeishuConfiguration, 500);
   const ensureFloatingVisible = (): void => windows?.ensureFloatingVisible();
   screen.on("display-added", ensureFloatingVisible);
   screen.on("display-removed", ensureFloatingVisible);

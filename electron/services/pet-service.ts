@@ -10,9 +10,13 @@ import {
   type FocusSession,
   type FocusSessionView,
   type PetDiaryEntry,
+  type PetAdventure,
+  type PetCustomizationPatch,
   type PetEvent,
   type PetMemoryEntry,
+  type PetMiniGameRecord,
   type PetProfile,
+  type ProactiveMessageRecord,
   type PetReward,
   type PetSnapshot,
   type PetState,
@@ -45,13 +49,26 @@ function createProfile(name: string, now = Date.now()): PetProfile {
 }
 
 export function createDefaultPetState(name = "小序", now = Date.now()): PetState {
+  const timestamp = isoNow(now);
   return {
     schemaVersion: 1,
     revision: 0,
     profile: createProfile(name, now),
     focusHistory: [],
     rewards: [],
-    inventory: [],
+    inventory: [
+      { id: "outfit-scarf", quantity: 1, unlockedAt: timestamp },
+      { id: "toy-ball", quantity: 1, unlockedAt: timestamp },
+      { id: "decoration-cloud-lamp", quantity: 1, unlockedAt: timestamp },
+    ],
+    appearance: {
+      palette: "lavender",
+      outfit: "none",
+      roomTheme: "cloud-room",
+      decorations: ["cloud-lamp"],
+    },
+    adventures: [],
+    miniGames: [],
     diary: [],
     memories: [],
     proactiveMessages: [],
@@ -130,6 +147,15 @@ function normalizeState(value: unknown, name: string): PetState {
     focusHistory: Array.isArray(raw.focusHistory) ? clone(raw.focusHistory) : [],
     rewards: Array.isArray(raw.rewards) ? clone(raw.rewards) : [],
     inventory: Array.isArray(raw.inventory) ? clone(raw.inventory) : [],
+    appearance: {
+      ...defaults.appearance,
+      ...clone(raw.appearance ?? {}),
+      decorations: Array.isArray(raw.appearance?.decorations)
+        ? clone(raw.appearance.decorations)
+        : defaults.appearance.decorations,
+    },
+    adventures: Array.isArray(raw.adventures) ? clone(raw.adventures) : [],
+    miniGames: Array.isArray(raw.miniGames) ? clone(raw.miniGames) : [],
     diary: Array.isArray(raw.diary) ? clone(raw.diary) : [],
     memories: Array.isArray(raw.memories) ? clone(raw.memories) : [],
     proactiveMessages: Array.isArray(raw.proactiveMessages)
@@ -206,6 +232,175 @@ export class PetService {
     return this.#mutate((draft, now) => {
       draft.profile.name = next;
       draft.profile.updatedAt = isoNow(now);
+    });
+  }
+
+  async customize(patch: PetCustomizationPatch): Promise<PetSnapshot> {
+    const palettes = new Set(["lavender", "mint", "sunset", "midnight"]);
+    const outfits = new Set(["none", "scarf", "explorer", "starlight"]);
+    const rooms = new Set(["cloud-room", "forest-nook", "night-library"]);
+    return this.#mutate((draft, now, events) => {
+      if (patch.palette !== undefined) {
+        if (!palettes.has(patch.palette)) throw new Error("INVALID_PET_PALETTE");
+        draft.appearance.palette = patch.palette;
+      }
+      if (patch.outfit !== undefined) {
+        if (!outfits.has(patch.outfit)) throw new Error("INVALID_PET_OUTFIT");
+        draft.appearance.outfit = patch.outfit;
+        draft.profile.equippedOutfit =
+          patch.outfit === "none" ? undefined : patch.outfit;
+      }
+      if (patch.roomTheme !== undefined) {
+        if (!rooms.has(patch.roomTheme)) throw new Error("INVALID_PET_ROOM");
+        draft.appearance.roomTheme = patch.roomTheme;
+      }
+      if (patch.decorations !== undefined) {
+        draft.appearance.decorations = Array.from(
+          new Set(
+            patch.decorations
+              .map((item) => item.trim().slice(0, 80))
+              .filter(Boolean),
+          ),
+        ).slice(0, 12);
+      }
+      draft.profile.updatedAt = isoNow(now);
+      events.push({ type: "customization-changed", at: isoNow(now) });
+    });
+  }
+
+  async dailyAdventure(localDate = isoNow(this.#now()).slice(0, 10)): Promise<PetAdventure> {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(localDate)
+      ? localDate
+      : isoNow(this.#now()).slice(0, 10);
+    const existing = this.#state.adventures.find(
+      (adventure) => adventure.localDate === date,
+    );
+    if (existing) return clone(existing);
+    let result!: PetAdventure;
+    await this.#mutate((draft, now) => {
+      const current = draft.adventures.find(
+        (adventure) => adventure.localDate === date,
+      );
+      if (current) {
+        result = clone(current);
+        return;
+      }
+      result = createDailyAdventure(date, now, draft.profile.name);
+      draft.adventures.unshift(result);
+      draft.adventures = draft.adventures.slice(0, 180);
+    });
+    return clone(result);
+  }
+
+  async completeAdventure(
+    adventureId: string,
+    choiceId: string,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft, now, events) => {
+      const adventure = draft.adventures.find(
+        (entry) => entry.id === adventureId,
+      );
+      if (!adventure) throw new Error("PET_ADVENTURE_NOT_FOUND");
+      const choice = adventure.choices.find((entry) => entry.id === choiceId);
+      if (!choice) throw new Error("PET_ADVENTURE_CHOICE_NOT_FOUND");
+      if (adventure.completedAt) return;
+      adventure.selectedChoiceId = choice.id;
+      adventure.outcome = adventureOutcome(choice.id, draft.profile.name);
+      adventure.completedAt = isoNow(now);
+      const reward = this.#grantReward(
+        draft,
+        {
+          idempotencyKey: `adventure:${adventure.localDate}`,
+          source: "adventure",
+          sourceId: adventure.id,
+          experience: 6,
+          intimacy: 2,
+          attribute:
+            choice.id === "explore"
+              ? "courage"
+              : choice.id === "organize"
+                ? "organization"
+                : "creativity",
+          attributePoints: 1,
+          itemId: "adventure-star",
+        },
+        now,
+      );
+      adventure.rewardId = reward.id;
+      addInventoryItem(draft, "adventure-star", now, 1);
+      addInventoryItem(draft, "outfit-explorer", now);
+      addInventoryItem(draft, "decoration-books", now);
+      addInventoryItem(draft, "action-inspect", now);
+      events.push({ type: "reward-granted", at: isoNow(now), reward });
+      events.push({ type: "adventure-completed", at: isoNow(now) });
+    });
+  }
+
+  async recordMiniGame(input: {
+    game: PetMiniGameRecord["game"];
+    score: number;
+    durationSeconds: number;
+  }): Promise<PetSnapshot> {
+    return this.#mutate((draft, now, events) => {
+      const completedAt = isoNow(now);
+      const record: PetMiniGameRecord = {
+        id: randomUUID(),
+        game: input.game,
+        score: Math.min(99_999, Math.max(0, Math.round(input.score))),
+        durationSeconds: Math.min(
+          3_600,
+          Math.max(1, Math.round(input.durationSeconds)),
+        ),
+        completedAt,
+      };
+      draft.miniGames.unshift(record);
+      draft.miniGames = draft.miniGames.slice(0, 500);
+      if (record.game === "breathing" || record.game === "stretch-mirror") {
+        addInventoryItem(draft, "decoration-plant", now);
+        addInventoryItem(draft, "prop-teacup", now);
+      } else if (record.score >= 1) {
+        addInventoryItem(draft, "outfit-starlight", now);
+        addInventoryItem(draft, "action-dance", now);
+      }
+      const day = completedAt.slice(0, 10);
+      const key = `game:${day}:${record.game}`;
+      if (!draft.rewards.some((reward) => reward.idempotencyKey === key)) {
+        const reward = this.#grantReward(
+          draft,
+          {
+            idempotencyKey: key,
+            source: "game",
+            sourceId: record.id,
+            experience: 3,
+            intimacy: 1,
+            attribute:
+              record.game === "breathing" || record.game === "stretch-mirror"
+                ? "energy"
+                : record.game === "jump-rope"
+                  ? "courage"
+                  : "creativity",
+            attributePoints: 1,
+          },
+          now,
+        );
+        events.push({ type: "reward-granted", at: completedAt, reward });
+      }
+      events.push({ type: "mini-game-completed", at: completedAt });
+    });
+  }
+
+  async recordProactiveMessage(
+    input: Pick<ProactiveMessageRecord, "kind" | "reason" | "dismissed">,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      draft.proactiveMessages.unshift({
+        id: randomUUID(),
+        kind: input.kind,
+        reason: input.reason.trim().slice(0, 500),
+        dismissed: input.dismissed,
+        shownAt: isoNow(now),
+      });
+      draft.proactiveMessages = draft.proactiveMessages.slice(0, 500);
     });
   }
 
@@ -683,4 +878,71 @@ function taskExperience(priority: TaskPriority): number {
   if (priority === "medium") return 10;
   if (priority === "low") return 8;
   return 6;
+}
+
+function addInventoryItem(
+  draft: PetState,
+  id: string,
+  now: number,
+  quantity = 0,
+): void {
+  const existing = draft.inventory.find((item) => item.id === id);
+  if (existing) {
+    if (quantity > 0) existing.quantity += quantity;
+    return;
+  }
+  draft.inventory.push({
+    id,
+    quantity: Math.max(1, quantity),
+    unlockedAt: isoNow(now),
+  });
+}
+
+const DAILY_ADVENTURES = [
+  {
+    title: "云朵邮局的慢递",
+    prompt: "一封没有收件人的信落在窗边。我们怎么替它找到方向？",
+  },
+  {
+    title: "被风吹乱的任务星图",
+    prompt: "今天的任务像星星一样散开了。要和我一起把它们排成星座吗？",
+  },
+  {
+    title: "森林书架的秘密夹层",
+    prompt: "小窝的书架响了一声，夹层里藏着一张空白地图。先从哪里开始？",
+  },
+] as const;
+
+function createDailyAdventure(
+  localDate: string,
+  now: number,
+  petName: string,
+): PetAdventure {
+  const seed = Array.from(localDate).reduce(
+    (sum, character) => sum + character.charCodeAt(0),
+    0,
+  );
+  const template = DAILY_ADVENTURES[seed % DAILY_ADVENTURES.length]!;
+  return {
+    id: `adventure:${localDate}`,
+    localDate,
+    title: template.title,
+    prompt: `${template.prompt}\n${petName}会陪你一起，不需要连续签到。`,
+    choices: [
+      { id: "explore", label: "大胆探索" },
+      { id: "organize", label: "先整理线索" },
+      { id: "imagine", label: "画出新路线" },
+    ],
+    createdAt: isoNow(now),
+  };
+}
+
+function adventureOutcome(choiceId: string, petName: string): string {
+  if (choiceId === "explore") {
+    return `你和${petName}顺着风跑出去，找到了那封信真正想抵达的地方。勇气不是不犹豫，而是一起迈出一步。`;
+  }
+  if (choiceId === "organize") {
+    return `你和${petName}把线索铺成一排，原本混乱的小事渐渐有了方向。今天的秩序来自温柔的整理。`;
+  }
+  return `你和${petName}画了一条地图上没有的路，意外发现了一片会发光的云。好奇心也值得被记进日记。`;
 }

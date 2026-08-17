@@ -67,12 +67,15 @@ const streamChunkSchema = z
                   z
                     .object({
                       index: z.number().int().nonnegative(),
-                      id: z.string().optional(),
-                      type: z.literal("function").optional(),
+                      // OpenAI-compatible providers commonly send these
+                      // fields only on the first tool-call fragment, then
+                      // explicitly use null on continuation fragments.
+                      id: z.string().nullable().optional(),
+                      type: z.literal("function").nullable().optional(),
                       function: z
                         .object({
-                          name: z.string().optional(),
-                          arguments: z.string().optional(),
+                          name: z.string().nullable().optional(),
+                          arguments: z.string().nullable().optional(),
                         })
                         .passthrough()
                         .optional(),

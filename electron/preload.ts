@@ -100,6 +100,20 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingVisible, visible),
     setFloatingExpanded: (expanded) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingExpanded, expanded),
+    setFloatingPetOnly: (petOnly) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingPetOnly, petOnly),
+    beginFloatingDrag: (screenX, screenY) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellBeginFloatingDrag, {
+        screenX,
+        screenY,
+      }),
+    updateFloatingDrag: (screenX, screenY) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellUpdateFloatingDrag, {
+        screenX,
+        screenY,
+      }),
+    endFloatingDrag: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellEndFloatingDrag),
     setLaunchAtLogin: (enabled) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetLaunchAtLogin, enabled),
     openExternal: (url) =>
@@ -156,8 +170,21 @@ const desktopApi: DesktopApi = {
   pet: {
     snapshot: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petSnapshot),
     rename: (name) => ipcRenderer.invoke(DESKTOP_CHANNELS.petRename, name),
+    customize: (patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petCustomize, patch),
     interact: (kind) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petInteract, kind),
+    dailyAdventure: (localDate) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petAdventureDaily, localDate),
+    completeAdventure: (adventureId, choiceId) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petAdventureComplete, {
+        adventureId,
+        choiceId,
+      }),
+    recordMiniGame: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petMiniGameRecord, input),
+    recordProactiveMessage: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petProactiveRecord, input),
     startFocus: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petFocusStart, request),
     pauseFocus: (reason) =>

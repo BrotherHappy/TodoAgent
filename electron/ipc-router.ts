@@ -102,6 +102,11 @@ const settingsSchema = z
         wellbeingReminders: z.boolean(),
         autoDiary: z.boolean(),
         relationshipMemory: z.boolean(),
+        actionPack: z.enum(["balanced", "calm", "playful", "focused"]),
+        animationIntensity: z.enum(["gentle", "lively"]),
+        proactiveIntervalMinutes: z.number().int().min(15).max(240),
+        meetingMode: z.boolean(),
+        seasonalEvents: z.boolean(),
       })
       .strict(),
     ai: z
@@ -188,6 +193,10 @@ export interface DesktopIpcDependencies {
   showQuickCapture: () => void;
   setFloatingVisible: (visible: boolean) => Promise<AppSettings>;
   setFloatingExpanded: (expanded: boolean) => void;
+  setFloatingPetOnly: (petOnly: boolean) => void;
+  beginFloatingDrag: (screenX: number, screenY: number) => boolean;
+  updateFloatingDrag: (screenX: number, screenY: number) => boolean;
+  endFloatingDrag: () => void;
   setLaunchAtLogin: (enabled: boolean) => Promise<AppSettings>;
   openExternal: (url: string) => Promise<void>;
   onTasksChanged: () => void;
@@ -381,6 +390,26 @@ export function registerDesktopIpc(
   );
   handle(DESKTOP_CHANNELS.shellSetFloatingExpanded, (_event, input) =>
     dependencies.setFloatingExpanded(z.boolean().parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.shellSetFloatingPetOnly, (_event, input) =>
+    dependencies.setFloatingPetOnly(z.boolean().parse(input)),
+  );
+  const floatingPointerSchema = z
+    .object({
+      screenX: z.number().finite().min(-100_000).max(100_000),
+      screenY: z.number().finite().min(-100_000).max(100_000),
+    })
+    .strict();
+  handle(DESKTOP_CHANNELS.shellBeginFloatingDrag, (_event, input) => {
+    const pointer = floatingPointerSchema.parse(input);
+    return dependencies.beginFloatingDrag(pointer.screenX, pointer.screenY);
+  });
+  handle(DESKTOP_CHANNELS.shellUpdateFloatingDrag, (_event, input) => {
+    const pointer = floatingPointerSchema.parse(input);
+    return dependencies.updateFloatingDrag(pointer.screenX, pointer.screenY);
+  });
+  handle(DESKTOP_CHANNELS.shellEndFloatingDrag, () =>
+    dependencies.endFloatingDrag(),
   );
   handle(DESKTOP_CHANNELS.shellSetLaunchAtLogin, (_event, input) =>
     dependencies.setLaunchAtLogin(z.boolean().parse(input)),
@@ -610,6 +639,20 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.petRename, (_event, input) =>
     dependencies.pet.rename(z.string().trim().min(1).max(80).parse(input)),
   );
+  handle(DESKTOP_CHANNELS.petCustomize, (_event, input) => {
+    const request = z
+      .object({
+        palette: z.enum(["lavender", "mint", "sunset", "midnight"]).optional(),
+        outfit: z.enum(["none", "scarf", "explorer", "starlight"]).optional(),
+        roomTheme: z
+          .enum(["cloud-room", "forest-nook", "night-library"])
+          .optional(),
+        decorations: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.customize(request);
+  });
   handle(DESKTOP_CHANNELS.petInteract, (_event, input) =>
     dependencies.pet.interact(
       input === undefined
@@ -617,6 +660,62 @@ export function registerDesktopIpc(
         : z.string().trim().min(1).max(80).parse(input),
     ),
   );
+  handle(DESKTOP_CHANNELS.petAdventureDaily, (_event, input) =>
+    dependencies.pet.dailyAdventure(
+      input === undefined
+        ? undefined
+        : z.string().regex(/^\d{4}-\d{2}-\d{2}$/).parse(input),
+    ),
+  );
+  handle(DESKTOP_CHANNELS.petAdventureComplete, (_event, input) => {
+    const request = z
+      .object({
+        adventureId: z.string().trim().min(1).max(120),
+        choiceId: z.string().trim().min(1).max(80),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.completeAdventure(
+      request.adventureId,
+      request.choiceId,
+    );
+  });
+  handle(DESKTOP_CHANNELS.petMiniGameRecord, (_event, input) => {
+    const request = z
+      .object({
+        game: z.enum([
+          "breathing",
+          "star-catch",
+          "jump-rope",
+          "stretch-mirror",
+        ]),
+        score: z.number().finite().min(0).max(99_999),
+        durationSeconds: z.number().finite().min(1).max(3_600),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.recordMiniGame(request);
+  });
+  handle(DESKTOP_CHANNELS.petProactiveRecord, (_event, input) => {
+    const request = z
+      .object({
+        kind: z.enum([
+          "companion",
+          "planning",
+          "deadline",
+          "wellbeing",
+          "weather",
+          "sync",
+          "morning",
+          "evening",
+        ]),
+        reason: z.string().trim().min(1).max(500),
+        dismissed: z.boolean().optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.recordProactiveMessage(request);
+  });
   const focusPresetSchema = z
     .object({
       focusMinutes: z.number().int().min(1).max(240),

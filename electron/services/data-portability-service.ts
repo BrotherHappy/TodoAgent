@@ -749,15 +749,38 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectOptional(weather, 'resolvedName', `${path}.weather`, expectString);
   expectNumber(weather.cacheMinutes, `${path}.weather.cacheMinutes`, { integer: true, minimum: 30, maximum: 120 });
 
-  const pet = settings.pet === undefined
-    ? expectRecord(clone(defaultSettings.pet), `${path}.pet`)
+  const importedPet = settings.pet === undefined
+    ? {}
     : expectRecord(settings.pet, `${path}.pet`);
-  assertOnlyKeys(pet, [
+  assertOnlyKeys(importedPet, [
     'interactionsEnabled', 'proactiveMessages', 'wellbeingReminders',
-    'autoDiary', 'relationshipMemory',
+    'autoDiary', 'relationshipMemory', 'actionPack', 'animationIntensity',
+    'proactiveIntervalMinutes', 'meetingMode', 'seasonalEvents',
   ], `${path}.pet`);
-  Object.keys(defaultSettings.pet).forEach((key) =>
+  const pet = {
+    ...clone(defaultSettings.pet),
+    ...importedPet,
+  };
+  ([
+    'interactionsEnabled', 'proactiveMessages', 'wellbeingReminders',
+    'autoDiary', 'relationshipMemory', 'meetingMode', 'seasonalEvents',
+  ] as const).forEach((key) =>
     expectBoolean(pet[key], `${path}.pet.${key}`),
+  );
+  expectEnum(
+    pet.actionPack,
+    ['balanced', 'calm', 'playful', 'focused'] as const,
+    `${path}.pet.actionPack`,
+  );
+  expectEnum(
+    pet.animationIntensity,
+    ['gentle', 'lively'] as const,
+    `${path}.pet.animationIntensity`,
+  );
+  expectNumber(
+    pet.proactiveIntervalMinutes,
+    `${path}.pet.proactiveIntervalMinutes`,
+    { integer: true, minimum: 15, maximum: 240 },
   );
 
   const ai = expectRecord(settings.ai, `${path}.ai`);

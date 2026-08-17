@@ -10,6 +10,8 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleDot,
   ClipboardCheck,
   Clock3,
@@ -24,6 +26,7 @@ import {
   Filter,
   Focus,
   GripVertical,
+  Heart,
   Inbox,
   Info,
   Laptop,
@@ -63,6 +66,7 @@ import {
   type CSSProperties,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import type {
@@ -101,6 +105,7 @@ import type {
 } from "../shared/desktop-api";
 import type {
   FocusSessionView,
+  PetAdventure,
   PetDiaryEntry,
   PetMemoryEntry,
   PetSnapshot,
@@ -112,9 +117,25 @@ import {
   toLocalDateTimeInput,
 } from "./local-datetime";
 import { feishuCreationBlockedMessage } from "./feishu-create-guard";
-import { PetCharacter, type PetMood } from "./PetCharacter";
+import {
+  PetCharacter,
+  type PetMood,
+  type PetOutfit,
+  type PetPalette,
+  type PetSeason,
+} from "./PetCharacter";
+import {
+  petInteractionFromPoint,
+  type PetAction,
+  type PetInteractionKind,
+} from "./pet-behavior";
+import {
+  buildPetProactiveSuggestion,
+  shouldSuppressPetProactive,
+} from "./pet-companion";
 import { useTaskController, type TaskController } from "./task-controller";
 import { useAgentChat } from "./use-agent-chat";
+import { usePetBehavior } from "./use-pet-behavior";
 
 type MainRoute =
   | TaskView
@@ -152,6 +173,7 @@ interface ToastState {
 type ReadyDataPreview = Extract<DataPreviewResultView, { status: "ready" }>;
 const floatingAgentDraftId = "floating-agent-prompt";
 const floatingTabStorageKey = "todoAgentFloatingTab";
+const floatingPetOnlyStorageKey = "todoAgentFloatingPetOnly";
 const mainNavigationStateKey = "todoAgentMainNavigation";
 
 function isPetTab(value: unknown): value is PetTab {
@@ -175,6 +197,14 @@ function readFloatingTab(): PetTab {
     // A disabled or unavailable storage area must never make the desktop
     // entry unusable. The first-run default remains the all-task overview.
     return "all";
+  }
+}
+
+function readFloatingPetOnly(): boolean {
+  try {
+    return localStorage.getItem(floatingPetOnlyStorageKey) === "true";
+  } catch {
+    return false;
   }
 }
 
@@ -3928,17 +3958,135 @@ function clockDuration(seconds: number): string {
     : `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
+function PetPlayground({
+  disabled,
+  onComplete,
+}: {
+  disabled: boolean;
+  onComplete: (
+    game: "breathing" | "star-catch",
+    score: number,
+    durationSeconds: number,
+  ) => void;
+}) {
+  const breathingLabels = ["吸气", "停留", "呼气", "停留"] as const;
+  const [breathingPhase, setBreathingPhase] = useState<number>();
+  const [starRunning, setStarRunning] = useState(false);
+  const [starScore, setStarScore] = useState(0);
+  const [starSeconds, setStarSeconds] = useState(20);
+  const [starPosition, setStarPosition] = useState({ x: 48, y: 48 });
+  useEffect(() => {
+    if (breathingPhase === undefined) return undefined;
+    const timer = window.setTimeout(() => {
+      if (breathingPhase >= breathingLabels.length - 1) {
+        setBreathingPhase(undefined);
+        onComplete("breathing", 4, 16);
+      } else {
+        setBreathingPhase((current) => (current ?? 0) + 1);
+      }
+    }, 4_000);
+    return () => window.clearTimeout(timer);
+  }, [breathingPhase]);
+  useEffect(() => {
+    if (!starRunning) return undefined;
+    const timer = window.setInterval(() => {
+      setStarSeconds((seconds) => {
+        if (seconds > 1) return seconds - 1;
+        window.clearInterval(timer);
+        setStarRunning(false);
+        setStarScore((score) => {
+          onComplete("star-catch", score, 20);
+          return score;
+        });
+        return 0;
+      });
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [starRunning]);
+  const startStars = () => {
+    setStarScore(0);
+    setStarSeconds(20);
+    setStarPosition({ x: 48, y: 48 });
+    setStarRunning(true);
+  };
+  return (
+    <div className="pet-games-grid">
+      <section className="pet-game-card breathing-game">
+        <span className="pet-game-kicker">安静小游戏</span>
+        <h2>和我呼吸 16 秒</h2>
+        <p>没有连胜和惩罚，只把注意力轻轻带回身体。</p>
+        <div
+          className={`pet-breathing-orb ${breathingPhase !== undefined ? "is-running" : ""}`}
+          data-phase={breathingPhase ?? "idle"}
+          aria-live="polite"
+        >
+          {breathingPhase === undefined ? "准备" : breathingLabels[breathingPhase]}
+        </div>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={disabled || breathingPhase !== undefined}
+          onClick={() => setBreathingPhase(0)}
+        >
+          <Play size={15} /> 开始呼吸
+        </button>
+      </section>
+      <section className="pet-game-card star-game">
+        <span className="pet-game-kicker">反应小游戏</span>
+        <h2>接住任务星</h2>
+        <p>20 秒轻松点一点，结束后就回到手头的事。</p>
+        <div className="pet-star-field" aria-label="接住任务星游戏区">
+          {starRunning ? (
+            <button
+              type="button"
+              className="pet-catch-star"
+              style={{
+                left: `${starPosition.x}%`,
+                top: `${starPosition.y}%`,
+              }}
+              aria-label="接住星星"
+              onClick={() => {
+                setStarScore((score) => score + 1);
+                setStarPosition({
+                  x: 10 + Math.round(Math.random() * 78),
+                  y: 12 + Math.round(Math.random() * 70),
+                });
+              }}
+            >
+              ✦
+            </button>
+          ) : (
+            <span>✦</span>
+          )}
+          <small>{starRunning ? `${starSeconds}s · ${starScore} 颗` : `最好：${starScore} 颗`}</small>
+        </div>
+        <button
+          type="button"
+          className="soft-button"
+          disabled={disabled || starRunning}
+          onClick={startStars}
+        >
+          <Sparkles size={15} /> 开始接星星
+        </button>
+      </section>
+    </div>
+  );
+}
+
 function PetHomePage({
   notify,
 }: {
   notify: (message: string, kind?: ToastKind) => void;
 }) {
   const { snapshot, weather, refresh, setWeather } = usePetData();
-  const [section, setSection] = useState<"home" | "diary" | "memory">("home");
+  const [section, setSection] = useState<
+    "home" | "room" | "adventure" | "play" | "diary" | "memory"
+  >("home");
   const [busy, setBusy] = useState(false);
   const [memoryText, setMemoryText] = useState("");
   const [editingDiary, setEditingDiary] = useState<PetDiaryEntry>();
   const [editingMemory, setEditingMemory] = useState<PetMemoryEntry>();
+  const [adventure, setAdventure] = useState<PetAdventure>();
 
   const run = async (operation: () => Promise<void>, success: string) => {
     setBusy(true);
@@ -3952,6 +4100,13 @@ function PetHomePage({
       setBusy(false);
     }
   };
+  useEffect(() => {
+    if (section !== "adventure" || !window.desktopApi) return;
+    void window.desktopApi.pet
+      .dailyAdventure()
+      .then(setAdventure)
+      .catch(() => undefined);
+  }, [section, snapshot?.revision]);
   if (!snapshot) {
     return (
       <main className="pet-page loading-page">
@@ -3961,6 +4116,8 @@ function PetHomePage({
     );
   }
   const profile = snapshot.profile;
+  const hasUnlocked = (itemId: string) =>
+    snapshot.inventory.some((item) => item.id === itemId);
   const levelProgress = profile.experience % 100;
   const recentRewards = snapshot.rewards.slice(0, 6);
   return (
@@ -3975,12 +4132,18 @@ function PetHomePage({
           <PetCharacter
             name={profile.name}
             mood={snapshot.focus?.status === "running" ? "focus" : "happy"}
+            interactive
+            palette={snapshot.appearance.palette}
+            outfit={snapshot.appearance.outfit}
           />
         </div>
       </header>
       <nav className="pet-page-tabs" aria-label="小窝导航">
         {([
           ["home", "成长"],
+          ["room", "小房间"],
+          ["adventure", "今日冒险"],
+          ["play", "一起玩"],
           ["diary", "日记"],
           ["memory", "记忆"],
         ] as const).map(([value, label]) => (
@@ -4085,6 +4248,192 @@ function PetHomePage({
             )}
           </section>
         </div>
+      )}
+
+      {section === "room" && (
+        <section className="pet-room-section">
+          <div className={`pet-room-stage room-${snapshot.appearance.roomTheme}`}>
+            <span className="pet-room-window" aria-hidden="true">☁</span>
+            {snapshot.appearance.decorations.includes("cloud-lamp") && (
+              <span className="pet-room-decoration cloud-lamp" aria-hidden="true">☼</span>
+            )}
+            {snapshot.appearance.decorations.includes("plant") && (
+              <span className="pet-room-decoration room-plant" aria-hidden="true">♧</span>
+            )}
+            {snapshot.appearance.decorations.includes("books") && (
+              <span className="pet-room-decoration room-books" aria-hidden="true">▥</span>
+            )}
+            <PetCharacter
+              name={profile.name}
+              mood="happy"
+              action="dance"
+              interactive
+              palette={snapshot.appearance.palette}
+              outfit={snapshot.appearance.outfit}
+            />
+          </div>
+          <div className="pet-room-controls">
+            <div className="pet-section-heading">
+              <div>
+                <h2>布置你们的小房间</h2>
+                <p>外观只表达陪伴，不与饥饿、连续签到或惩罚绑定。</p>
+              </div>
+            </div>
+            <label>
+              <span>身体配色</span>
+              <select
+                value={snapshot.appearance.palette}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      palette: event.target.value as typeof snapshot.appearance.palette,
+                    });
+                  }, "配色已更换")
+                }
+              >
+                <option value="lavender">薰衣草</option>
+                <option value="mint">薄荷云</option>
+                <option value="sunset">日落糖</option>
+                <option value="midnight">星夜</option>
+              </select>
+            </label>
+            <label>
+              <span>服装</span>
+              <select
+                value={snapshot.appearance.outfit}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      outfit: event.target.value as typeof snapshot.appearance.outfit,
+                    });
+                  }, "服装已更换")
+                }
+              >
+                <option value="none">轻装</option>
+                <option value="scarf">暖暖围巾</option>
+                <option value="explorer" disabled={!hasUnlocked("outfit-explorer")}>
+                  探索帽{hasUnlocked("outfit-explorer") ? "" : " · 完成冒险解锁"}
+                </option>
+                <option value="starlight" disabled={!hasUnlocked("outfit-starlight")}>
+                  星光披风{hasUnlocked("outfit-starlight") ? "" : " · 接住任务星解锁"}
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>房间主题</span>
+              <select
+                value={snapshot.appearance.roomTheme}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      roomTheme: event.target.value as typeof snapshot.appearance.roomTheme,
+                    });
+                  }, "房间已布置")
+                }
+              >
+                <option value="cloud-room">云朵工作室</option>
+                <option value="forest-nook">森林角落</option>
+                <option value="night-library">夜航书房</option>
+              </select>
+            </label>
+            <fieldset>
+              <legend>摆件</legend>
+              {([[
+                "cloud-lamp",
+                "云灯",
+                "decoration-cloud-lamp",
+              ], ["plant", "小植物", "decoration-plant"], ["books", "任务书架", "decoration-books"]] as const).map(([id, label, itemId]) => {
+                const enabled = snapshot.appearance.decorations.includes(id);
+                const unlocked = hasUnlocked(itemId);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={enabled ? "active" : ""}
+                    disabled={busy || !unlocked}
+                    title={unlocked ? undefined : `${label}尚未解锁`}
+                    onClick={() =>
+                      void run(async () => {
+                        await window.desktopApi?.pet.customize({
+                          decorations: enabled
+                            ? snapshot.appearance.decorations.filter((item) => item !== id)
+                            : [...snapshot.appearance.decorations, id],
+                        });
+                      }, enabled ? "摆件已收起" : "摆件已放好")
+                    }
+                  >
+                    {enabled ? <Check size={14} /> : <Plus size={14} />} {label}{unlocked ? "" : " · 待解锁"}
+                  </button>
+                );
+              })}
+            </fieldset>
+          </div>
+        </section>
+      )}
+
+      {section === "adventure" && (
+        <section className="pet-adventure-section">
+          <div className="pet-adventure-scene" aria-hidden="true">
+            <span>✦</span>
+            <PetCharacter
+              name={profile.name}
+              action={adventure?.completedAt ? "celebrate" : "inspect"}
+              emotion={adventure?.completedAt ? "proud" : "curious"}
+              palette={snapshot.appearance.palette}
+              outfit="explorer"
+            />
+          </div>
+          <article className="pet-adventure-card">
+            <span className="pet-game-kicker">{adventure?.localDate ?? "今天"} · 每日一篇，不要求连续</span>
+            <h2>{adventure?.title ?? "正在展开地图…"}</h2>
+            <p>{adventure?.prompt}</p>
+            {adventure?.completedAt ? (
+              <div className="pet-adventure-outcome">
+                <strong>你们今天选择了：{adventure.choices.find((choice) => choice.id === adventure.selectedChoiceId)?.label}</strong>
+                <p>{adventure.outcome}</p>
+                <small>获得一颗冒险星与温和成长；错过一天不会失去任何东西。</small>
+              </div>
+            ) : (
+              <div className="pet-adventure-choices">
+                {adventure?.choices.map((choice) => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    className="soft-button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(async () => {
+                        await window.desktopApi?.pet.completeAdventure(adventure.id, choice.id);
+                        const next = await window.desktopApi?.pet.dailyAdventure(adventure.localDate);
+                        if (next) setAdventure(next);
+                      }, "今日冒险已写入日记")
+                    }
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </article>
+        </section>
+      )}
+
+      {section === "play" && (
+        <PetPlayground
+          disabled={busy}
+          onComplete={(game, score, durationSeconds) =>
+            void run(async () => {
+              await window.desktopApi?.pet.recordMiniGame({
+                game,
+                score,
+                durationSeconds,
+              });
+            }, game === "breathing" ? "呼吸完成，慢一点也很好" : `接住了 ${score} 颗任务星`)
+          }
+        />
       )}
 
       {section === "diary" && (
@@ -4958,6 +5307,112 @@ function SettingsPage({
                   })
                 }
                 label="主动陪伴"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>动作性格</strong>
+                <p>决定 20 种待机动作出现的组合与节奏</p>
+              </div>
+              <select
+                className="settings-input"
+                value={appSettings.pet.actionPack}
+                onChange={(event) =>
+                  void persist({
+                    ...appSettings,
+                    pet: {
+                      ...appSettings.pet,
+                      actionPack: event.target.value as AppSettings["pet"]["actionPack"],
+                    },
+                  }, "动作性格已更新")
+                }
+              >
+                <option value="balanced">自然平衡</option>
+                <option value="calm">安静陪伴</option>
+                <option value="playful">活泼好奇</option>
+                <option value="focused">专注搭档</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>动作幅度</strong>
+                <p>“舒缓”会保留呼吸和眨眼，但降低跳动与位移</p>
+              </div>
+              <select
+                className="settings-input"
+                value={appSettings.pet.animationIntensity}
+                onChange={(event) =>
+                  void persist({
+                    ...appSettings,
+                    pet: {
+                      ...appSettings.pet,
+                      animationIntensity: event.target.value as AppSettings["pet"]["animationIntensity"],
+                    },
+                  }, "动作幅度已更新")
+                }
+              >
+                <option value="lively">鲜明</option>
+                <option value="gentle">舒缓</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>主动交流间隔</strong>
+                <p>专注、会议、静音、夜间和全屏状态始终优先免打扰</p>
+              </div>
+              <div className="settings-number-control">
+                <input
+                  className="settings-input"
+                  type="number"
+                  aria-label="主动交流间隔"
+                  min={15}
+                  max={240}
+                  step={15}
+                  value={appSettings.pet.proactiveIntervalMinutes}
+                  onChange={(event) =>
+                    setAppSettings((current) => ({
+                      ...current,
+                      pet: {
+                        ...current.pet,
+                        proactiveIntervalMinutes: Number(event.target.value),
+                      },
+                    }))
+                  }
+                  onBlur={() => void persist(appSettings, "主动交流间隔已更新")}
+                />
+                <span>分钟</span>
+              </div>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>会议模式</strong>
+                <p>宠物保持呼吸与眨眼，但不主动说话或弹出提醒</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.meetingMode}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, meetingMode: value },
+                  })
+                }
+                label="会议模式"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>季节小事件</strong>
+                <p>只改变小装饰和偶发动作，不影响任务与成长数值</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.seasonalEvents}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, seasonalEvents: value },
+                  })
+                }
+                label="季节小事件"
               />
             </div>
             <div className="settings-row">
@@ -7594,6 +8049,249 @@ function QuickCaptureWindow() {
   );
 }
 
+type FloatingPetGame = "jump-rope" | "stretch-mirror";
+
+function FloatingPetCoopGame({
+  game,
+  petName,
+  palette,
+  outfit,
+  season,
+  positionLocked,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  onAction,
+  onComplete,
+  onClose,
+}: {
+  game: FloatingPetGame;
+  petName: string;
+  palette: PetPalette;
+  outfit: PetOutfit;
+  season?: PetSeason;
+  positionLocked: boolean;
+  onDragStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onDragMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onDragEnd: (event?: ReactPointerEvent<HTMLButtonElement>) => void;
+  onAction: (action: PetAction, message?: string, durationMs?: number) => void;
+  onComplete: (
+    game: FloatingPetGame,
+    score: number,
+    durationSeconds: number,
+  ) => void;
+  onClose: () => void;
+}) {
+  const startedAtRef = useRef(Date.now());
+  const completedRef = useRef(false);
+  const lastScoredCycleRef = useRef(-1);
+  const scoreRef = useRef(0);
+  const motionTimerRef = useRef<number | undefined>(undefined);
+  const onCompleteRef = useRef(onComplete);
+  const onActionRef = useRef(onAction);
+  const [remaining, setRemaining] = useState(20);
+  const [ropeWindowOpen, setRopeWindowOpen] = useState(false);
+  const [score, setScore] = useState(0);
+  const [combo, setCombo] = useState(0);
+  const [misses, setMisses] = useState(0);
+  const [stretchStep, setStretchStep] = useState(0);
+  const [stageAction, setStageAction] = useState<PetAction>(
+    game === "jump-rope" ? "jump-rope-ready" : "stretch",
+  );
+  const [motionBeat, setMotionBeat] = useState(0);
+  const [stageFeedback, setStageFeedback] = useState("看准绳子");
+  onCompleteRef.current = onComplete;
+  onActionRef.current = onAction;
+
+  const stretchSteps: Array<{
+    title: string;
+    hint: string;
+    action: PetAction;
+  }> = [
+    { title: "抬起肩膀", hint: "吸气，和我一起把肩膀抬高", action: "stretch" },
+    { title: "向左舒展", hint: "慢慢拉长身体左侧", action: "look-left" },
+    { title: "向右舒展", hint: "换边，动作不用追求标准", action: "look-right" },
+    { title: "喝口水", hint: "放松肩膀，喝一口水就完成", action: "drink" },
+  ];
+  const gameControls = (
+    <div className="pet-game-header-actions">
+      <button
+        type="button"
+        className="floating-drag-handle pet-game-drag-handle no-drag"
+        title={positionLocked ? "位置已锁定" : "拖动移动"}
+        aria-label={positionLocked ? "宠物位置已锁定" : "拖动 Todo Pet"}
+        disabled={positionLocked}
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+      >
+        <GripVertical size={15} />
+      </button>
+      <button type="button" className="icon-button" aria-label="退出小游戏" onClick={onClose}>
+        <X size={16} />
+      </button>
+    </div>
+  );
+
+  useEffect(() => {
+    if (game !== "jump-rope") return undefined;
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAtRef.current;
+      const nextRemaining = Math.max(0, 20 - Math.floor(elapsed / 1_000));
+      const phase = (elapsed % 900) / 900;
+      const nextWindowOpen = phase >= 0.58 && phase <= 0.84;
+      setRemaining((current) => current === nextRemaining ? current : nextRemaining);
+      setRopeWindowOpen((current) => current === nextWindowOpen ? current : nextWindowOpen);
+      if (elapsed < 20_000 || completedRef.current) return;
+      completedRef.current = true;
+      onCompleteRef.current("jump-rope", scoreRef.current, 20);
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [game]);
+
+  useEffect(
+    () => () => {
+      if (motionTimerRef.current !== undefined) {
+        window.clearTimeout(motionTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const playStageAction = (action: PetAction, durationMs: number, feedback: string) => {
+    if (motionTimerRef.current !== undefined) {
+      window.clearTimeout(motionTimerRef.current);
+    }
+    setStageAction(action);
+    setStageFeedback(feedback);
+    setMotionBeat((value) => value + 1);
+    motionTimerRef.current = window.setTimeout(() => {
+      setStageAction(game === "jump-rope" ? "jump-rope-ready" : "stretch");
+      setStageFeedback(game === "jump-rope" ? "看准绳子" : "慢慢跟上就好");
+      motionTimerRef.current = undefined;
+    }, durationMs);
+  };
+  const jump = () => {
+    const elapsed = Date.now() - startedAtRef.current;
+    const cycle = Math.floor(elapsed / 900);
+    // The visible green window is the source of truth. Recalculating the
+    // phase here can turn a click that landed on a green button into a miss
+    // during the few milliseconds between paint and the event handler.
+    if (ropeWindowOpen && lastScoredCycleRef.current !== cycle) {
+      lastScoredCycleRef.current = cycle;
+      setScore((value) => {
+        scoreRef.current = value + 1;
+        return value + 1;
+      });
+      setCombo((value) => value + 1);
+      playStageAction("jump-rope", 820, "跳得漂亮！");
+      return;
+    }
+    setMisses((value) => value + 1);
+    setCombo(0);
+    playStageAction("head-tilt", 800, "差一点，再看准脚边");
+  };
+
+  if (game === "stretch-mirror") {
+    const step = stretchSteps[stretchStep];
+    return (
+      <section className="pet-coop-game no-drag" aria-label="镜像伸展小游戏">
+        <header>
+          <div>
+            <span className="pet-game-kicker">和 {petName} 一起动一动</span>
+            <h2>镜像伸展</h2>
+          </div>
+          {gameControls}
+        </header>
+        <div className="pet-stretch-progress" aria-label={`第 ${stretchStep + 1} 步，共 ${stretchSteps.length} 步`}>
+          {stretchSteps.map((item, index) => (
+            <span key={item.title} className={index <= stretchStep ? "active" : ""} />
+          ))}
+        </div>
+        <div className="pet-stretch-mirror">
+          <div className="pet-game-character" key={`${motionBeat}-${stageAction}`}>
+            <PetCharacter
+              mood="idle"
+              action={stageAction}
+              name={petName}
+              palette={palette}
+              outfit={outfit}
+              season={season}
+            />
+          </div>
+          <div className="pet-stretch-instruction">
+            <Activity size={24} />
+            <strong>{step.title}</strong>
+            <p>{step.hint}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="primary-button pet-coop-primary"
+          onClick={() => {
+            playStageAction(step.action, 1_400, step.hint);
+            onActionRef.current(step.action, step.hint, 1_500);
+            if (stretchStep < stretchSteps.length - 1) {
+              setStretchStep((value) => value + 1);
+              return;
+            }
+            if (completedRef.current) return;
+            completedRef.current = true;
+            onCompleteRef.current("stretch-mirror", stretchSteps.length, 24);
+          }}
+        >
+          <Check size={16} />
+          {stretchStep === stretchSteps.length - 1 ? "一起完成" : "我跟上了"}
+        </button>
+        <small>没有摄像头和动作评分，只需要舒服地跟着做。</small>
+      </section>
+    );
+  }
+
+  return (
+    <section className="pet-coop-game pet-jump-rope-game no-drag" aria-label="协作跳绳小游戏">
+      <header>
+        <div>
+          <span className="pet-game-kicker">20 秒协作挑战</span>
+          <h2>和 {petName} 一起跳绳</h2>
+        </div>
+        {gameControls}
+      </header>
+      <div className={`pet-rope-stage ${ropeWindowOpen ? "is-jump-window" : ""}`}>
+        <div className="pet-game-character" key={`${motionBeat}-${stageAction}`}>
+          <PetCharacter
+            mood="idle"
+            action={stageAction}
+            name={petName}
+            palette={palette}
+            outfit={outfit}
+            season={season}
+          />
+        </div>
+        <div className="pet-rope-cue">
+          <strong>{stageAction === "jump-rope" ? stageFeedback : ropeWindowOpen ? "现在跳！" : stageFeedback}</strong>
+          <small>绳子到脚边时点击，宠物才会越过绳子</small>
+        </div>
+      </div>
+      <button
+        type="button"
+        className={`pet-jump-button ${ropeWindowOpen ? "is-ready" : ""}`}
+        aria-label="让宠物跳起来"
+        onClick={jump}
+      >
+        <Sparkles size={18} /> 点击起跳
+      </button>
+      <div className="pet-game-score" aria-live="polite">
+        <span><strong>{remaining}</strong> 秒</span>
+        <span><strong>{score}</strong> 次成功</span>
+        <span><strong>{combo}</strong> 连跳</span>
+        <span><strong>{misses}</strong> 次差一点</span>
+      </div>
+    </section>
+  );
+}
+
 function FloatingWindow() {
   // Keep both task collections live. The floating panel can switch between
   // the open all-task overview and the complete Today list without waiting
@@ -7602,13 +8300,18 @@ function FloatingWindow() {
   const allController = useTaskController("all", "");
   const [expanded, setExpanded] = useState(false);
   const hoverExpandTimerRef = useRef<number | undefined>(undefined);
+  const hoverLeaveTimerRef = useRef<number | undefined>(undefined);
   const compactActivateTimerRef = useRef<number | undefined>(undefined);
   const contextMenuReturnExpandedRef = useRef(false);
+  const contextMenuReturnPetOnlyRef = useRef(false);
+  const interactionReturnExpandedRef = useRef(false);
+  const interactionReturnPetOnlyRef = useRef(false);
   const hoverExpandDelayMsRef = useRef(
     defaultSettings.floating.hoverExpandDelayMs,
   );
   const floatingSettingsLoadedRef = useRef(false);
   const hoveringFloatingRef = useRef(false);
+  const lastFloatingPointerRef = useRef({ x: -1, y: -1 });
   const expandTriggerRef = useRef<"hover" | "click" | undefined>(undefined);
   const [hoverExpandDelayMs, setHoverExpandDelayMs] = useState(
     defaultSettings.floating.hoverExpandDelayMs,
@@ -7620,7 +8323,18 @@ function FloatingWindow() {
   const [privacyMode, setPrivacyMode] = useState(false);
   const [floatingLocked, setFloatingLocked] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [interactionWheelOpen, setInteractionWheelOpen] = useState(false);
+  const [floatingGame, setFloatingGame] = useState<FloatingPetGame>();
   const [isFloatingHovered, setIsFloatingHovered] = useState(false);
+  const [petOnly, setPetOnly] = useState(readFloatingPetOnly);
+  const [reactionBubbleCollapsed, setReactionBubbleCollapsed] = useState(false);
+  const [taskBubbleCollapsed, setTaskBubbleCollapsed] = useState(false);
+  const [focusBubbleCollapsed, setFocusBubbleCollapsed] = useState(false);
+  const [heldTaskBubbleCollapsed, setHeldTaskBubbleCollapsed] = useState(false);
+  const [heldTaskId, setHeldTaskId] = useState<string>();
+  const [taskDropActive, setTaskDropActive] = useState(false);
+  const [petWindowDragging, setPetWindowDragging] = useState(false);
+  const floatingDragPointerRef = useRef<number | undefined>(undefined);
   const [tab, setTab] = useState<PetTab>(readFloatingTab);
   const [input, setInput] = useState("");
   const [creatingFloatingTask, setCreatingFloatingTask] = useState(false);
@@ -7631,6 +8345,7 @@ function FloatingWindow() {
   const [petSettings, setPetSettings] = useState(defaultSettings);
   const [focusBusy, setFocusBusy] = useState(false);
   const [focusError, setFocusError] = useState("");
+  const prefersReducedMotion = usePrefersReducedMotion();
   const petData = usePetData();
   const miniContentRef = useRef<HTMLDivElement>(null);
   const chatFollowsOutputRef = useRef(true);
@@ -7641,11 +8356,25 @@ function FloatingWindow() {
   const carousel = useFloatingTodayCarousel(
     todayController.tasks,
     focusedTask,
-    isFloatingHovered || expanded || contextMenuOpen || privacyMode,
+    isFloatingHovered || expanded || contextMenuOpen || interactionWheelOpen || Boolean(floatingGame) || privacyMode,
   );
   // The compact completion action follows the visible title. A rotating task
   // bubble must never complete a different, hidden task.
   const current = carousel.task;
+  const heldTask = heldTaskId
+    ? [...allController.tasks, ...todayController.tasks].find(
+        (task) => task.id === heldTaskId,
+      )
+    : undefined;
+  const petAppearance = petData.snapshot?.appearance ?? {
+    palette: "lavender" as const,
+    outfit: "none" as const,
+    roomTheme: "cloud-room" as const,
+    decorations: ["cloud-lamp"],
+  };
+  const petSeason = petSettings.pet.seasonalEvents
+    ? ((["winter", "winter", "spring", "spring", "spring", "summer", "summer", "summer", "autumn", "autumn", "autumn", "winter"] as const)[new Date().getMonth()])
+    : undefined;
   const floatingChat = useAgentChat({
     initialMessage:
       "我可以直接在这里查询、创建和整理任务；需要确认的操作也会留在这个小窗口里。",
@@ -7666,10 +8395,116 @@ function FloatingWindow() {
       setPanelExpanded(true, "click");
     },
   });
+  const openTodayTaskCount = todayController.tasks.filter(
+    (task) => task.status === "open" && !task.deletedAt,
+  ).length;
+  const overdueCount = todayController.tasks.filter(
+    (task) =>
+      task.status === "open" &&
+      Boolean(task.dueAt && task.dueAt.slice(0, 10) < dateKey()),
+  ).length;
+  const petBehavior = usePetBehavior(
+    {
+      reducedMotion: prefersReducedMotion,
+      focus: petFocus
+        ? { phase: petFocus.phase, status: petFocus.status }
+        : undefined,
+      syncing: feishuStatus?.state === "syncing",
+      syncError: feishuStatus?.state === "error",
+      agentSending: floatingChat.isSending,
+      agentRunState: floatingChat.runState,
+      approvalPending: Boolean(floatingChat.approval),
+      overdueCount,
+      openTaskCount: openTodayTaskCount,
+      taskDropActive,
+    },
+    petName,
+    petSettings.pet.interactionsEnabled,
+    petSettings.pet.actionPack,
+  );
+  useEffect(() => {
+    if (petBehavior.message) setReactionBubbleCollapsed(false);
+  }, [petBehavior.message]);
+  useEffect(() => {
+    if (heldTaskId) setHeldTaskBubbleCollapsed(false);
+  }, [heldTaskId]);
+  useEffect(() => {
+    void window.desktopApi?.shell.setFloatingPetOnly(petOnly);
+  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+  const previousSyncStateRef = useRef<FeishuStatusView["state"] | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    const previous = previousSyncStateRef.current;
+    previousSyncStateRef.current = feishuStatus?.state;
+    if (previous === "syncing" && feishuStatus?.state === "connected") {
+      petBehavior.act("sync-success", "同步完成，任务已经搬好啦。", 3_000);
+    }
+  }, [feishuStatus?.state]);
+  const lastProactiveAtRef = useRef(0);
+  useEffect(() => {
+    if (!floatingSettingsLoadedRef.current) return undefined;
+    if (
+      shouldSuppressPetProactive({
+        settings: petSettings,
+        now: new Date(),
+        focusActive: Boolean(petFocus),
+        fullscreen: Boolean(document.fullscreenElement),
+      })
+    ) {
+      return undefined;
+    }
+    const hour = new Date().getHours();
+    const delay = hour >= 6 && hour < 11 ? 8_000 : 45_000;
+    const showSuggestion = () => {
+      if (
+        shouldSuppressPetProactive({
+          settings: petSettings,
+          now: new Date(),
+          focusActive: Boolean(petFocus),
+          fullscreen: Boolean(document.fullscreenElement),
+        })
+      ) return;
+      const intervalMs = petSettings.pet.proactiveIntervalMinutes * 60_000;
+      if (
+        lastProactiveAtRef.current > 0 &&
+        Date.now() - lastProactiveAtRef.current < intervalMs - 1_000
+      ) return;
+      const suggestion = buildPetProactiveSuggestion({
+        now: new Date(),
+        tasks: allController.tasks,
+        weather: petData.weather,
+        petName,
+        syncProblem: feishuStatus?.state === "error",
+      });
+      lastProactiveAtRef.current = Date.now();
+      petBehavior.act(suggestion.action, suggestion.message, 8_000);
+      void window.desktopApi?.pet.recordProactiveMessage({
+        kind: suggestion.kind,
+        reason: suggestion.message,
+      });
+    };
+    const timer = window.setTimeout(showSuggestion, delay);
+    const interval = window.setInterval(
+      showSuggestion,
+      petSettings.pet.proactiveIntervalMinutes * 60_000,
+    );
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [
+    allController.tasks,
+    feishuStatus?.state,
+    petData.weather,
+    petFocus,
+    petName,
+    petSettings,
+  ]);
   useEffect(() => {
     try {
       localStorage.setItem(floatingTabStorageKey, tab);
@@ -7693,10 +8528,16 @@ function FloatingWindow() {
       if (hoverExpandTimerRef.current !== undefined) {
         window.clearTimeout(hoverExpandTimerRef.current);
       }
+      if (hoverLeaveTimerRef.current !== undefined) {
+        window.clearTimeout(hoverLeaveTimerRef.current);
+      }
       if (compactActivateTimerRef.current !== undefined) {
         window.clearTimeout(compactActivateTimerRef.current);
       }
       contextMenuReturnExpandedRef.current = false;
+      contextMenuReturnPetOnlyRef.current = false;
+      interactionReturnExpandedRef.current = false;
+      interactionReturnPetOnlyRef.current = false;
     },
     [],
   );
@@ -7819,6 +8660,15 @@ function FloatingWindow() {
     value: boolean,
     trigger: "hover" | "click" = "click",
   ) {
+    if (value && petOnly) {
+      setPetOnly(false);
+      try {
+        localStorage.setItem(floatingPetOnlyStorageKey, "false");
+      } catch {
+        // The in-memory mode still works if persistence is unavailable.
+      }
+      void window.desktopApi?.shell.setFloatingPetOnly(false);
+    }
     if (hoverExpandTimerRef.current !== undefined) {
       window.clearTimeout(hoverExpandTimerRef.current);
       hoverExpandTimerRef.current = undefined;
@@ -7827,19 +8677,117 @@ function FloatingWindow() {
       window.clearTimeout(compactActivateTimerRef.current);
       compactActivateTimerRef.current = undefined;
     }
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = undefined;
+    }
     if (!value) {
       setContextMenuOpen(false);
+      setInteractionWheelOpen(false);
+      setFloatingGame(undefined);
       contextMenuReturnExpandedRef.current = false;
+      interactionReturnExpandedRef.current = false;
     }
     expandTriggerRef.current = value ? trigger : undefined;
     setExpanded(value);
     void window.desktopApi?.shell.setFloatingExpanded(value);
   }
+  function collapsePetTaskRail(): void {
+    if (hoverExpandTimerRef.current !== undefined) {
+      window.clearTimeout(hoverExpandTimerRef.current);
+      hoverExpandTimerRef.current = undefined;
+    }
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = undefined;
+    }
+    if (compactActivateTimerRef.current !== undefined) {
+      window.clearTimeout(compactActivateTimerRef.current);
+      compactActivateTimerRef.current = undefined;
+    }
+    setContextMenuOpen(false);
+    setInteractionWheelOpen(false);
+    setFloatingGame(undefined);
+    setExpanded(false);
+    expandTriggerRef.current = undefined;
+    setPetOnly(true);
+    try {
+      localStorage.setItem(floatingPetOnlyStorageKey, "true");
+    } catch {
+      // The in-memory mode still works if persistence is unavailable.
+    }
+    void window.desktopApi?.shell.setFloatingPetOnly(true);
+  }
+  function expandPetTaskRail(): void {
+    setPetOnly(false);
+    try {
+      localStorage.setItem(floatingPetOnlyStorageKey, "false");
+    } catch {
+      // The in-memory mode still works if persistence is unavailable.
+    }
+    void window.desktopApi?.shell.setFloatingPetOnly(false);
+  }
   function closeFloatingContextMenu(): void {
     const returnToExpandedPanel = contextMenuReturnExpandedRef.current;
+    const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
     contextMenuReturnExpandedRef.current = false;
+    contextMenuReturnPetOnlyRef.current = false;
     setContextMenuOpen(false);
+    if (returnToPetOnly) {
+      collapsePetTaskRail();
+      return;
+    }
     if (!returnToExpandedPanel) setPanelExpanded(false);
+  }
+  function openPetInteractionWheel(): void {
+    interactionReturnExpandedRef.current = expanded;
+    interactionReturnPetOnlyRef.current = petOnly;
+    setContextMenuOpen(false);
+    setFloatingGame(undefined);
+    setInteractionWheelOpen(true);
+    if (!expanded) setPanelExpanded(true, "click");
+  }
+  function closePetInteractionSurface(): void {
+    const returnToExpandedPanel = interactionReturnExpandedRef.current;
+    const returnToPetOnly = interactionReturnPetOnlyRef.current;
+    interactionReturnExpandedRef.current = false;
+    interactionReturnPetOnlyRef.current = false;
+    setInteractionWheelOpen(false);
+    setFloatingGame(undefined);
+    if (returnToPetOnly) {
+      collapsePetTaskRail();
+      return;
+    }
+    if (!returnToExpandedPanel) setPanelExpanded(false);
+  }
+  function performWheelInteraction(kind: PetInteractionKind): void {
+    petBehavior.interact(kind);
+    void window.desktopApi?.pet.interact(kind).then(() => petData.refresh());
+    closePetInteractionSurface();
+  }
+  function startFloatingPetGame(game: FloatingPetGame): void {
+    setInteractionWheelOpen(false);
+    setFloatingGame(game);
+    petBehavior.act(
+      game === "jump-rope" ? "wave" : "stretch",
+      game === "jump-rope" ? "准备好了吗？看准绳子一起跳！" : "我做一拍，你跟一拍。",
+      2_400,
+    );
+  }
+  function completeFloatingPetGame(
+    game: FloatingPetGame,
+    score: number,
+    durationSeconds: number,
+  ): void {
+    void window.desktopApi?.pet
+      .recordMiniGame({ game, score, durationSeconds })
+      .then(() => petData.refresh());
+    petBehavior.celebrate(
+      game === "jump-rope"
+        ? `我们一起跳了 ${score} 下！配合越来越好啦。`
+        : "伸展完成，肩膀和眼睛都松一松。",
+    );
+    closePetInteractionSurface();
   }
   function openFloatingContextMenu(
     event: ReactMouseEvent<HTMLElement>,
@@ -7847,19 +8795,26 @@ function FloatingWindow() {
     event.preventDefault();
     event.stopPropagation();
     contextMenuReturnExpandedRef.current = expanded;
+    contextMenuReturnPetOnlyRef.current = petOnly;
     setContextMenuOpen(true);
     if (!expanded) setPanelExpanded(true, "click");
   }
   function showMainFromFloatingMenu(route: MainRoute): void {
+    const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
     contextMenuReturnExpandedRef.current = false;
+    contextMenuReturnPetOnlyRef.current = false;
     setContextMenuOpen(false);
-    setPanelExpanded(false);
+    if (returnToPetOnly) collapsePetTaskRail();
+    else setPanelExpanded(false);
     void window.desktopApi?.shell.showMain(route);
   }
   function showQuickCaptureFromFloatingMenu(): void {
+    const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
     contextMenuReturnExpandedRef.current = false;
+    contextMenuReturnPetOnlyRef.current = false;
     setContextMenuOpen(false);
-    setPanelExpanded(false);
+    if (returnToPetOnly) collapsePetTaskRail();
+    else setPanelExpanded(false);
     void window.desktopApi?.shell.showQuickCapture();
   }
   function openFloatingChatFromMenu(): void {
@@ -7911,6 +8866,60 @@ function FloatingWindow() {
     tomorrow.setHours(0, 0, 0, 0);
     mutePetUntil(tomorrow);
   }
+  function performPetInteraction(kind: PetInteractionKind): void {
+    petBehavior.interact(kind);
+    void window.desktopApi?.pet.interact(kind).then(() => petData.refresh());
+    closeFloatingContextMenu();
+  }
+  function beginFloatingHandleDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (floatingLocked || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    floatingDragPointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setPetWindowDragging(true);
+    petBehavior.startDragging();
+    void window.desktopApi?.shell.beginFloatingDrag(
+      event.screenX,
+      event.screenY,
+    );
+  }
+  function updateFloatingHandleDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (floatingDragPointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+    void window.desktopApi?.shell.updateFloatingDrag(
+      event.screenX,
+      event.screenY,
+    );
+  }
+  function finishFloatingHandleDrag(
+    event?: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (
+      event &&
+      floatingDragPointerRef.current !== undefined &&
+      floatingDragPointerRef.current !== event.pointerId
+    ) return;
+    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    floatingDragPointerRef.current = undefined;
+    setPetWindowDragging(false);
+    petBehavior.stopDragging();
+    void window.desktopApi?.shell.endFloatingDrag();
+  }
+  async function toggleTaskFromPet(
+    controller: TaskController,
+    task: Task,
+  ): Promise<void> {
+    const completing = task.status === "open";
+    await controller.toggleComplete(task);
+    if (completing) petBehavior.celebrate("完成一件，真不错。");
+  }
   async function runFocusAction(operation: () => Promise<unknown>) {
     setFocusBusy(true);
     setFocusError("");
@@ -7928,8 +8937,9 @@ function FloatingWindow() {
   function startPetFocus(
     mode: "pomodoro" | "count-up",
     focusMinutes = petSettings.focus.focusMinutes,
+    taskOverride?: Task,
   ): void {
-    const task = current;
+    const task = taskOverride ?? current;
     void runFocusAction(async () => {
       await window.desktopApi?.pet.startFocus({
         mode,
@@ -7956,6 +8966,32 @@ function FloatingWindow() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [contextMenuOpen]);
+  useEffect(() => {
+    if (!interactionWheelOpen && !floatingGame) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closePetInteractionSurface();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [interactionWheelOpen, floatingGame, expanded]);
+  useEffect(() => {
+    if (!petWindowDragging) return undefined;
+    const finish = () => {
+      if (floatingDragPointerRef.current === undefined) return;
+      floatingDragPointerRef.current = undefined;
+      setPetWindowDragging(false);
+      petBehavior.stopDragging();
+      void window.desktopApi?.shell.endFloatingDrag();
+    };
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("blur", finish, { once: true });
+    return () => {
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("blur", finish);
+    };
+  }, [petWindowDragging]);
   function openMainFromCompact(): void {
     if (compactActivateTimerRef.current !== undefined) {
       window.clearTimeout(compactActivateTimerRef.current);
@@ -7995,7 +9031,7 @@ function FloatingWindow() {
     }, 240);
   }
   function scheduleHoverExpand() {
-    if (expanded || hoverExpandTimerRef.current !== undefined) return;
+    if (petOnly || expanded || hoverExpandTimerRef.current !== undefined) return;
     hoverExpandTimerRef.current = window.setTimeout(() => {
       hoverExpandTimerRef.current = undefined;
       if (!hoveringFloatingRef.current) return;
@@ -8003,6 +9039,10 @@ function FloatingWindow() {
     }, hoverExpandDelayMsRef.current);
   }
   const beginHoverExpand = () => {
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = undefined;
+    }
     hoveringFloatingRef.current = true;
     setIsFloatingHovered(true);
     scheduleHoverExpand();
@@ -8012,13 +9052,33 @@ function FloatingWindow() {
     window.clearTimeout(hoverExpandTimerRef.current);
     hoverExpandTimerRef.current = undefined;
   };
-  const endHoverInteraction = () => {
+  const endHoverInteraction = (clientX: number, clientY: number) => {
+    lastFloatingPointerRef.current = { x: clientX, y: clientY };
     hoveringFloatingRef.current = false;
     setIsFloatingHovered(false);
     cancelHoverExpand();
-    if (expandTriggerRef.current === "hover") {
-      setPanelExpanded(false);
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
     }
+    // Resizing the native transparent window from compact to expanded can
+    // briefly dispatch mouseleave even though the pointer is still over the
+    // newly revealed panel. Give the window geometry time to settle, then
+    // verify the pointer is really outside the entire floating surface.
+    hoverLeaveTimerRef.current = window.setTimeout(() => {
+      hoverLeaveTimerRef.current = undefined;
+      const { x, y } = lastFloatingPointerRef.current;
+      const withinViewport =
+        x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight;
+      const pointedElement = withinViewport
+        ? document.elementFromPoint(x, y)
+        : null;
+      if (pointedElement?.closest(".floating-stack")) {
+        hoveringFloatingRef.current = true;
+        setIsFloatingHovered(true);
+        return;
+      }
+      if (expandTriggerRef.current === "hover") setPanelExpanded(false);
+    }, 180);
   };
   const syncLabel = feishuStatus?.connected
     ? feishuStatus.state === "syncing"
@@ -8027,11 +9087,6 @@ function FloatingWindow() {
     : feishuStatus?.configured
       ? "飞书等待重新连接"
       : "飞书未连接 · 本地任务正常";
-  const overdueCount = todayController.tasks.filter(
-    (task) =>
-      task.status === "open" &&
-      Boolean(task.dueAt && task.dueAt.slice(0, 10) < dateKey()),
-  ).length;
   const petMood: PetMood = petFocus?.status === "running"
     ? "focus"
     : feishuStatus?.state === "syncing"
@@ -8043,7 +9098,8 @@ function FloatingWindow() {
           : "idle";
   return (
     <div
-      className={`floating-shell pet-shell ${expanded ? "is-expanded" : "is-compact"} ${privacyMode ? "privacy-mode" : ""} ${floatingLocked ? "position-locked" : ""} ${petFocus?.status === "running" ? "focus-mode" : ""}`}
+      className={`floating-shell pet-shell ${expanded ? "is-expanded" : "is-compact"} ${petOnly ? "is-pet-only" : ""} ${privacyMode ? "privacy-mode" : ""} ${floatingLocked ? "position-locked" : ""} ${petFocus ? "has-focus-session" : ""} ${petFocus?.status === "running" ? "focus-mode" : ""} ${petBehavior.message ? "has-pet-reaction" : ""} ${petBehavior.message && reactionBubbleCollapsed ? "pet-reaction-collapsed" : ""} ${petWindowDragging ? "is-pet-dragging" : ""} ${interactionWheelOpen ? "has-interaction-wheel" : ""} ${floatingGame ? "has-coop-game" : ""} pet-motion-${petSettings.pet.animationIntensity}`}
+      data-pet-action={petBehavior.action}
       style={
         {
           "--pet-scale": Math.max(75, Math.min(125, scalePercent)) / 100,
@@ -8054,109 +9110,440 @@ function FloatingWindow() {
         className="floating-stack"
         data-expand-trigger={expandTriggerRef.current ?? "closed"}
         onMouseEnter={beginHoverExpand}
-        onMouseOut={(event) => {
-          const next = event.relatedTarget;
-          if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
-            endHoverInteraction();
-          }
+        onMouseMove={(event) => {
+          lastFloatingPointerRef.current = {
+            x: event.clientX,
+            y: event.clientY,
+          };
         }}
+        onMouseLeave={(event) =>
+          endHoverInteraction(event.clientX, event.clientY)
+        }
       >
         <div
-          // The pet and its task bubble form one native drag surface. Buttons
-          // opt out so task controls and panel expansion remain clickable.
-          className="pet-compact drag-region"
+          // The native window remains transparent. Only the pet and its two
+          // speech bubbles are painted; controls opt out of the drag surface.
+          className="pet-compact"
           onContextMenu={openFloatingContextMenu}
         >
-          <span
-            className="floating-drag-handle drag-region"
-            title={floatingLocked ? "位置已锁定" : "拖动移动"}
-            aria-hidden="true"
+          {petBehavior.message && (
+            <div
+              className={`pet-reaction-bubble no-drag ${reactionBubbleCollapsed ? "is-collapsed" : ""}`}
+              role="status"
+              aria-live="polite"
+            >
+              <button
+                type="button"
+                className="pet-reaction-bubble-toggle"
+                aria-expanded={!reactionBubbleCollapsed}
+                aria-label={reactionBubbleCollapsed ? "展开宠物消息气泡" : "折叠宠物消息气泡"}
+                onClick={() => setReactionBubbleCollapsed((value) => !value)}
+              >
+                <span><Sparkles size={12} /> {petName}有话说</span>
+                <ChevronDown size={14} />
+              </button>
+              {!reactionBubbleCollapsed && (
+                <div className="pet-reaction-bubble-body">
+                  <span>{petBehavior.message}</span>
+                  <div className="pet-quick-replies">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        petBehavior.dismiss();
+                        setTab(openTodayTaskCount ? "today" : "all");
+                        setPanelExpanded(true, "click");
+                      }}
+                    >
+                      好，一起看看
+                    </button>
+                    <button type="button" onClick={petBehavior.dismiss}>
+                      稍后
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {!floatingGame && (
+            <button
+              type="button"
+              className="floating-drag-handle no-drag"
+              title={floatingLocked ? "位置已锁定" : "拖动移动"}
+              aria-label={floatingLocked ? "宠物位置已锁定" : "拖动 Todo Pet"}
+              disabled={floatingLocked}
+              onPointerDown={beginFloatingHandleDrag}
+              onPointerMove={updateFloatingHandleDrag}
+              onPointerUp={finishFloatingHandleDrag}
+              onPointerCancel={finishFloatingHandleDrag}
+            >
+              <GripVertical size={15} />
+            </button>
+          )}
+          {!floatingGame && !interactionWheelOpen && (
+            <button
+              type="button"
+              className={`pet-task-rail-toggle no-drag ${petOnly ? "is-expand" : "is-collapse"}`}
+              aria-label={petOnly ? "展开宠物任务栏" : "收起宠物任务栏"}
+              title={petOnly ? "展开任务栏" : "只保留宠物"}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (petOnly) expandPetTaskRail();
+                else collapsePetTaskRail();
+              }}
+            >
+              {petOnly ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+            </button>
+          )}
+          <button
+            type="button"
+            className={`pet-interaction-trigger no-drag ${interactionWheelOpen ? "is-open" : ""}`}
+            aria-label={interactionWheelOpen ? "关闭宠物互动轮盘" : `和${petName}互动`}
+            aria-expanded={interactionWheelOpen}
+            title="互动与小游戏"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (interactionWheelOpen) closePetInteractionSurface();
+              else openPetInteractionWheel();
+            }}
           >
-            <GripVertical size={15} />
-          </span>
+            {interactionWheelOpen ? <X size={15} /> : <Heart size={15} />}
+          </button>
           <button
             type="button"
             className="pet-avatar-button floating-expand-trigger no-drag"
-            aria-label={`与${petName}互动`}
+            aria-label={petOnly ? `互动 ${petName}` : expanded ? `收起 ${petName}` : `展开 ${petName}`}
             aria-expanded={expanded}
             title={
-              expanded
+              petOnly
+                ? "点击互动 · 双击打开主窗口"
+                : expanded
                 ? "点击收起"
                 : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
             }
+            onDragEnter={(event) => {
+              if (!event.dataTransfer.types.includes("application/x-todo-agent-task")) return;
+              event.preventDefault();
+              setTaskDropActive(true);
+            }}
+            onDragOver={(event) => {
+              if (!event.dataTransfer.types.includes("application/x-todo-agent-task")) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setTaskDropActive(false);
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const taskId = event.dataTransfer.getData("application/x-todo-agent-task");
+              setTaskDropActive(false);
+              if (!taskId) return;
+              setHeldTaskId(taskId);
+              petBehavior.taskDrop();
+              if (petOnly) expandPetTaskRail();
+            }}
             onClick={(event) => {
+              if (petSettings.pet.interactionsEnabled) {
+                const character = event.currentTarget.querySelector<HTMLElement>(
+                  ".pet-character",
+                );
+                const kind = petInteractionFromPoint(
+                  event.clientX,
+                  event.clientY,
+                  (character ?? event.currentTarget).getBoundingClientRect(),
+                );
+                petBehavior.interact(kind);
+                void window.desktopApi?.pet.interact(kind).then(() => petData.refresh());
+              }
+              if (petOnly) {
+                if (event.detail > 1) openMainFromCompact();
+                return;
+              }
               if (expanded) {
                 setPanelExpanded(false, "click");
                 return;
-              }
-              if (petSettings.pet.interactionsEnabled) {
-                void window.desktopApi?.pet.interact("avatar-click");
               }
               handleCompactActivate(event);
             }}
           >
             <PetCharacter
               mood={petMood}
+              emotion={petBehavior.emotion}
+              action={petBehavior.action}
               name={petName}
               scalePercent={expanded ? 100 : scalePercent}
               compact
+              interactive
+              palette={petAppearance.palette}
+              outfit={petAppearance.outfit}
+              season={petSeason}
             />
           </button>
-          <button
-            type="button"
-            className="pet-task-bubble floating-summary no-drag"
-            aria-label={expanded ? `收起 ${petName}` : `展开 ${petName}`}
-            aria-expanded={expanded}
-            title={
-              expanded
-                ? "点击收起"
-                : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
-            }
-            onClick={(event) => {
-              if (expanded) {
-                setPanelExpanded(false, "click");
-                return;
-              }
-              handleCompactActivate(event);
-            }}
-          >
-            <div className="floating-copy">
-              <FloatingTodayCarousel
-                task={current}
-                index={carousel.index}
-                count={carousel.count}
-                paused={carousel.paused}
-                static={carousel.static}
-                privacyMode={privacyMode}
-              />
-              <small>
-                {current
-                  ? `${current.focusStartedAt ? `${petName}陪你专注` : `${petName}提醒你`} · ${current.source.type === "feishu" ? "飞书" : "本地"}${privacyMode ? " · 隐私模式" : ""}`
-                  : `${petName}说：今天可以轻松一点`}
-              </small>
+          {interactionWheelOpen && (
+            <div className="pet-interaction-wheel no-drag" role="menu" aria-label="宠物互动轮盘">
+              <button style={{ "--wheel-index": 0 } as CSSProperties} type="button" role="menuitem" aria-label="摸摸头" onClick={() => performWheelInteraction("head-pat")}>
+                <Heart size={17} /><span>摸摸头</span>
+              </button>
+              <button style={{ "--wheel-index": 1 } as CSSProperties} type="button" role="menuitem" aria-label="挠痒痒" onClick={() => performWheelInteraction("tickle")}>
+                <Sparkles size={17} /><span>挠痒痒</span>
+              </button>
+              <button style={{ "--wheel-index": 2 } as CSSProperties} type="button" role="menuitem" aria-label="击掌" onClick={() => performWheelInteraction("high-five")}>
+                <Check size={17} /><span>击掌</span>
+              </button>
+              <button style={{ "--wheel-index": 3 } as CSSProperties} type="button" role="menuitem" aria-label="玩毛线球" onClick={() => performWheelInteraction("play")}>
+                <CircleDot size={17} /><span>毛线球</span>
+              </button>
+              <button style={{ "--wheel-index": 4 } as CSSProperties} type="button" role="menuitem" aria-label="轻戳肚子" onClick={() => performWheelInteraction("belly-poke")}>
+                <WandSparkles size={17} /><span>戳肚子</span>
+              </button>
+              <button style={{ "--wheel-index": 5 } as CSSProperties} type="button" role="menuitem" aria-label="一起休息" onClick={() => performWheelInteraction("rest")}>
+                <Sun size={17} /><span>喝水</span>
+              </button>
+              <button className="is-game" style={{ "--wheel-index": 6 } as CSSProperties} type="button" role="menuitem" aria-label="开始协作跳绳" onClick={() => startFloatingPetGame("jump-rope")}>
+                <Play size={17} /><span>跳绳</span>
+              </button>
+              <button className="is-game" style={{ "--wheel-index": 7 } as CSSProperties} type="button" role="menuitem" aria-label="开始镜像伸展" onClick={() => startFloatingPetGame("stretch-mirror")}>
+                <Activity size={17} /><span>伸展</span>
+              </button>
             </div>
-            <span className="focus-time">
-              {petFocus
-                ? clockDuration(petFocusClock)
-                : current
-                  ? humanDuration(elapsed)
-                  : "✓"}
-            </span>
-          </button>
-          {current && (
-            <button
-              type="button"
-              className="icon-button pet-complete-button no-drag"
-              disabled={!canToggleTaskCompletion(current)}
-              aria-label={
-                privacyMode ? "完成当前私人任务" : `完成${current.title}`
-              }
-              onClick={() => void todayController.toggleComplete(current)}
-            >
-              <Check size={17} />
-            </button>
           )}
+          <div className="pet-bubble-stack no-drag">
+            {heldTask && (
+              <section
+                className={`pet-speech-bubble pet-held-task ${heldTaskBubbleCollapsed ? "is-collapsed" : ""}`}
+                aria-label="交给宠物的任务"
+              >
+                <button
+                  type="button"
+                  className="pet-bubble-toggle"
+                  aria-expanded={!heldTaskBubbleCollapsed}
+                  aria-label={heldTaskBubbleCollapsed ? "展开交给宠物的任务气泡" : "折叠交给宠物的任务气泡"}
+                  onClick={() => setHeldTaskBubbleCollapsed((value) => !value)}
+                >
+                  <span className="pet-bubble-label">
+                    <Sparkles size={13} />
+                    我接住了
+                  </span>
+                  <ChevronDown size={15} />
+                </button>
+                {!heldTaskBubbleCollapsed && (
+                  <div className="pet-held-task-body">
+                    <strong>{privacyMode ? "私人任务" : heldTask.title}</strong>
+                    <div className="pet-held-task-actions">
+                  <button
+                    type="button"
+                    disabled={!canToggleTaskCompletion(heldTask)}
+                    onClick={() => {
+                      const controller = tab === "today" ? todayController : allController;
+                      void toggleTaskFromPet(controller, heldTask).then(() => {
+                        petBehavior.taskComplete();
+                        setHeldTaskId(undefined);
+                      });
+                    }}
+                  >
+                    <Check size={13} /> 完成
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void allController.moveToToday(heldTask.id).then(() => {
+                        petBehavior.act("task-plan", "已经放进今天。", 3_000);
+                        setHeldTaskId(undefined);
+                      });
+                    }}
+                  >
+                    <Sun size={13} /> 今天
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      startPetFocus("pomodoro", petSettings.focus.focusMinutes, heldTask);
+                      setHeldTaskId(undefined);
+                    }}
+                  >
+                    <Focus size={13} /> 专注
+                  </button>
+                  <button type="button" aria-label="放下任务" onClick={() => setHeldTaskId(undefined)}>
+                    <X size={13} />
+                  </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+            <section
+              className={`pet-speech-bubble pet-task-bubble ${taskBubbleCollapsed ? "is-collapsed" : ""}`}
+              aria-label="当前任务气泡"
+            >
+              <button
+                type="button"
+                className="pet-bubble-toggle"
+                aria-expanded={!taskBubbleCollapsed}
+                aria-label={taskBubbleCollapsed ? "展开任务气泡" : "折叠任务气泡"}
+                onClick={() => setTaskBubbleCollapsed((value) => !value)}
+              >
+                <span className="pet-bubble-label">
+                  <ListChecks size={13} />
+                  当前任务
+                  <small>{carousel.count ? `${carousel.index + 1}/${carousel.count}` : "已清空"}</small>
+                </span>
+                <ChevronDown size={15} />
+              </button>
+              {!taskBubbleCollapsed && (
+                <div className="pet-task-bubble-body">
+                  <button
+                    type="button"
+                    className="floating-summary"
+                    aria-label="打开当前任务列表"
+                    title={expanded ? "切换到任务列表" : "单击展开任务列表 · 双击打开主窗口"}
+                    onClick={(event) => {
+                      if (expanded) {
+                        setTab("today");
+                        return;
+                      }
+                      handleCompactActivate(event);
+                    }}
+                  >
+                    <div className="floating-copy">
+                      <FloatingTodayCarousel
+                        task={current}
+                        index={carousel.index}
+                        count={carousel.count}
+                        paused={carousel.paused}
+                        static={carousel.static}
+                        privacyMode={privacyMode}
+                      />
+                      <small>
+                        {current
+                          ? `${petName}提醒你 ${current.source.type === "feishu" ? "飞书任务" : "本地任务"}${privacyMode ? "（隐私模式）" : ""}`
+                          : `${petName}说：今天可以轻松一点`}
+                      </small>
+                    </div>
+                    <span className="focus-time">
+                      {current ? humanDuration(elapsed) : "✓"}
+                    </span>
+                  </button>
+                  {current && (
+                    <button
+                      type="button"
+                      className="icon-button pet-complete-button"
+                      disabled={!canToggleTaskCompletion(current)}
+                      aria-label={
+                        privacyMode ? "完成当前私人任务" : `完成${current.title}`
+                      }
+                      onClick={() => void toggleTaskFromPet(todayController, current)}
+                    >
+                      <Check size={17} />
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
+            {petFocus && (
+              <section
+                className={`pet-speech-bubble pet-focus-bubble ${focusBubbleCollapsed ? "is-collapsed" : ""}`}
+                aria-label="专注计时气泡"
+              >
+                <button
+                  type="button"
+                  className="pet-bubble-toggle pet-focus-bubble-toggle"
+                  aria-expanded={!focusBubbleCollapsed}
+                  aria-label={focusBubbleCollapsed ? "展开专注气泡" : "折叠专注气泡"}
+                  onClick={() => setFocusBubbleCollapsed((value) => !value)}
+                >
+                  <span className="pet-bubble-label">
+                    <Focus size={14} />
+                    {focusPhaseLabel}
+                    <small>第 {petFocus.cycle}/{petFocus.preset.cycles} 轮</small>
+                  </span>
+                  <strong>{clockDuration(petFocusClock)}</strong>
+                  <ChevronDown size={15} />
+                </button>
+                {!focusBubbleCollapsed && (
+                  <div className="pet-focus-bubble-body">
+                    <p>
+                      {petFocus.taskTitle
+                        ? privacyMode
+                          ? "私人任务"
+                          : petFocus.taskTitle
+                        : petFocus.phase === "focus"
+                          ? "我陪你把这一段时间守住"
+                          : "站起来走走，喝口水吧"}
+                    </p>
+                    <div className="pet-focus-bubble-actions">
+                      {petFocus.status === "awaiting-completion" ? (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={focusBusy}
+                          aria-label={petFocus.phase === "focus" ? "开始专注休息" : "开始下一轮专注"}
+                          onClick={() =>
+                            void runFocusAction(() =>
+                              window.desktopApi!.pet.advanceFocus(),
+                            )
+                          }
+                        >
+                          <Play size={14} />
+                          {petFocus.phase === "focus" ? "休息" : "下一轮"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={focusBusy}
+                          aria-label={petFocus.status === "running" ? "暂停专注计时" : "继续专注计时"}
+                          onClick={() =>
+                            void runFocusAction(() =>
+                              petFocus.status === "running"
+                                ? window.desktopApi!.pet.pauseFocus()
+                                : window.desktopApi!.pet.resumeFocus(),
+                            )
+                          }
+                        >
+                          {petFocus.status === "running" ? <Pause size={14} /> : <Play size={14} />}
+                          {petFocus.status === "running" ? "暂停" : "继续"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="soft-button"
+                        disabled={focusBusy}
+                        aria-label="结束专注计时"
+                        onClick={() =>
+                          void runFocusAction(() =>
+                            window.desktopApi!.pet.finishFocus("abandoned"),
+                          )
+                        }
+                      >
+                        <Square size={13} />
+                        结束
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
         </div>
+        {floatingGame && (
+          <FloatingPetCoopGame
+            key={floatingGame}
+            game={floatingGame}
+            petName={petName}
+            palette={petAppearance.palette}
+            outfit={petAppearance.outfit}
+            season={petSeason}
+            positionLocked={floatingLocked}
+            onDragStart={beginFloatingHandleDrag}
+            onDragMove={updateFloatingHandleDrag}
+            onDragEnd={finishFloatingHandleDrag}
+            onAction={petBehavior.act}
+            onComplete={completeFloatingPetGame}
+            onClose={closePetInteractionSurface}
+          />
+        )}
         {contextMenuOpen && (
           <>
             <button
@@ -8209,6 +9596,61 @@ function FloatingWindow() {
               <div className="floating-context-divider" role="separator" />
               <button
                 type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("pet")}
+              >
+                <Heart size={16} />
+                <span>摸摸{petName}</span>
+                <small>增加默契</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("play")}
+              >
+                <CircleDot size={16} />
+                <span>玩一会儿</span>
+                <small>毛线球</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("high-five")}
+              >
+                <Sparkles size={16} />
+                <span>击个掌</span>
+                <small>庆祝一下</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("rest")}
+              >
+                <Activity size={16} />
+                <span>一起休息</span>
+                <small>喝水伸展</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("morning")}
+              >
+                <Sun size={16} />
+                <span>早间问候</span>
+                <small>看看今天</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("evening")}
+              >
+                <Clock3 size={16} />
+                <span>晚间收尾</span>
+                <small>温柔复盘</small>
+              </button>
+              <div className="floating-context-divider" role="separator" />
+              <button
+                type="button"
                 role="menuitemcheckbox"
                 aria-checked={privacyMode}
                 onClick={() => toggleFloatingPreference("privacyMode")}
@@ -8249,7 +9691,7 @@ function FloatingWindow() {
             </div>
           </>
         )}
-        {expanded && !contextMenuOpen && (
+        {expanded && !contextMenuOpen && !interactionWheelOpen && !floatingGame && (
           <div className="mini-panel">
             <div className="mini-tabs">
               <button
@@ -8318,14 +9760,24 @@ function FloatingWindow() {
             >
               {isTaskTab &&
                 displayedTaskController.tasks.map((task) => (
-                  <div className="mini-task" key={task.id}>
+                  <div
+                    className="mini-task"
+                    key={task.id}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData("application/x-todo-agent-task", task.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      petBehavior.act("task-carry", "把任务拖到我身上，我来接住。", 8_000);
+                    }}
+                    onDragEnd={() => setTaskDropActive(false)}
+                  >
                     <input
                       className="task-checkbox"
                       type="checkbox"
                       checked={task.status === "completed"}
                       disabled={!canToggleTaskCompletion(task)}
                       onChange={() =>
-                        void displayedTaskController.toggleComplete(task)
+                        void toggleTaskFromPet(displayedTaskController, task)
                       }
                       aria-label={
                         privacyMode ? "完成私人任务" : `完成${task.title}`
@@ -8468,7 +9920,13 @@ function FloatingWindow() {
                 <div className="pet-focus-view">
                   <PetCharacter
                     mood={petFocus?.status === "running" ? "focus" : "idle"}
+                    emotion={petBehavior.emotion}
+                    action={petBehavior.action}
                     name={petName}
+                    interactive
+                    palette={petAppearance.palette}
+                    outfit={petAppearance.outfit}
+                    season={petSeason}
                   />
                   <p className="pet-focus-kicker">
                     {petFocus
@@ -8578,7 +10036,16 @@ function FloatingWindow() {
               {tab === "home" && (
                 <div className="pet-home-view">
                   <div className="pet-home-hero">
-                    <PetCharacter mood={petMood} name={petName} />
+                    <PetCharacter
+                      mood={petMood}
+                      emotion={petBehavior.emotion}
+                      action={petBehavior.action}
+                      name={petName}
+                      interactive
+                      palette={petAppearance.palette}
+                      outfit={petAppearance.outfit}
+                      season={petSeason}
+                    />
                     <div>
                       <span>Todo Pet</span>
                       <h3>{petName}的小窝</h3>

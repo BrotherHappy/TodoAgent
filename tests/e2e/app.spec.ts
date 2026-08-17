@@ -22,6 +22,7 @@ async function launch(profilePath: string): Promise<ElectronApplication> {
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: "false",
       TODO_AGENT_E2E: "1",
+      TODO_AGENT_E2E_BACKGROUND: "1",
     },
   });
 }
@@ -641,7 +642,7 @@ test.describe("Todo Agent desktop shell", () => {
       return { background: style.backgroundColor, backdrop: style.backdropFilter };
     });
     const capsuleVisual = await floating
-      .locator(".pet-compact")
+      .locator(".pet-task-bubble")
       .evaluate((element) => {
         const style = getComputedStyle(element);
         return { background: style.backgroundColor, backdrop: style.backdropFilter };
@@ -676,23 +677,54 @@ test.describe("Todo Agent desktop shell", () => {
         height: bounds.height,
       };
     });
-    expect(cssAlpha(petVisual.background)).toBeGreaterThanOrEqual(0.98);
-    expect(petVisual.borderWidth).toBe("1px");
-    expect(petVisual.boxShadow).not.toBe("none");
+    expect(cssAlpha(petVisual.background)).toBe(0);
+    expect(petVisual.borderWidth).toBe("0px");
+    expect(petVisual.boxShadow).toBe("none");
     expect(petVisual.height).toBeGreaterThanOrEqual(100);
     await expect(floating.locator(".pet-character")).toBeVisible();
     await expect(floating.locator(".floating-drag-handle")).toBeVisible();
+    await expect(floating.locator(".pet-task-bubble")).toBeVisible();
+    await floating
+      .getByRole("button", { name: "折叠任务气泡" })
+      .click();
+    await expect(floating.locator(".pet-task-bubble")).toHaveClass(
+      /is-collapsed/u,
+    );
+    await expect(floating.locator(".floating-carousel")).toBeHidden();
+    await floating
+      .getByRole("button", { name: "展开任务气泡" })
+      .click();
+    await expect(floating.locator(".floating-carousel")).toBeVisible();
     expect(
       await pet.evaluate((element) =>
         getComputedStyle(element).getPropertyValue("-webkit-app-region"),
       ),
-    ).toBe("drag");
+    ).toBe("no-drag");
     expect(
       await floating.locator(".floating-drag-handle").evaluate((element) =>
         getComputedStyle(element).getPropertyValue("-webkit-app-region"),
       ),
-    ).toBe("drag");
+    ).toBe("no-drag");
     expect((await floatingWindowState(app)).movable).toBe(true);
+
+    const beforeDrag = (await floatingWindowState(app)).position;
+    const dragHandle = floating.locator(".floating-drag-handle");
+    const dragBounds = await dragHandle.boundingBox();
+    if (!dragBounds) throw new Error("Floating drag handle has no bounds");
+    await floating.mouse.move(
+      dragBounds.x + dragBounds.width / 2,
+      dragBounds.y + dragBounds.height / 2,
+    );
+    await floating.mouse.down();
+    await floating.mouse.move(
+      dragBounds.x + dragBounds.width / 2 - 64,
+      dragBounds.y + dragBounds.height / 2 + 42,
+      { steps: 6 },
+    );
+    await floating.mouse.up();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).position)
+      .not.toEqual(beforeDrag);
 
     await floating
       .getByRole("button", { name: "展开 小序" })
@@ -724,7 +756,7 @@ test.describe("Todo Agent desktop shell", () => {
     await expect.poll(async () => (await floatingWindowState(app!)).alwaysOnTop).toBe(true);
     await expect
       .poll(async () => (await floatingWindowState(app!)).bounds)
-      .toEqual({ width: 308, height: 87 });
+      .toEqual({ width: 329, height: 184 });
 
     const scaledVisual = await pet.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -737,11 +769,167 @@ test.describe("Todo Agent desktop shell", () => {
         height: bounds.height,
       };
     });
-    expect(cssAlpha(scaledVisual.background)).toBeGreaterThanOrEqual(0.98);
-    expect(scaledVisual.borderWidth).toBe("1px");
-    expect(scaledVisual.boxShadow).not.toBe("none");
-    expect(scaledVisual.width).toBeGreaterThanOrEqual(290);
-    expect(scaledVisual.height).toBeGreaterThanOrEqual(70);
+    expect(cssAlpha(scaledVisual.background)).toBe(0);
+    expect(scaledVisual.borderWidth).toBe("0px");
+    expect(scaledVisual.boxShadow).toBe("none");
+    expect(scaledVisual.width).toBeGreaterThanOrEqual(315);
+    expect(scaledVisual.height).toBeGreaterThanOrEqual(170);
+  });
+
+  test("collapses the complete task rail into a persistent pet-only surface", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+
+    const before = await floatingWindowState(app);
+    expect(before.bounds).toEqual({ width: 438, height: 184 });
+    await floating.getByRole("button", { name: "收起宠物任务栏" }).click();
+
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-pet-only/u);
+    await expect(floating.locator(".pet-character")).toBeVisible();
+    await expect(floating.locator(".pet-bubble-stack")).toBeHidden();
+    await expect(floating.locator(".mini-panel")).toBeHidden();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).bounds)
+      .toEqual({ width: 148, height: 148 });
+    expect((await floatingWindowState(app)).position).toEqual(before.position);
+
+    // A normal pet interaction must not reopen the task rail. The message is
+    // retained by the behavior state but its bubble stays hidden in pet-only mode.
+    await floating.locator(".pet-avatar-button").click({ position: { x: 47, y: 18 } });
+    await floating.waitForTimeout(320);
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-pet-only/u);
+    await expect(floating.locator(".pet-reaction-bubble")).toBeHidden();
+
+    await floating.getByRole("button", { name: "展开宠物任务栏" }).click();
+    await expect(floating.locator(".floating-shell")).not.toHaveClass(/is-pet-only/u);
+    await expect(floating.locator(".pet-task-bubble")).toBeVisible();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).bounds)
+      .toEqual({ width: 438, height: 184 });
+
+    await floating.getByRole("button", { name: "收起宠物任务栏" }).click();
+    await floating.reload();
+    await floating.waitForLoadState("domcontentloaded");
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-pet-only/u);
+    await expect(floating.getByRole("button", { name: "展开宠物任务栏" })).toBeVisible();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).bounds)
+      .toEqual({ width: 148, height: 148 });
+
+    // Pet-only mode still offers the radial interactions, then returns to the
+    // exact pet-only footprint after that temporary surface closes.
+    await floating.locator(".pet-compact").hover();
+    await floating.getByRole("button", { name: "和小序互动" }).click();
+    await expect(floating.getByRole("menu", { name: "宠物互动轮盘" })).toBeVisible();
+    await floating.keyboard.press("Escape");
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-pet-only/u);
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).bounds)
+      .toEqual({ width: 148, height: 148 });
+  });
+
+  test("opens a radial interaction wheel and runs cooperative pet games", async ({}, testInfo) => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+
+    await floating.locator(".pet-compact").hover();
+    await floating.getByRole("button", { name: "和小序互动" }).click();
+    const wheel = floating.getByRole("menu", { name: "宠物互动轮盘" });
+    await expect(wheel).toBeVisible();
+    await expect(wheel.getByRole("menuitem")).toHaveCount(8);
+    await expect(floating.locator(".floating-shell")).toHaveClass(/has-interaction-wheel/u);
+    await expect(floating.locator(".pet-season-mark")).toHaveCount(0);
+    await floating.screenshot({ path: testInfo.outputPath("pet-interaction-wheel.png") });
+
+    await wheel.getByRole("menuitem", { name: "摸摸头" }).click();
+    const pattedPet = floating.locator('.pet-character[data-pet-action="pet"]');
+    await expect(pattedPet).toBeVisible();
+    expect(
+      await pattedPet.locator(".pet-pat-hand").evaluate((element) =>
+        getComputedStyle(element).animationName,
+      ),
+    ).toBe("pet-hand-pat");
+    await floating.waitForTimeout(260);
+    await floating.screenshot({ path: testInfo.outputPath("pet-head-pat-motion.png") });
+
+    const interactionChecks = [
+      { menu: "挠痒痒", action: "tickle", effect: ".pet-tickle-feather", animation: "pet-feather-tickle" },
+      { menu: "击掌", action: "high-five", effect: ".pet-high-five-hand", animation: "pet-user-high-five" },
+      { menu: "玩毛线球", action: "play", effect: ".pet-prop-ball", animation: "pet-ball-play" },
+      { menu: "轻戳肚子", action: "poke", effect: ".pet-poke-finger", animation: "pet-finger-poke" },
+      { menu: "一起休息", action: "drink", effect: ".pet-prop-cup", animation: "pet-sip" },
+    ] as const;
+    for (const check of interactionChecks) {
+      await floating.locator(".pet-compact").hover();
+      await floating.getByRole("button", { name: "和小序互动" }).click();
+      await floating.getByRole("menuitem", { name: check.menu }).click();
+      const activePet = floating.locator(`.pet-character[data-pet-action="${check.action}"]`);
+      await expect(activePet).toBeVisible();
+      expect(
+        await activePet.locator(check.effect).evaluate((element) =>
+          getComputedStyle(element).animationName,
+        ),
+      ).toBe(check.animation);
+      await floating.waitForTimeout(180);
+      await floating.screenshot({ path: testInfo.outputPath(`pet-${check.action}-motion.png`) });
+    }
+
+    await floating.locator(".pet-compact").hover();
+    await floating.getByRole("button", { name: "和小序互动" }).click();
+
+    await floating.getByRole("menuitem", { name: "开始镜像伸展" }).click();
+    const stretch = floating.getByRole("region", { name: "镜像伸展小游戏" });
+    await expect(stretch).toBeVisible();
+    await expect(stretch.locator(".pet-game-character .pet-character")).toBeVisible();
+    await floating.screenshot({ path: testInfo.outputPath("pet-stretch-mirror.png") });
+    await stretch.getByRole("button", { name: "我跟上了" }).click();
+    await stretch.getByRole("button", { name: "我跟上了" }).click();
+    await stretch.getByRole("button", { name: "我跟上了" }).click();
+    await stretch.getByRole("button", { name: "一起完成" }).click();
+    await expect(stretch).toBeHidden();
+    await expect
+      .poll(async () =>
+        main.evaluate(async () =>
+          (await window.desktopApi!.pet.snapshot()).miniGames[0]?.game,
+        ),
+      )
+      .toBe("stretch-mirror");
+
+    await floating.locator(".pet-compact").hover();
+    await floating.getByRole("button", { name: "和小序互动" }).click();
+    await floating.getByRole("menuitem", { name: "开始协作跳绳" }).click();
+    const rope = floating.getByRole("region", { name: "协作跳绳小游戏" });
+    await expect(rope).toBeVisible();
+    const jumpButton = rope.getByRole("button", { name: "让宠物跳起来" });
+    await expect(jumpButton).toBeVisible();
+    const ropePet = rope.locator('.pet-character[data-pet-action="jump-rope-ready"]');
+    await expect(ropePet).toBeVisible();
+    await expect(ropePet.locator(".pet-jump-rope-back")).toHaveCount(1);
+    await expect(ropePet.locator(".pet-jump-rope-front")).toHaveCount(1);
+    await expect(jumpButton).toHaveClass(/is-ready/u);
+    await floating.screenshot({ path: testInfo.outputPath("pet-jump-rope-ready.png") });
+    await jumpButton.click();
+    const jumpingPet = rope.locator('.pet-character[data-pet-action="jump-rope"]');
+    await expect(jumpingPet).toBeVisible();
+    expect(
+      await jumpingPet.locator(".pet-rig").evaluate((element) =>
+        getComputedStyle(element).animationName,
+      ),
+    ).toBe("pet-rope-jump");
+    await floating.waitForTimeout(120);
+    await floating.screenshot({ path: testInfo.outputPath("pet-jump-rope-motion.png") });
+    await floating.waitForTimeout(350);
+    await floating.screenshot({ path: testInfo.outputPath("pet-jump-rope-overhead.png") });
+    await rope.getByRole("button", { name: "退出小游戏" }).click();
+    await expect(rope).toBeHidden();
   });
 
   test("runs the native Todo Pet focus loop and exposes the shared growth home", async () => {
@@ -764,13 +952,99 @@ test.describe("Todo Agent desktop shell", () => {
       .getByRole("button", { name: /25.*轻专注/u })
       .click();
     await expect(floating.getByText(/专注 · 第 1\/4 轮/u)).toBeVisible();
-    await expect(floating.getByRole("button", { name: "暂停" })).toBeVisible();
-    await floating.getByRole("button", { name: "暂停" }).click();
-    await expect(floating.getByRole("button", { name: "继续" })).toBeVisible();
-    await floating.getByRole("button", { name: "继续" }).click();
-    await expect(floating.getByRole("button", { name: "暂停" })).toBeVisible();
-    await floating.getByRole("button", { name: "结束" }).click();
+    const compactFocusBubble = floating.locator(".pet-focus-bubble");
+    await expect(compactFocusBubble).toBeVisible();
+    await expect(
+      compactFocusBubble.getByRole("button", { name: "暂停专注计时" }),
+    ).toBeVisible();
+    await compactFocusBubble
+      .getByRole("button", { name: "折叠专注气泡" })
+      .click();
+    await expect(compactFocusBubble).toHaveClass(/is-collapsed/u);
+    await compactFocusBubble
+      .getByRole("button", { name: "展开专注气泡" })
+      .click();
+    await expect(
+      floating.getByRole("button", { name: "暂停", exact: true }),
+    ).toBeVisible();
+    await floating
+      .getByRole("button", { name: "暂停", exact: true })
+      .click();
+    await expect(
+      floating.getByRole("button", { name: "继续", exact: true }),
+    ).toBeVisible();
+    await floating
+      .getByRole("button", { name: "继续", exact: true })
+      .click();
+    await expect(
+      floating.getByRole("button", { name: "暂停", exact: true }),
+    ).toBeVisible();
+    await floating
+      .getByRole("button", { name: "结束", exact: true })
+      .click();
     await expect(floating.locator(".pet-focus-timer")).toHaveText("25:00");
+  });
+
+  test("makes the pet itself react and keeps room, adventure, and play features operable", async ({}, testInfo) => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+
+    const avatar = floating.locator(".pet-avatar-button");
+    await avatar.click({ position: { x: 47, y: 18 } });
+    await expect(floating.locator(".floating-shell")).toHaveAttribute(
+      "data-pet-action",
+      "pet",
+    );
+    await expect(floating.getByText("嗯，再摸一下也可以。", { exact: true })).toBeVisible();
+    await expect(floating.locator(".pet-quick-replies")).toBeVisible();
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-expanded/u);
+    await expect(floating.locator(".floating-shell")).toHaveClass(/has-pet-reaction/u);
+    const reactionLayout = await floating.evaluate(() => {
+      const reaction = document.querySelector<HTMLElement>(".pet-reaction-bubble");
+      const taskBubble = document.querySelector<HTMLElement>(".pet-task-bubble");
+      if (!reaction || !taskBubble) throw new Error("Pet bubbles are missing");
+      const reactionRect = reaction.getBoundingClientRect();
+      const taskRect = taskBubble.getBoundingClientRect();
+      return {
+        viewportHeight: window.innerHeight,
+        reactionTop: reactionRect.top,
+        reactionBottom: reactionRect.bottom,
+        taskTop: taskRect.top,
+      };
+    });
+    expect(reactionLayout.reactionTop).toBeGreaterThanOrEqual(0);
+    expect(reactionLayout.reactionBottom).toBeLessThanOrEqual(reactionLayout.taskTop - 4);
+    expect(reactionLayout.reactionBottom).toBeLessThanOrEqual(reactionLayout.viewportHeight);
+    await floating.getByRole("button", { name: "折叠宠物消息气泡" }).click();
+    await expect(floating.locator(".pet-reaction-bubble")).toHaveClass(/is-collapsed/u);
+    await expect(floating.locator(".pet-reaction-bubble-body")).toBeHidden();
+    await expect(floating.locator(".floating-shell")).toHaveClass(/pet-reaction-collapsed/u);
+    await floating.getByRole("button", { name: "展开宠物消息气泡" }).click();
+    await expect(floating.getByText("嗯，再摸一下也可以。", { exact: true })).toBeVisible();
+    await floating.screenshot({
+      path: testInfo.outputPath("pet-expanded-reaction-safe-area.png"),
+    });
+
+    const navigation = main.getByRole("navigation", { name: "主导航" });
+    await navigation.getByRole("button", { name: "小窝", exact: true }).click();
+    await main.getByRole("button", { name: "小房间" }).click();
+    await expect(main.locator(".pet-room-stage")).toBeVisible();
+    await main.getByLabel("身体配色").selectOption("mint");
+    await expect(main.locator(".pet-room-stage .pet-palette-mint")).toBeVisible();
+
+    await main.getByRole("button", { name: "今日冒险" }).click();
+    await expect(main.locator(".pet-adventure-card")).toBeVisible();
+    await main.getByRole("button", { name: "先整理线索" }).click();
+    await expect(main.getByText(/你和小序把线索铺成一排/u)).toBeVisible();
+
+    await main.getByRole("button", { name: "一起玩" }).click();
+    await main.getByRole("button", { name: "开始接星星" }).click();
+    await main.getByRole("button", { name: "接住星星" }).click();
+    await expect(main.getByText(/20s · 1 颗/u)).toBeVisible();
   });
 
   test("keeps Todo Pet available after the main window closes and reopens the remembered task page", async () => {
@@ -1064,6 +1338,36 @@ test.describe("Todo Agent desktop shell", () => {
     await floating
       .getByRole("button", { name: "收起 小序" })
       .click();
+
+    // Lightweight pet interactions stay on the desktop surface, expose a
+    // distinct body action, and use the existing idempotent relationship
+    // reward path instead of opening a distracting game window.
+    const intimacyBefore = await main.evaluate(async () =>
+      (await window.desktopApi!.pet.snapshot()).profile.intimacy
+    );
+    await openPetMenu();
+    await menu.getByRole("menuitem", { name: /摸摸小序/u }).click();
+    await expect(menu).toBeHidden();
+    await expect(floating.locator(".floating-shell")).toHaveAttribute(
+      "data-pet-action",
+      "pet",
+    );
+    await expect(floating.getByRole("status").filter({ hasText: "再摸一下也可以" })).toBeVisible();
+    await expect
+      .poll(() =>
+        main.evaluate(async () =>
+          (await window.desktopApi!.pet.snapshot()).profile.intimacy
+        ),
+      )
+      .toBe(intimacyBefore + 1);
+
+    await openPetMenu();
+    await menu.getByRole("menuitem", { name: /玩一会儿/u }).click();
+    await expect(floating.locator(".floating-shell")).toHaveAttribute(
+      "data-pet-action",
+      "play",
+    );
+    await expect(floating.getByText("接住毛线球！")).toBeVisible();
 
     // Preference toggles are local display choices and immediately persist
     // through the existing settings API; no task content is inspected.
@@ -1747,6 +2051,9 @@ test.describe("Todo Agent desktop shell", () => {
     );
     await chatTab.hover();
     await expect(chatTab).toBeVisible();
+    await floating.locator(".mini-content").hover();
+    await floating.waitForTimeout(320);
+    await expect(chatTab).toBeVisible();
     await floating.locator(".floating-stack").evaluate((element) => {
       element.dispatchEvent(
         new MouseEvent("mouseout", { bubbles: true, relatedTarget: null }),
@@ -2093,7 +2400,7 @@ test.describe("Todo Agent desktop shell", () => {
       await expect(floating.getByLabel("给 Agent 发消息")).toBeVisible();
       await expect
         .poll(async () => (await floatingWindowState(app!)).bounds)
-        .toEqual({ width: 480, height: 600 });
+        .toEqual({ width: 480, height: 640 });
       await floating
         .getByRole("button", { name: "今天", exact: true })
         .click();

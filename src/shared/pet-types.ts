@@ -87,7 +87,16 @@ export interface PetProfile {
 export interface PetReward {
   id: string;
   idempotencyKey: string;
-  source: "task" | "focus" | "planning" | "review" | "rest" | "interaction";
+  source:
+    | "task"
+    | "focus"
+    | "planning"
+    | "review"
+    | "rest"
+    | "interaction"
+    | "adventure"
+    | "game"
+    | "customization";
   sourceId: string;
   experience: number;
   intimacy: number;
@@ -101,6 +110,50 @@ export interface PetInventoryItem {
   id: string;
   quantity: number;
   unlockedAt: string;
+}
+
+export type PetPalette = "lavender" | "mint" | "sunset" | "midnight";
+export type PetOutfit = "none" | "scarf" | "explorer" | "starlight";
+export type PetRoomTheme = "cloud-room" | "forest-nook" | "night-library";
+
+export interface PetAppearance {
+  palette: PetPalette;
+  outfit: PetOutfit;
+  roomTheme: PetRoomTheme;
+  decorations: string[];
+}
+
+export interface PetCustomizationPatch {
+  palette?: PetPalette;
+  outfit?: PetOutfit;
+  roomTheme?: PetRoomTheme;
+  decorations?: string[];
+}
+
+export interface PetAdventureChoice {
+  id: string;
+  label: string;
+}
+
+export interface PetAdventure {
+  id: string;
+  localDate: string;
+  title: string;
+  prompt: string;
+  choices: PetAdventureChoice[];
+  selectedChoiceId?: string;
+  outcome?: string;
+  rewardId?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface PetMiniGameRecord {
+  id: string;
+  game: "breathing" | "star-catch" | "jump-rope" | "stretch-mirror";
+  score: number;
+  durationSeconds: number;
+  completedAt: string;
 }
 
 export interface PetDiaryEntry {
@@ -137,7 +190,9 @@ export interface ProactiveMessageRecord {
     | "deadline"
     | "wellbeing"
     | "weather"
-    | "sync";
+    | "sync"
+    | "morning"
+    | "evening";
   reason: string;
   shownAt: string;
   dismissed?: boolean;
@@ -151,6 +206,9 @@ export interface PetState {
   focusHistory: FocusHistoryRecord[];
   rewards: PetReward[];
   inventory: PetInventoryItem[];
+  appearance: PetAppearance;
+  adventures: PetAdventure[];
+  miniGames: PetMiniGameRecord[];
   diary: PetDiaryEntry[];
   memories: PetMemoryEntry[];
   proactiveMessages: ProactiveMessageRecord[];
@@ -183,7 +241,10 @@ export interface PetEvent {
     | "focus-phase-completed"
     | "focus-phase-started"
     | "reward-granted"
-    | "weather-updated";
+    | "weather-updated"
+    | "adventure-completed"
+    | "mini-game-completed"
+    | "customization-changed";
   at: string;
   focus?: FocusSessionView;
   reward?: PetReward;

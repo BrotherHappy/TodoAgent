@@ -379,6 +379,105 @@ describe("OpenAIChatCompletionsGateway", () => {
     });
   });
 
+  it("accepts null metadata on OpenAI-compatible tool-call continuation chunks", async () => {
+    const gateway = new OpenAIChatCompletionsGateway({
+      baseUrl: "http://10.30.0.21:8005",
+      model: "DeepSeek-V4-Flash-0731",
+      credentialRef: "model.default",
+      secretResolver: { resolve: async () => "provider-key" },
+      fetch: async () =>
+        streamingResponse([
+          JSON.stringify({
+            id: "chatcmpl-deepseek-tool-stream",
+            choices: [
+              {
+                delta: {
+                  role: "assistant",
+                  content: "\n\n",
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call-deepseek-stream",
+                      type: "function",
+                      function: {
+                        name: "task_update",
+                        arguments: "",
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          JSON.stringify({
+            id: "chatcmpl-deepseek-tool-stream",
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: null,
+                      type: null,
+                      function: {
+                        name: null,
+                        arguments: '{"taskId":"task-1",',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          JSON.stringify({
+            id: "chatcmpl-deepseek-tool-stream",
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: null,
+                      type: null,
+                      function: {
+                        name: null,
+                        arguments: '"title":"New title"}',
+                      },
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          }),
+          JSON.stringify({
+            choices: [],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          }),
+        ]),
+    });
+
+    const deltas: string[] = [];
+    const completion = await gateway.complete(request(), undefined, (delta) =>
+      deltas.push(delta),
+    );
+
+    expect(deltas).toEqual(["\n\n"]);
+    expect(completion).toMatchObject({
+      id: "chatcmpl-deepseek-tool-stream",
+      finishReason: "tool_calls",
+      assistantMessage: { content: "\n\n" },
+      toolCalls: [
+        {
+          id: "call-deepseek-stream",
+          name: "task_update",
+          arguments: { taskId: "task-1", title: "New title" },
+        },
+      ],
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    });
+  });
+
   it("does not retry after visible stream text was emitted", async () => {
     const encoded = new TextEncoder().encode(
       `data: ${JSON.stringify({ choices: [{ delta: { content: "已输出" } }] })}\n\n`,

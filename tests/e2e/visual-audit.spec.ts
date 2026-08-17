@@ -18,7 +18,11 @@ async function launch(profilePath: string): Promise<ElectronApplication> {
     executablePath: electronPath as unknown as string,
     args: [projectRoot, `--user-data-dir=${profilePath}`],
     cwd: projectRoot,
-    env: { ...process.env, TODO_AGENT_E2E: "1" },
+    env: {
+      ...process.env,
+      TODO_AGENT_E2E: "1",
+      TODO_AGENT_E2E_BACKGROUND: "1",
+    },
   });
 }
 
@@ -294,14 +298,14 @@ test("keeps isolated desktop surfaces navigable, scrollable and unobstructed", a
     await nav.getByRole("button", { name: "设置", exact: true }).click();
     await expect(main.getByRole("heading", { name: "通用" })).toBeVisible();
     await expect(main.locator(".toast")).toHaveCount(0);
-    await main.getByRole("navigation", { name: "设置导航" }).getByRole("button", { name: "悬浮与桌面", exact: true }).click();
+    await main.getByRole("navigation", { name: "设置导航" }).getByRole("button", { name: "Todo Pet", exact: true }).click();
     await main.screenshot({ path: path.join(imageDir, "settings-floating.png") });
 
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
-    await floating.getByRole("button", { name: "展开 Todo Agent" }).click();
+    await floating.getByRole("button", { name: "展开 小序" }).click();
     await expect(floating.locator(".mini-panel")).toBeVisible();
-    await floating.getByRole("button", { name: "对话", exact: true }).click();
+    await floating.getByRole("button", { name: "聊聊", exact: true }).click();
     const miniText = floating.getByLabel("给 Agent 发消息");
     await miniText.fill("请同样用 Markdown 总结");
     await miniText.press("Enter");

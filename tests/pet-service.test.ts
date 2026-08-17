@@ -115,6 +115,25 @@ describe("PetService", () => {
     expect(service.snapshot().rewards).toHaveLength(2);
   });
 
+  it("rewards each kind of direct interaction once per day without creating a click grind", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-interaction-"));
+    const now = Date.parse("2026-08-15T06:00:00.000Z");
+    const service = new PetService({ userDataPath: root, now: () => now });
+    await service.initialize();
+
+    await service.recordInteraction("pet");
+    await service.recordInteraction("pet");
+    expect(service.snapshot().profile.intimacy).toBe(1);
+    expect(service.snapshot().rewards).toHaveLength(1);
+
+    await service.recordInteraction("play");
+    await service.recordInteraction("rest");
+    expect(service.snapshot().profile.intimacy).toBe(3);
+    expect(
+      service.snapshot().rewards.map((reward) => reward.sourceId).sort(),
+    ).toEqual(["pet", "play", "rest"]);
+  });
+
   it("creates editable diaries and only stores memories after an explicit call", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-journal-"));
     const service = new PetService({ userDataPath: root, initialName: "团团" });
@@ -140,5 +159,59 @@ describe("PetService", () => {
     expect(service.snapshot().memories[0]?.enabled).toBe(false);
     expect(await service.deleteDiary(diary.id)).toBe(true);
     expect(await service.deleteMemory(memory.id)).toBe(true);
+  });
+
+  it("persists appearance changes with safe bounded decorations", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-room-"));
+    const service = new PetService({ userDataPath: root });
+    await service.initialize();
+    await service.customize({
+      palette: "mint",
+      outfit: "explorer",
+      roomTheme: "forest-nook",
+      decorations: ["plant", "plant", "books"],
+    });
+    expect(service.snapshot().appearance).toEqual({
+      palette: "mint",
+      outfit: "explorer",
+      roomTheme: "forest-nook",
+      decorations: ["plant", "books"],
+    });
+    const restored = new PetService({ userDataPath: root });
+    await restored.initialize();
+    expect(restored.snapshot().appearance.outfit).toBe("explorer");
+  });
+
+  it("creates one pressure-free daily adventure and rewards its choice exactly once", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-adventure-"));
+    const service = new PetService({ userDataPath: root, initialName: "团团" });
+    await service.initialize();
+    const first = await service.dailyAdventure("2026-08-15");
+    const same = await service.dailyAdventure("2026-08-15");
+    expect(same.id).toBe(first.id);
+    await service.completeAdventure(first.id, "organize");
+    await service.completeAdventure(first.id, "organize");
+    const snapshot = service.snapshot();
+    expect(snapshot.adventures).toHaveLength(1);
+    expect(snapshot.adventures[0]?.outcome).toContain("团团");
+    expect(snapshot.rewards.filter((reward) => reward.source === "adventure")).toHaveLength(1);
+    expect(snapshot.inventory.find((item) => item.id === "adventure-star")?.quantity).toBe(1);
+    expect(snapshot.inventory.some((item) => item.id === "outfit-explorer")).toBe(true);
+    expect(snapshot.inventory.some((item) => item.id === "decoration-books")).toBe(true);
+  });
+
+  it("records every mini-game session but only grants one gentle daily reward per game", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-game-"));
+    const now = Date.parse("2026-08-15T08:00:00.000Z");
+    const service = new PetService({ userDataPath: root, now: () => now });
+    await service.initialize();
+    await service.recordMiniGame({ game: "star-catch", score: 9, durationSeconds: 20 });
+    await service.recordMiniGame({ game: "star-catch", score: 14, durationSeconds: 20 });
+    await service.recordMiniGame({ game: "jump-rope", score: 11, durationSeconds: 20 });
+    await service.recordMiniGame({ game: "stretch-mirror", score: 4, durationSeconds: 24 });
+    expect(service.snapshot().miniGames).toHaveLength(4);
+    expect(service.snapshot().rewards.filter((reward) => reward.source === "game")).toHaveLength(3);
+    expect(service.snapshot().inventory.some((item) => item.id === "outfit-starlight")).toBe(true);
+    expect(service.snapshot().inventory.some((item) => item.id === "action-dance")).toBe(true);
   });
 });

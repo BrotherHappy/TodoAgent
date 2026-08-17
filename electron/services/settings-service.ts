@@ -27,6 +27,8 @@ interface StoredSecrets {
 const clone = <T>(value: T): T => structuredClone(value);
 const petTabs = new Set(['all', 'today', 'focus', 'chat', 'home']);
 const environmentSounds = new Set(['off', 'rain', 'forest', 'cafe', 'white-noise']);
+const petActionPacks = new Set(['balanced', 'calm', 'playful', 'focused']);
+const petAnimationIntensities = new Set(['gentle', 'lively']);
 
 function clampInteger(
   value: unknown,
@@ -129,6 +131,18 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   if (!environmentSounds.has(merged.focus.environmentSound)) {
     merged.focus.environmentSound = defaultSettings.focus.environmentSound;
   }
+  if (!petActionPacks.has(merged.pet.actionPack)) {
+    merged.pet.actionPack = defaultSettings.pet.actionPack;
+  }
+  if (!petAnimationIntensities.has(merged.pet.animationIntensity)) {
+    merged.pet.animationIntensity = defaultSettings.pet.animationIntensity;
+  }
+  merged.pet.proactiveIntervalMinutes = clampInteger(
+    merged.pet.proactiveIntervalMinutes,
+    defaultSettings.pet.proactiveIntervalMinutes,
+    15,
+    240,
+  );
   merged.weather.cacheMinutes = clampInteger(
     merged.weather.cacheMinutes,
     defaultSettings.weather.cacheMinutes,
@@ -196,6 +210,11 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       wellbeingReminders: merged.pet.wellbeingReminders,
       autoDiary: merged.pet.autoDiary,
       relationshipMemory: merged.pet.relationshipMemory,
+      actionPack: merged.pet.actionPack,
+      animationIntensity: merged.pet.animationIntensity,
+      proactiveIntervalMinutes: merged.pet.proactiveIntervalMinutes,
+      meetingMode: merged.pet.meetingMode,
+      seasonalEvents: merged.pet.seasonalEvents,
     },
     ai: {
       enabled: merged.ai.enabled,
