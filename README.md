@@ -107,6 +107,7 @@ npm run package:win:zip
 详细设计与边界：
 
 - [统一 PRD](./docs/PRD.md)
+- [竞品研究与可借鉴设计](./docs/COMPETITIVE_PRODUCT_RESEARCH.md)
 - [Todo Pet 产品设计](./docs/TODO_PET_PRODUCT_DESIGN.md)
 - [Todo Pet 实现规范](./docs/TODO_PET_IMPLEMENTATION_SPEC.md)
 - [页面信息架构与交互](./docs/UX_INFORMATION_ARCHITECTURE.md)
@@ -119,3 +120,9 @@ npm run package:win:zip
 - 天气使用结构化公共服务，供应商不可用时保留并标明最后缓存结果。
 - 真实飞书租户、Windows 设备、全屏应用和多显示器组合仍需要持续实机验收。
 - 当前仓库尚未声明开源许可证；除非另有明确书面许可，保留全部权利。
+
+## 设计研究
+
+我们把 Todo Pet 放在“任务管理 × 桌面宠物 × AI Agent”的交叉点上，持续对照 Todoist、TickTick、Things、OmniFocus、Sunsama、Motion、Notion AI、Taskade、Vikunja、Super Productivity、Finch、Forest、Habitica、Weyrdlets、Shimeji 等产品的 UI、交互和功能。
+
+详细的竞品矩阵、优势差异、可迁移模式、风险取舍和 P0/P1/P2 实现清单见：[竞品研究与可借鉴设计](./docs/COMPETITIVE_PRODUCT_RESEARCH.md)。这份研究也明确了 Todo Pet 的边界：真实任务和飞书同步是事实层，宠物是陪伴层，Agent 必须经过权限预览；不使用宠物死亡、饥饿、扣资产或强制连续签到制造压力。
