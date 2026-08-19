@@ -123,6 +123,6 @@ npm run package:win:zip
 
 ## 设计研究
 
-我们把 Todo Pet 放在“任务管理 × 桌面宠物 × AI Agent”的交叉点上，持续对照 Todoist、TickTick、Things、OmniFocus、Sunsama、Motion、Notion AI、Taskade、Vikunja、Super Productivity、Finch、Forest、Habitica、Weyrdlets、Shimeji 等产品的 UI、交互和功能。
+我们把 Todo Pet 放在“任务管理 × 桌面宠物 × AI Agent”的交叉点上，持续对照 50+ 个商用和开源产品，包括 Todoist、TickTick、Things、OmniFocus、Sunsama、Motion、Notion AI、Taskade、Vikunja、Super Productivity、AppFlowy、Finch、Forest、Habitica、Weyrdlets、Shimeji 等。
 
-详细的竞品矩阵、优势差异、可迁移模式、风险取舍和 P0/P1/P2 实现清单见：[竞品研究与可借鉴设计](./docs/COMPETITIVE_PRODUCT_RESEARCH.md)。这份研究也明确了 Todo Pet 的边界：真实任务和飞书同步是事实层，宠物是陪伴层，Agent 必须经过权限预览；不使用宠物死亡、饥饿、扣资产或强制连续签到制造压力。
+详细的逐产品 UI / 交互 / 功能矩阵、优势差异、可迁移模式、风险取舍和 P0/P1/P2 实现清单见：[竞品研究与可借鉴设计](./docs/COMPETITIVE_PRODUCT_RESEARCH.md)。这份研究也明确了 Todo Pet 的边界：真实任务和飞书同步是事实层，宠物是陪伴层，Agent 必须经过权限预览；不使用宠物死亡、饥饿、扣资产或强制连续签到制造压力。

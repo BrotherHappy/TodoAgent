@@ -8,7 +8,7 @@
 
 ## 0. 先说结论
 
-“市面上所有产品”无法被一次性穷尽，产品、插件和开源分支每天都在变化。本报告采用**代表性覆盖**：横跨 6 个类别、30+ 个产品，并优先使用产品官网、帮助中心、官方 App Store / Steam 页面和 GitHub README 作为证据。它不是简单的功能清单，而是回答三个问题：
+“市面上所有产品”无法被一次性穷尽，产品、插件和开源分支每天都在变化。本报告采用**代表性覆盖**：横跨 6 个类别、50+ 个产品，并优先使用产品官网、帮助中心、官方 App Store / Steam 页面和 GitHub README 作为证据。它不是简单的功能清单，而是回答三个问题：
 
 1. 哪些产品在 UI、交互或功能上比当前 Todo Pet 更成熟？
 2. 它们的成熟点能否直接迁移到“桌面宠物 + 任务 + Agent”的产品模型？
@@ -69,12 +69,13 @@ Todo Pet 的差异化不是“比 Todoist 多一个可爱的皮肤”，而是�
 
 | 类别 | 代表产品 |
 |---|---|
-| 传统任务管理 | Todoist、TickTick、Things 3、OmniFocus、Microsoft To Do、Apple Reminders、Google Tasks、Any.do、Remember The Milk |
-| 日程与时间规划 | Sunsama、Akiflow、Motion、Reclaim、Routine、Morgen、Structured、Amazing Marvin |
-| AI 工作区 / Agent | Notion AI、Taskade AI、Todoist Assist、Motion AI、Reclaim Assistant |
-| 开源 / 本地优先 | Vikunja、Super Productivity、Taskwarrior、Kanboard、Planify、Lunatask、Org mode |
-| 宠物 / 游戏化 / 专注 | Finch、Forest、Habitica、Focus Friend、Weyrdlets、Spirit City、Study Bunny |
-| 桌面宠物 / 开源交互 | Desktop Goose、Shimeji-ee、Desktop Pets、Deskcat、GooseDroid |
+| 传统任务管理 | Todoist、TickTick、Things 3、OmniFocus、Microsoft To Do、Apple Reminders、Google Tasks、Any.do、Remember The Milk、Superlist |
+| 日程与时间规划 | Sunsama、Akiflow、Motion、Reclaim、Routine、Morgen、Structured、Amazing Marvin、Amie、Tiimo、Sorted³、SkedPal |
+| AI 工作区 / Agent | Notion AI、Taskade AI、Todoist Assist、Motion AI、Reclaim Assistant、ClickUp Brain、Asana AI、AppFlowy AI |
+| 开源 / 本地优先 | Vikunja、Super Productivity、Taskwarrior、Kanboard、Planify、Lunatask、Org mode、Focalboard、AppFlowy、Anytype、Joplin |
+| 宠物 / 游戏化 / 专注 | Finch、Forest、Habitica、Focus Friend、Weyrdlets、Spirit City、Study Bunny、Wokamon、Tamagotchi |
+| 桌面宠物 / 开源交互 | Desktop Goose、Shimeji-ee、Desktop Pets、Deskcat、GooseDroid、PawPal、OpenDesktopPet、Cat Fidget、BongoCat |
+| 项目与开发任务 | ClickUp、Asana、Trello、Linear |
 | 业务连接 | Feishu / Lark Tasks、Gmail / Google Tasks、Outlook / Microsoft To Do |
 
 ## 2. 商用任务管理产品
@@ -592,6 +593,286 @@ Todo Pet 的差异化不是“比 Todoist 多一个可爱的皮肤”，而是�
 
 - [飞书创建任务 API](https://open.feishu.cn/document/task-v2/task/create?lang=zh-CN)
 - [Lark CLI](https://github.com/larksuite/cli)
+
+### 补充代表产品
+
+- [Superlist](https://www.superlist.com/)
+- [Superlist Talk](https://help.superlist.com/en/articles/74945-talk-superlist-s-ai-voice-assistant-for-hands-free-tasks)
+- [Amie Tasks](https://amie.so/documentation/features/tasks)
+- [Tiimo](https://www.tiimoapp.com/)
+- [Sorted³](https://www.sortedapp.com/how-it-works)
+- [ClickUp](https://clickup.com/features)
+- [Asana](https://asana.com/features)
+- [Trello Views](https://trello.com/en/views)
+- [Linear Conceptual Model](https://linear.app/docs/conceptual-model)
+- [Focalboard](https://www.focalboard.com/)
+- [AppFlowy](https://appflowy.com/)
+- [Anytype](https://anytype.io/)
+- [Joplin To-dos](https://joplinapp.org/help/apps/to-dos/)
+- [Remember The Milk](https://www.rememberthemilk.com/help/guide/?hl=en-GB)
+- [Amazing Marvin](https://amazingmarvin.com/product/)
+- [SkedPal](https://www.skedpal.com/how-it-works)
+- [Study Bunny](https://superbyte.site/tutorial)
+- [Wokamon](https://wokamon.com/)
+- [Tamagotchi Paradise](https://tamagotchi-official.com/us/series/paradise/howto/)
+- [Desktop Pet](https://github.com/duzexu/desktop-pet)
+- [PawPal](https://github.com/zebangeth/PawPal)
+- [OpenDesktopPet](https://github.com/HanLoney/OpenDesktop-Pet)
+- [Cat Fidget](https://www.highroadsoftware.com/apps/catfidget/)
+- [BongoCat](https://bongocat.gjxx.dev/)
+
+## 附录 A. 补充代表产品
+
+前文已经展开了最接近 Todo Pet 核心闭环的产品。本附录补齐四类容易被忽略、但对后续设计很有价值的产品：把任务和笔记合并的产品、面向团队的项目系统、开源本地优先工作区，以及更接近“真实宠物”的桌面陪伴。
+
+### A.1 Superlist：任务、笔记、会议和语音捕获的轻量融合
+
+- **UI**：以列表和 section 组织工作 / 生活 / 兴趣项目，任务详情中可以保留长文本、附件和会议内容，整体比传统项目管理工具更像一张可持续编辑的清单。
+- **交互**：Enter 快速新增；Talk 用语音创建任务、完整列表或笔记，并把口述内容转成标题、截止日期、子任务和描述；会议可以自动提取摘要、行动项和日期。
+- **优势**：把“想法、笔记、任务”放在同一个上下文里，减少会议后手工复制任务；共享列表支持文字和语音讨论。
+- **Todo Pet 借鉴**：宠物气泡支持“说一段话 → 预览任务和备注 → 选择保存到任务 / 日记 / Inbox”；同一条 Agent 对话可以引用任务上下文，但不自动把所有聊天写进长期记忆。
+- **不照搬**：语音转写和任务创建必须有可编辑预览，不能让听错的日期直接进入飞书。
+- **证据**：[Superlist Basics](https://help.superlist.com/en/articles/10050-superlist-basics-lists-tasks-sections-meetings-explained)、[Talk 语音助手](https://help.superlist.com/en/articles/74945-talk-superlist-s-ai-voice-assistant-for-hands-free-tasks)、[Superlist](https://www.superlist.com/)。
+
+### A.2 Amie：日历、任务和 AI 找时间的同屏工作台
+
+- **UI**：日历和 Todo panel 同屏，任务能以时间块出现在日历中；快速菜单和命令面板减少页面跳转。
+- **交互**：Enter 新建，`⌘/Ctrl+K` 呼出命令菜单；自然语言解析日期、时长、重复和优先级；AI 为任务寻找可用时间；可连接 Linear、Notion、Todoist。
+- **优势**：将“任务是什么、何时做、要花多久”放在一次输入中解决；任务和事件的视觉关系直观。
+- **Todo Pet 借鉴**：宠物在用户说“下午处理 30 分钟”时，把任务、时长和建议时间块一起展示；Agent 只提出排程，不静默改日历。
+- **证据**：[Amie Tasks & Todos](https://amie.so/documentation/features/tasks)、[Amie Calendar](https://amieapp.com/Calendar)。
+
+### A.3 Tiimo：针对执行功能差异的视觉时间和 AI 拆解
+
+- **UI**：彩色时间线、图标、视觉倒计时、任务 checklist、Widget 和周 / 月视图；强调“下一步”和剩余时间，而不是密集字段。
+- **交互**：用户可以输入或说出一段 brain dump，AI 将其拆成步骤、估算时长、排序并放入计划；计划变化后可让 AI 重新安排；焦点计时器绑定具体任务。
+- **优势**：把过大的任务变成可开始的步骤，并用时间估算避免过度规划；对需要视觉锚点的用户更友好。
+- **Todo Pet 借鉴**：Agent 的“拆分任务”结果先显示 3–7 个可执行步骤；宠物气泡每次只提示当前步骤，并显示剩余时间，不把整个项目一次性吐出来。
+- **证据**：[Tiimo](https://www.tiimoapp.com/)。
+
+### A.4 Sorted³：自动排程、时间尺和重排手势
+
+- **UI**：日程时间线把事件、任务和笔记混排；Calendar Drawer、Time Ruler 和 Widgets 让用户在不离开当天视图的情况下调整计划。
+- **交互**：Auto Schedule 根据优先级、时长和可用时间生成可行日程；Magic Select、Reorganize、Merge 和拖动时间尺用于快速重排。
+- **优势**：自动排程和手动微调的边界很清楚；用户能看到“我今天实际装得下多少任务”。
+- **Todo Pet 借鉴**：宠物可以把用户的“今天太满了”转成两套方案：保守计划和冲刺计划，显示每套会移动哪些任务。
+- **证据**：[Sorted³ How It Works](https://www.sortedapp.com/how-it-works)、[Sorted³](https://ss3.staysorted.com/)。
+
+### A.5 ClickUp：层级、自动化和上下文型 Agent
+
+- **UI**：Workspace → Space → Folder → List → Task 的层级，提供 List、Board、Calendar、Gantt、Dashboard、Docs、Whiteboard 等多视图；功能密度很高。
+- **交互**：自定义字段、状态、关系、自动化、AI Cards、AI Notetaker、Talk to Text 和 Super Agents；任务、文档、聊天、历史可以被统一搜索。
+- **优势**：能把复杂组织流程映射为结构化状态；Agent 有真实的任务、文档、人员和历史上下文。
+- **Todo Pet 借鉴**：为 Agent 建立“工具注册表 + 数据范围 + 操作预览”；把复杂字段收进展开详情，宠物只暴露最重要的状态。
+- **不照搬**：个人产品不能复制 ClickUp 的全量导航和字段墙；采用按需启用能力的策略。
+- **证据**：[ClickUp Features](https://clickup.com/features)。
+
+### A.6 Asana：依赖、规则、多视图和人机协作
+
+- **UI**：项目可切换 List、Calendar、Timeline、Gantt、Kanban；My Tasks 汇总个人负责项，Inbox 只保留相关更新。
+- **交互**：任务有 owner、起止日期、依赖、审批、评论、附件、自定义字段；Rules 自动分配、分类和更新；AI Teammates / AI Studio 参与工作流。
+- **优势**：任务依赖和项目健康状态清晰；同一个任务可以跨项目显示（multi-home），避免复制任务。
+- **Todo Pet 借鉴**：任务模型支持阻塞 / 阻塞者和多视图引用；Agent 重新规划时先显示依赖链；一份本地任务不能因进入多个宠物视图而复制。
+- **证据**：[Asana Features](https://asana.com/features)、[Asana Feature Guide](https://help.asana.com/s/article/all-asana-features?language=en_US)。
+
+### A.7 Trello：卡片、拖放和可理解的自动化
+
+- **UI**：Board 是最核心入口，卡片在列表之间移动；Timeline、Table、Calendar、Dashboard 和 Map 作为视角扩展。
+- **交互**：拖卡改变状态；Inbox 从邮件 / Slack 捕获；Butler 自动化使用按钮、规则和命令；模板和 Power-Ups 让团队以熟悉的卡片语法扩展。
+- **优势**：状态变更的空间隐喻非常容易理解；自动化直接贴近卡片和列表，不需要编写脚本。
+- **Todo Pet 借鉴**：把“任务卡搬运”做成宠物的身体动作；小游戏和气泡可以让用户把卡拖入“专注 / 完成 / 稍后”三个目标区。
+- **证据**：[Trello Views](https://trello.com/en/views)、[Trello Automation](https://trello.com/power-ups/5935cab6b26816f9d49fd814/butler)。
+
+### A.8 Linear：开发者任务的状态、Cycle 和容量信号
+
+- **UI**：Issue 列表 / Board，Project 和 Initiative 形成层级；Cycle 以时间盒组织工作；状态列和快捷键偏向键盘用户。
+- **交互**：Issue 可以被分配、标记、加入项目 / Cycle、讨论、关联依赖；Cycle 显示 capacity dial 预测当前周期能否完成。
+- **优势**：状态、估算、周期和项目之间非常紧凑；适合工程任务的高频键盘和批量操作。
+- **Todo Pet 借鉴**：为开发 / 写作等长任务加入“工作周期”和剩余容量，不要求所有个人任务都走复杂项目流程。
+- **证据**：[Linear Conceptual Model](https://linear.app/docs/conceptual-model)、[Linear Cycles](https://linear.app/docs/use-cycles)。
+
+### A.9 Focalboard：保存视图和开放字段的开源看板
+
+- **UI**：Board、Table、Calendar、Gallery、List；筛选、分组、排序和保存视图是主操作；卡片内容支持 Markdown 和图片。
+- **交互**：拖卡改变分组属性；自定义字段、模板、评论、权限和备份快照；个人桌面版支持 macOS、Windows、Linux。
+- **优势**：看板的直观性和数据库字段的灵活性兼得；保存视图可以把同一批任务变成不同工作台。
+- **Todo Pet 借鉴**：把“全部 / 今天 / 专注 / 来源”做成查询视图，宠物只绑定当前视图，不复制任务数据。
+- **证据**：[Focalboard](https://www.focalboard.com/)、[Focalboard User Guide](https://www.focalboard.com/guide/user/)。
+
+### A.10 AppFlowy：本地 AI、数据库和可自托管工作区
+
+- **UI**：页面、数据库、属性、卡片视图和自定义主题；可以在同一工作区处理文档、项目和任务。
+- **交互**：AI 负责问答、写作、表格 Autofill 和行动项提取；支持本地模型（如 Mistral / Llama）和离线模式；可自托管并同步到移动端。
+- **优势**：模型可替换、数据可本地化；结构化数据库比纯聊天更容易追踪 AI 结果。
+- **Todo Pet 借鉴**：允许接入 DeepSeek、OpenAI-compatible、本地 Ollama 等模型；Agent 的计划和结果都写回结构化任务记录，不只留在聊天历史。
+- **证据**：[AppFlowy](https://appflowy.com/)。
+
+### A.11 Anytype：对象、关系和端到端加密
+
+- **UI**：对象、集合、数据库、图谱、模板和块编辑器；任务、项目、笔记、资源可以是相互关联的对象。
+- **交互**：离线创建和本地 / 局域网同步；对象可通过关系和视图重新组合；本地加密、用户持有密钥。
+- **优势**：不把任务限制在单一列表里；隐私模型和数据所有权清晰。
+- **Todo Pet 借鉴**：任务、日记、宠物事件和 Agent 记忆分开建模，使用关系连接；支持离线工作和用户可读的导出。
+- **不照搬**：图谱不是默认工作台，普通用户先看到“下一步”；关系视图作为高级入口。
+- **证据**：[Anytype](https://anytype.io/)、[Anytype FAQ](https://anytype.io/faq/)。
+
+### A.12 Joplin：任务和笔记可以互相转换
+
+- **UI**：笔记本 / 标签 / Markdown 编辑器；To-do 笔记和普通笔记在同一列表中，完成项可置顶或隐藏。
+- **交互**：右键或操作菜单切换 note / todo；待办可设闹钟；插件可提供日历面板、重复任务和逾期聚合。
+- **优势**：任务不脱离上下文，适合“研究笔记里长出行动项”；Markdown 和同步格式可迁移。
+- **Todo Pet 借鉴**：Agent 研究网页后可把来源、摘要和行动项作为同一任务的可折叠上下文；允许把任务转换为宠物日记或研究卡。
+- **证据**：[Joplin To-dos](https://joplinapp.org/help/apps/to-dos/)、[Calendar Notes Plugin](https://joplinapp.org/plugins/plugin/com.github.eugenelesnov.CalendarNotes/)。
+
+### A.13 Remember The Milk：Smart List 和位置上下文
+
+- **UI**：列表、标签、联系人、地点和 Smart List；界面轻量，强调快速排序和搜索。
+- **交互**：Smart Add 一行输入多个字段；搜索可保存为 Smart List；任务和子任务可以按地点、标签、联系人和提醒筛选。
+- **优势**：位置和上下文过滤很早就被产品化；适合“我在某个地方能做什么”的场景。
+- **Todo Pet 借鉴**：位置提醒默认关闭、需要用户授权；可将“办公室 / 家 / 出门”作为用户手动定义的上下文，不申请精确定位。
+- **证据**：[Remember The Milk Getting Started](https://www.rememberthemilk.com/help/guide/?hl=en-GB)、[Smart Add](https://blog.rememberthemilk.com/introducing-smart-add-a-smarter-way-to-add-your-tasks/)。
+
+### A.14 Amazing Marvin：可配置策略和个性化工作流
+
+- **UI**：Day Planner、任务列表、目标、习惯和策略模块；用户可开关、排序和配置功能；右键菜单和悬停按钮也可自定义。
+- **交互**：策略可以逐项启用；快捷键创建任务；目标可把长期目的与项目 / 习惯关联；Check-ins 提供定期反思。
+- **优势**：不假设所有人使用同一种生产力方法；功能模块化，适合 ADHD / 高度个性化用户。
+- **Todo Pet 借鉴**：把宠物主动性、提醒严格度、番茄方式、奖励风格做成可组合策略；设置页面提供推荐模板，而不是一开始展示几十个开关。
+- **证据**：[Amazing Marvin Product](https://amazingmarvin.com/product/)、[Strategies](https://help.amazingmarvin.com/en/collections/1139197-strategies)。
+
+### A.15 SkedPal：基于约束的 AI 自动排程
+
+- **UI**：任务、时间预算、日历和计划视图；用户设置目标、偏好和时间约束后由 Auto-Scheduler 生成计划。
+- **交互**：用户像对助理一样说“在 5 月 10 日前完成这个项目”，系统根据可用时间、优先级和约束排程；计划变化后可重排。
+- **优势**：比固定提醒更贴近“我希望什么时候完成”；适合任务很多且时间受限的人。
+- **Todo Pet 借鉴**：Agent 的重排输入同时支持截止日、可用时段、最小连续时长、缓冲和“不安排在晚上”等约束；结果必须可解释。
+- **证据**：[SkedPal How It Works](https://www.skedpal.com/how-it-works)。
+
+### A.16 Study Bunny：专注时间驱动宠物互动
+
+- **UI**：兔子、计时器、待办、学习统计、商店和房间；学习时间可以兑换胡萝卜、物品和装扮。
+- **交互**：倒计时 / 正计时 / 休息；暂停用于重新找回注意力；Study Tracker、Flashcards 和 Honesty Mode 提供不同学习强度。
+- **优势**：专注时长转化为宠物成长和房间内容，反馈清晰且有情绪记忆。
+- **Todo Pet 借鉴**：将专注成果转成宠物动作、收藏和小窝装饰；暂停不是失败，而是宠物陪用户重新进入节奏。
+- **证据**：[Study Bunny Tutorial](https://superbyte.site/tutorial)。
+
+### A.17 Wokamon：现实活动直接喂养成长
+
+- **UI**：步数、能量、宠物收集和活动统计；成长曲线把现实运动转成角色变化。
+- **交互**：每一步都会转化为宠物能量；连接 Fitbit 等设备；完成活动可以解锁新角色并与朋友互动。
+- **优势**：现实行为和宠物成长之间的映射非常直接，用户不用额外维护一套游戏任务。
+- **Todo Pet 借鉴**：把完成任务、专注时长、主动休息和户外活动映射为“共同旅程”；不要把数值做成必须照顾的生命条。
+- **证据**：[Wokamon](https://wokamon.com/)。
+
+### A.18 Tamagotchi：养成分支、小游戏和可见关系
+
+- **UI**：宠物、环境 / 房间、食物、健康、小游戏、商店和图鉴；成长阶段和外观变化是主线。
+- **交互**：照顾、玩游戏、清理、治疗和喂食会影响成长分支；新版本加入连接、合作 / 竞技小游戏、礼物和繁殖。
+- **优势**：用户行为会形成独特的宠物结果；小游戏、收藏和外观为长期关系提供内容。
+- **Todo Pet 借鉴**：用户完成的任务类型、专注节奏和互动偏好可以解锁不同动作包 / 装扮路线；只做正向分支，不因缺席让宠物生病。
+- **证据**：[Tamagotchi Paradise How-to](https://tamagotchi-official.com/us/series/paradise/howto/)、[Tamagotchi Connection](https://www.bandai.com/tamagotchi-connection-citrus)。
+
+### A.19 Desktop Pet / PawPal / OpenDesktopPet：开源桌宠的工程基线
+
+- **UI**：透明无边框、始终置顶、托盘和独立控制面板；支持缩放、透明度、位置锁定、鼠标穿透和导入素材包。
+- **交互**：Desktop Pet 以点击、拖拽、悬停、定时和番茄钟组成自定义规则；PawPal 加入休息、喝水、专注和当前应用提醒；OpenDesktopPet 加入 Live2D、语音、截图视觉、长期记忆和流式气泡。
+- **优势**：证明“桌面存在感”需要窗口层、输入穿透、动画素材和配置系统共同配合；开源项目对拖动、位置记忆和 Boss Mode 的处理很具体。
+- **Todo Pet 借鉴**：
+  - 将动作和交互规则配置化，支持冷却时间和优先级。
+  - 宠物和气泡使用独立层，但拥有统一的 hit-test 和拖动状态。
+  - 全屏、演示、会议和 Boss Mode 是系统能力，而不是临时 CSS。
+  - 素材包必须带许可证、尺寸、锚点和减少动态效果版本。
+- **证据**：[Desktop Pet](https://github.com/duzexu/desktop-pet)、[PawPal](https://github.com/zebangeth/PawPal)、[OpenDesktopPet](https://github.com/HanLoney/OpenDesktop-Pet)。
+
+### A.20 Cat Fidget / BongoCat：轻量互动和输入映射
+
+- **UI**：小型透明宠物窗口，不占 Dock / 任务栏；角色可由照片抠图、像素素材或 Live2D 模型构成。
+- **交互**：点击、抚摸、拖拽、甩动；BongoCat 还将键盘和鼠标输入映射到角色动作，并支持多平台、离线和自定义模型。
+- **优势**：轻量、低承诺、立即可玩；角色对用户输入有连续反应，不依赖复杂养成。
+- **Todo Pet 借鉴**：在用户工作时用低频输入节奏触发敲键盘 / 阅读动作，但不记录具体内容；所有输入感知默认关闭且不上传。
+- **证据**：[Cat Fidget](https://www.highroadsoftware.com/apps/catfidget/)、[BongoCat](https://bongocat.gjxx.dev/)。
+
+## 附录 B. 逐产品横向矩阵
+
+以下矩阵用统一维度压缩 50+ 个产品的优势，便于后续实现时快速定位参考对象。评级是“该产品在此维度的突出程度”，不是产品优劣总分。
+
+### B.1 任务 / 规划 / Agent
+
+| 产品 | UI 形态 | 关键交互 | 相比 Todo Pet 的突出优势 | Todo Pet 具体吸收 |
+|---|---|---|---|---|
+| Todoist | 列表 + 项目 / 看板 | Quick Add、自然语言、Filter Assist | 捕获和过滤器成熟 | 统一解析器、保存视图 |
+| TickTick | 列表 + 日历 + 矩阵 | 拖动时间、番茄、习惯 | 任务 / 专注 / 习惯一体化 | 时间线与 Widget |
+| Things 3 | 极简列表 | Magic Plus、拖动分组 | 渐进披露、低噪声 | 气泡只显示下一步 |
+| OmniFocus | Perspectives / Forecast | Quick Entry、Review、上下文 | 复杂任务可控 | 宠物周回顾与解释筛选 |
+| Microsoft To Do | My Day 工作台 | Suggestions、夜间回收 | 日计划心理负担低 | 今日不是事实库 |
+| Apple Reminders | 列表 + Smart Lists | 标签、章节、模板、Siri | 系统级入口 | 快捷键、语音、模板 |
+| Google Tasks | Workspace 侧栏 | 从邮件 / 日历 / 文档创建 | 上下文捕获无跳转 | 剪贴板 / 当前窗口捕获 |
+| Any.do | 日历 + Daily Planner | My Day、位置 / 重复提醒 | 个人和家庭入口广 | 来源聚合与提醒策略 |
+| Structured | 垂直日线 | 拖 Inbox 到时间线、Replan | 视觉时间计划 | 展开窗时间线 |
+| Sunsama | 日计划 + 时间块 | Guided Planning、Rollover | 日常仪式成熟 | 早报 / 晚报流程 |
+| Akiflow | Universal Inbox + 日历 | 快捷键、P 规划、锁定时间 | 跨工具捕获高效 | 飞书 / 本地统一待整理 |
+| Motion | AI 日历 | 自动排程、依赖、风险 | 处理变化和容量 | Agent 建议日程 |
+| Reclaim | 日历防御层 | 弹性习惯、Focus Time | 习惯能围绕日程移动 | 弹性休息与生活提醒 |
+| Routine | 工作区 + 菜单栏 | 语音、Context Capture、离线 | 桌面入口完整 | 宠物 Quick Capture |
+| Amie | 日历与 Todo 同屏 | `⌘/Ctrl+K`、自然语言、AI 找时间 | 任务时长和时间块同录入 | 语音 + 时长预览 |
+| Tiimo | 视觉时间线 | Brain dump → 步骤 / 时长 / 计划 | 适合执行功能困难用户 | 每次只提示下一步 |
+| Sorted³ | 日线 + Calendar Drawer | Auto Schedule、Magic Select | 自动和手动重排结合 | 两套可解释计划 |
+| Amazing Marvin | 可配置 Day Planner | 策略开关、Check-in | 个性化工作流极强 | 主动性策略模板 |
+| SkedPal | 约束式日程 | 截止日 + 约束 → 自动排程 | 以“完成目标”而非提醒为中心 | 约束模型和预览 |
+| Remember The Milk | 列表 + Smart List | Smart Add、地点 / 标签 | 上下文过滤简单直接 | 手动上下文，不默认定位 |
+| Superlist | 列表 + section + 笔记 | Talk 语音、会议行动项 | 任务和笔记同上下文 | 语音预览、日记联动 |
+
+### B.2 项目 / 开源 / 本地优先
+
+| 产品 | UI 形态 | 关键交互 | 相比 Todo Pet 的突出优势 | Todo Pet 具体吸收 |
+|---|---|---|---|---|
+| ClickUp | 全量工作区、多视图 | 字段、自动化、Super Agents | 结构化工作上下文最全 | 工具注册表与分层能力 |
+| Asana | 项目多视图 | 依赖、Rules、Multi-home | 项目关系和健康状态 | 阻塞链与跨视图引用 |
+| Trello | Board / Card | 拖卡、Butler、模板 | 状态变化最直观 | 宠物搬运任务卡 |
+| Linear | Issue / Cycle | 快捷键、周期、capacity | 开发任务状态紧凑 | 周期和容量信号 |
+| Vikunja | List / Kanban / Table / Gantt | Saved Filters、拖动、导入导出 | 开源项目视图完整 | 任务查询视图与迁移 |
+| Super Productivity | 项目 + Focus Mode | 时间追踪、插件、离线 | 隐私和工程集成强 | 本地优先、连接器 |
+| Taskwarrior | CLI / 报告 | urgency、虚拟标签、hooks | 优先级可解释和可脚本 | 推荐原因与规则 |
+| Kanboard | Kanban / Swimlane | 子任务、自动动作、插件 | 轻量自动化边界清晰 | 动作触发器 |
+| Planify | GNOME 列表 / 日历 | 拖放、离线、Todoist / CalDAV | 桌面 UI 清晰 | 卡片和同步队列 |
+| Lunatask | 任务 + 日记 + 习惯 | 默认加密、云同步 | 隐私关系模型成熟 | 记忆可查看 / 删除 |
+| Focalboard | Board / Table / Calendar / Gallery | 自定义字段、保存视图 | 开源看板和数据库平衡 | 保存宠物视图 |
+| AppFlowy | 页面 + 数据库 | 本地 AI、离线、自托管 | 模型与数据可控 | 本地模型路由 |
+| Anytype | 对象 + 关系 + 图谱 | 离线创建、P2P、本地加密 | 所有权和关系模型强 | 任务 / 日记 / 记忆分层 |
+| Joplin | 笔记本 + Markdown | note / todo 转换、闹钟 | 行动项保留原始上下文 | 研究卡和任务联动 |
+| Org mode / Todo.txt | 纯文本 | 版本控制、脚本、查询 | 可迁移、可审计 | JSON / Markdown 导出 |
+
+### B.3 宠物 / 游戏化 / 桌面陪伴
+
+| 产品 | UI 形态 | 关键交互 | 相比 Todo Pet 的突出优势 | Todo Pet 具体吸收 |
+|---|---|---|---|---|
+| Finch | 宠物房间 + 目标 | 目标、呼吸、Quests、Micropet | 温和自护和功能引导 | 低压力问候与可选模块 |
+| Forest | 种树专注 | 计时、阻断、群组、森林 | 专注成果视觉化强 | 任务成果变收藏 |
+| Habitica | RPG 任务 | 经验、金币、装备、宠物、任务 | 奖励经济和长期目标 | 装扮 / 家园 / 章节 |
+| Focus Friend | 宠物 + 计时器 | Focus Shield、暂停、休息 | 专注主线极清楚 | 专注气泡状态机 |
+| Weyrdlets | 桌面 Overlay + 小岛 | 抚摸、玩具、小游戏、收集 | 桌面宠物内容最完整 | 30–90 秒小游戏 |
+| Spirit City | 氛围房间 + 工具 | Lofi、习惯、日记、计时 | 情绪氛围适合长时陪伴 | 小窝和环境层 |
+| Study Bunny | 兔子 + 学习计时 | 专注、商店、Tracker、Flashcards | 学习反馈循环具体 | 专注成果和动作 |
+| Wokamon | 活动统计 + 宠物 | 步数喂养、收集、社交 | 现实行为到成长映射直接 | 任务 / 休息 / 活动成长 |
+| Tamagotchi | 宠物 + 环境 + 图鉴 | 照顾、小游戏、成长分支 | 关系和演化内容深 | 正向动作 / 装扮分支 |
+| Desktop Goose | 透明桌面角色 | 漫游、追逐、调皮、Boss Mode | 桌面存在感强 | 可选安全调皮动作 |
+| Shimeji-ee | 行为脚本 + 角色 | 热点、拖拽、窗口、暂停 | 动作系统可配置 | 动作包与状态机 |
+| Desktop Pet | 透明桌宠 + 控制面板 | Petpack、规则、缩放、穿透 | 素材与交互工程化 | 资源包协议 |
+| PawPal | 宠物 + 健康提醒 | 休息、喝水、专注、应用感知 | 低打扰桌面提醒 | 温和生活提醒 |
+| OpenDesktopPet | Live2D + AI 气泡 | 语音、截图、记忆、流式对话 | AI 桌宠能力完整 | 模型 / 工具 / 记忆边界 |
+| Cat Fidget | 小型透明窗口 | 抚摸、拖动、甩动、照片抠图 | 极低承诺、马上有反馈 | 轻互动模式 |
+| BongoCat | 输入映射宠物 | 键鼠驱动、模型导入、离线 | 输入反馈连续可见 | 默认不记录内容的输入感知 |
+
+## 附录 C. 研究结论的实现优先级
+
+把竞品优势真正转化为 Todo Pet 设计时，优先级应遵循以下顺序：
+
+1. **可信任务事实**：完成、同步、截止时间、来源和冲突必须先正确；这是飞书、Todoist、Vikunja 等产品共同的底座。
+2. **低摩擦开始**：快捷键、气泡、语音、上下文捕获和“一键开始专注”；这是 Todoist、Akiflow、Routine、Superlist、Apple Reminders 的共同优势。
+3. **可行的今天**：时间线、时长、弹性重排、冲突预览；这是 Structured、Motion、Reclaim、Tiimo、Sorted³、SkedPal 的共同优势。
+4. **Agent 可控执行**：使用 Notion、Taskade、ClickUp、Asana 的行动预览、工具边界和审计思路。
+5. **真实陪伴反馈**：使用 Finch、Forest、Weyrdlets、Shimeji、Desktop Pet 的动作、成果和互动，但删除惩罚性养成。
+6. **长期关系内容**：最后再做装扮、家园、季节、图鉴和社交；Tamagotchi、Habitica、Spirit City 的内容值得借鉴，但不能阻塞任务主线。
 
 ## 14. 变更记录
 
