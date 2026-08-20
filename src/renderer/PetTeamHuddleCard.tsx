@@ -3,8 +3,10 @@ import type { Task } from "../shared/models";
 import type { PetCompanion } from "../shared/pet-types";
 import { PetCompanionAvatar } from "./PetCompanionAvatar";
 import {
+  buildPetTeamBriefing,
   buildPetTeamPlan,
   pickPetTeamTask,
+  type PetTeamBriefingStep,
   type PetTeamPlan,
 } from "./pet-team-huddle";
 
@@ -29,10 +31,14 @@ export function PetTeamHuddleCard({
   const [selectedTaskId, setSelectedTaskId] = useState(() => pickPetTeamTask(openTasks)?.id ?? "");
   const [leadId, setLeadId] = useState("");
   const [phase, setPhase] = useState<HuddlePhase>("idle");
+  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [briefingStepIndex, setBriefingStepIndex] = useState(0);
   const [error, setError] = useState("");
   const timerRef = useRef<number | undefined>(undefined);
+  const briefingTimerRef = useRef<number | undefined>(undefined);
   const selectedTask = openTasks.find((task) => task.id === selectedTaskId) ?? openTasks[0];
   const plan: PetTeamPlan | undefined = buildPetTeamPlan(selectedTask, companions, leadId);
+  const briefing: PetTeamBriefingStep[] = plan ? buildPetTeamBriefing(plan) : [];
 
   useEffect(() => {
     if (!selectedTask || selectedTask.id !== selectedTaskId) {
@@ -43,16 +49,31 @@ export function PetTeamHuddleCard({
 
   useEffect(() => () => {
     if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
+    if (briefingTimerRef.current !== undefined) window.clearInterval(briefingTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    setBriefingStepIndex(0);
+  }, [plan?.lead.companion.id, plan?.task.id]);
 
   if (companions.length === 0) return null;
 
   const prepare = () => {
     if (!plan || disabled || phase !== "idle") return;
     setError("");
+    setBriefingOpen(true);
+    setBriefingStepIndex(0);
     setPhase("preparing");
+    briefingTimerRef.current = window.setInterval(() => {
+      setBriefingStepIndex((current) => Math.min(current + 1, Math.max(briefing.length - 1, 0)));
+    }, 260);
     timerRef.current = window.setTimeout(() => {
       timerRef.current = undefined;
+      if (briefingTimerRef.current !== undefined) {
+        window.clearInterval(briefingTimerRef.current);
+        briefingTimerRef.current = undefined;
+      }
+      setBriefingStepIndex(Math.max(briefing.length - 1, 0));
       setPhase("ready");
     }, 900);
   };
@@ -62,6 +83,10 @@ export function PetTeamHuddleCard({
     setError("");
     try {
       await onStartFocus(plan.task);
+      if (briefingTimerRef.current !== undefined) {
+        window.clearInterval(briefingTimerRef.current);
+        briefingTimerRef.current = undefined;
+      }
       setPhase("idle");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "小队暂时无法开始专注。");
@@ -126,9 +151,49 @@ export function PetTeamHuddleCard({
             <strong>领队：{plan.lead.companion.name}</strong>
             <span>{plan.lead.line}</span>
           </p>
+          <div className="pet-team-huddle-briefing">
+            <button
+              type="button"
+              className="pet-team-huddle-briefing-toggle"
+              aria-expanded={briefingOpen}
+              onClick={() => setBriefingOpen((open) => !open)}
+            >
+              <span>协作简报</span>
+              <small>{briefing.length} 步 · 仅是陪伴提示</small>
+              <span aria-hidden="true">{briefingOpen ? "收起" : "展开"}</span>
+            </button>
+            {briefingOpen && (
+              <ol className="pet-team-huddle-briefing-list" aria-label="小队协作简报">
+                {briefing.map((step, index) => {
+                  const isCurrent = phase === "preparing" && index === briefingStepIndex;
+                  const isDone = phase === "ready" || (phase === "preparing" && index < briefingStepIndex);
+                  return (
+                    <li
+                      key={step.id}
+                      className={`${isCurrent ? "is-current" : ""} ${isDone ? "is-done" : ""}`.trim()}
+                      aria-current={isCurrent ? "step" : undefined}
+                    >
+                      <span className="pet-team-huddle-briefing-index" aria-hidden="true">{isDone ? "✓" : index + 1}</span>
+                      <span className="pet-team-huddle-briefing-copy">
+                        <strong>{step.title}</strong>
+                        <small>{step.member.companion.name} · {step.member.roleLabel}</small>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </div>
+          <p className="pet-team-huddle-briefing-status" aria-live="polite">
+            {phase === "preparing"
+              ? `第 ${Math.min(briefingStepIndex + 1, briefing.length)}/${briefing.length} 步：${briefing[briefingStepIndex]?.title ?? "准备节奏"}`
+              : phase === "ready"
+                ? "协作简报完成，小队已经就位。"
+                : "点击小队准备，先看一眼大家各自负责的陪伴节奏。"}
+          </p>
           <p className="pet-team-huddle-summary" aria-live="polite">
             {phase === "preparing"
-              ? "小队正在碰头，把第一步和专注节奏准备好…"
+              ? `小队正在碰头，${briefing[briefingStepIndex]?.member.companion.name ?? plan.lead.companion.name} 正在完成第 ${briefingStepIndex + 1} 步陪伴准备…`
               : phase === "ready"
                 ? `${plan.lead.companion.name}已经带队就位，准备好就开始这一段专注。`
                 : plan.summary}

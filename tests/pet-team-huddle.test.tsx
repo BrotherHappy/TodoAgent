@@ -58,6 +58,31 @@ describe("PetTeamHuddleCard", () => {
     expect(onStartFocus).toHaveBeenCalledWith(task);
   });
 
+  it("shows a collapsible lead-first briefing and advances its preparation steps", () => {
+    vi.useFakeTimers();
+    render(
+      <PetTeamHuddleCard
+        companions={companions}
+        tasks={[task]}
+        onStartFocus={vi.fn().mockResolvedValue(undefined)}
+        onOpenTask={vi.fn()}
+      />,
+    );
+
+    const toggle = screen.getByRole("button", { name: /协作简报/u });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("先找一个落点")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "小队准备" }));
+    expect(screen.getByText("第 1/2 步：先找一个落点")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByText("第 2/2 步：守住一小段节奏")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(600));
+    expect(screen.getByText("协作简报完成，小队已经就位。")).toBeInTheDocument();
+    expect(screen.getAllByText("✓")).toHaveLength(2);
+  });
+
   it("allows a companion to lead the briefing before preparation", () => {
     render(
       <PetTeamHuddleCard

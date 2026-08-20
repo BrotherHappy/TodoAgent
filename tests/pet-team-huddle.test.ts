@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Task } from "../src/shared/models";
 import type { PetCompanion } from "../src/shared/pet-types";
-import { buildPetTeamPlan, pickPetTeamTask } from "../src/renderer/pet-team-huddle";
+import { buildPetTeamBriefing, buildPetTeamPlan, pickPetTeamTask } from "../src/renderer/pet-team-huddle";
 
 const task = (id: string, patch: Partial<Task> = {}): Task => ({
   id,
@@ -56,6 +56,16 @@ describe("pet team huddle", () => {
     const plan = buildPetTeamPlan(task("准备发布"), companions, "moth");
     expect(plan?.lead).toMatchObject({ companion: { id: "moth" }, role: "guard" });
     expect(plan?.task.id).toBe("准备发布");
+  });
+
+  it("builds a lead-first briefing without inventing work", () => {
+    const plan = buildPetTeamPlan(task("准备发布"), companions, "moth");
+    expect(plan).toBeDefined();
+    const briefing = buildPetTeamBriefing(plan!);
+    expect(briefing.map((step) => step.member.companion.id)).toEqual(["moth", "bird"]);
+    expect(briefing.map((step) => step.title)).toEqual(["把干扰放轻", "先找一个落点"]);
+    expect(briefing[0]?.member.line).toContain("声音放轻");
+    expect(briefing.map((step) => step.id)).toEqual(["1-guard-moth", "2-scout-bird"]);
   });
 
   it("does not create a plan for completed or companion-less tasks", () => {

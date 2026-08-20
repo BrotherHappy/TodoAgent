@@ -17,6 +17,12 @@ export interface PetTeamPlan {
   summary: string;
 }
 
+export interface PetTeamBriefingStep {
+  id: string;
+  member: PetTeamMember;
+  title: string;
+}
+
 const priorityWeight: Record<Task["priority"], number> = {
   urgent: 0,
   high: 1,
@@ -35,6 +41,15 @@ const roleByKind: Record<PetCompanionKind, {
   "moss-mouse": { role: "sort", roleLabel: "整理上下文", line: "我来把杂乱的线头收拢起来。" },
   "moon-moth": { role: "guard", roleLabel: "安静守护", line: "我会把声音放轻，陪你完成这一段。" },
 };
+
+const briefingTitleByRole: Record<PetTeamRole, string> = {
+  scout: "先找一个落点",
+  sort: "收拢需要的线头",
+  steady: "守住一小段节奏",
+  guard: "把干扰放轻",
+};
+
+const briefingRoleOrder: PetTeamRole[] = ["scout", "sort", "steady", "guard"];
 
 const taskDueTimestamp = (task: Task): number => {
   if (!task.dueAt) return Number.POSITIVE_INFINITY;
@@ -76,4 +91,27 @@ export function buildPetTeamPlan(
     lead,
     summary: `${names}会一起陪你完成「${task.title}」，但任务状态仍只由 Todo Agent 记录。`,
   };
+}
+
+/**
+ * Builds a presentation-only, deterministic briefing for the current huddle.
+ * It explains how companions will accompany one task; it does not create
+ * subtasks, invoke an Agent, or imply that any role has executed work.
+ */
+export function buildPetTeamBriefing(plan: PetTeamPlan): PetTeamBriefingStep[] {
+  const remaining = plan.members
+    .filter((member) => member.companion.id !== plan.lead.companion.id)
+    .slice()
+    .sort((left, right) =>
+      briefingRoleOrder.indexOf(left.role) - briefingRoleOrder.indexOf(right.role) ||
+      left.companion.id.localeCompare(right.companion.id),
+    );
+  return [plan.lead, ...remaining].map((member, index) => ({
+    id: `${member.role}-${member.companion.id}`,
+    member,
+    title: briefingTitleByRole[member.role],
+  })).map((step, index) => ({
+    ...step,
+    id: `${index + 1}-${step.id}`,
+  }));
 }
