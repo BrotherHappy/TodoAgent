@@ -6891,6 +6891,13 @@ select {
   align-items: center;
   gap: 12px;
 }
+.pet-room-controls label .pet-personality-hint {
+  grid-column: 1 / -1;
+  margin-top: -5px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .pet-room-controls select {
   min-height: 38px;
   border: 1px solid var(--app-line);
@@ -10333,6 +10340,25 @@ select {
   .pet-eye-open {
     animation: pet-blink 4.9s linear infinite;
   }
+  /* Personality changes presence and tempo only; task facts and reminders
+     remain entirely independent of the companion style. */
+  .pet-personality-energetic .pet-body-rig,
+  .pet-personality-playful .pet-body-rig { animation-duration: 2.9s; }
+  .pet-personality-energetic .pet-tail-rig,
+  .pet-personality-playful .pet-tail-rig { animation-duration: 1.05s; }
+  .pet-personality-energetic .pet-ear-left-rig,
+  .pet-personality-energetic .pet-ear-right-rig,
+  .pet-personality-playful .pet-ear-left-rig,
+  .pet-personality-playful .pet-ear-right-rig { animation-duration: 5.4s; }
+  .pet-personality-calm .pet-body-rig { animation-duration: 5.2s; }
+  .pet-personality-calm .pet-tail-rig { animation-duration: 4.6s; }
+  .pet-personality-calm .pet-ear-left-rig,
+  .pet-personality-calm .pet-ear-right-rig { animation-duration: 10s; }
+  .pet-personality-witty .pet-tail-rig { animation-duration: 1.7s; }
+  .pet-personality-quiet .pet-body-rig { animation-duration: 6.4s; }
+  .pet-personality-quiet .pet-tail-rig { animation-duration: 6.8s; }
+  .pet-personality-quiet .pet-ear-left-rig,
+  .pet-personality-quiet .pet-ear-right-rig { animation-duration: 12s; }
   .pet-emotion-focused .pet-rig { animation-duration: 4.5s; }
   .pet-emotion-excited .pet-tail-rig,
   .pet-emotion-happy .pet-tail-rig,

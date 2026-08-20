@@ -289,6 +289,7 @@ describe("PetService", () => {
       palette: "mint",
       outfit: "explorer",
       roomTheme: "forest-nook",
+      personality: "calm",
       decorations: ["plant", "plant", "books"],
     });
     expect(service.snapshot().appearance).toEqual({
@@ -297,9 +298,11 @@ describe("PetService", () => {
       roomTheme: "forest-nook",
       decorations: ["plant", "books"],
     });
+    expect(service.snapshot().profile.personality).toBe("calm");
     const restored = new PetService({ userDataPath: root });
     await restored.initialize();
     expect(restored.snapshot().appearance.outfit).toBe("explorer");
+    expect(restored.snapshot().profile.personality).toBe("calm");
   });
 
   it("creates one pressure-free daily adventure and rewards its choice exactly once", async () => {

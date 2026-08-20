@@ -1,4 +1,5 @@
 import { useId, useRef, type CSSProperties, type PointerEvent } from "react";
+import type { PetPersonality } from "../shared/pet-types";
 import {
   petActionLabels,
   type PetAction,
@@ -9,6 +10,7 @@ export type PetMood = "idle" | "focus" | "syncing" | "alert" | "happy";
 export type PetPalette = "lavender" | "mint" | "sunset" | "midnight";
 export type PetOutfit = "none" | "scarf" | "explorer" | "starlight";
 export type PetSeason = "spring" | "summer" | "autumn" | "winter";
+export type { PetPersonality };
 
 interface PetCharacterProps {
   mood?: PetMood;
@@ -21,6 +23,7 @@ interface PetCharacterProps {
   palette?: PetPalette;
   outfit?: PetOutfit;
   season?: PetSeason;
+  personality?: PetPersonality;
 }
 
 const moodLabels: Record<PetMood, string> = {
@@ -50,6 +53,15 @@ const emotionLabels: Record<PetEmotion, string> = {
   proud: "很有成就感",
 };
 
+const personalityLabels: Record<PetPersonality, string> = {
+  gentle: "温柔陪伴",
+  energetic: "元气鼓励",
+  calm: "冷静管家",
+  playful: "活泼淘气",
+  witty: "轻微淘气",
+  quiet: "安静陪伴",
+};
+
 function clampGaze(value: number): number {
   return Math.max(-1, Math.min(1, value));
 }
@@ -70,6 +82,7 @@ export function PetCharacter({
   palette = "lavender",
   outfit = "none",
   season,
+  personality = "gentle",
 }: PetCharacterProps) {
   const rootRef = useRef<HTMLSpanElement>(null);
   const gradientId = `pet-body-${useId().replaceAll(":", "")}`;
@@ -94,13 +107,14 @@ export function PetCharacter({
   return (
     <span
       ref={rootRef}
-      className={`pet-character pet-mood-${mood} pet-emotion-${resolvedEmotion} pet-action-${action} pet-palette-${palette} pet-outfit-${outfit} ${season ? `pet-season-${season}` : ""} ${compact ? "is-compact" : ""} ${interactive ? "is-interactive" : ""}`}
+      className={`pet-character pet-mood-${mood} pet-emotion-${resolvedEmotion} pet-action-${action} pet-palette-${palette} pet-outfit-${outfit} pet-personality-${personality} ${season ? `pet-season-${season}` : ""} ${compact ? "is-compact" : ""} ${interactive ? "is-interactive" : ""}`}
       data-pet-action={action}
       data-pet-emotion={resolvedEmotion}
       data-pet-palette={palette}
       data-pet-outfit={outfit}
+      data-pet-personality={personality}
       role="img"
-      aria-label={`${name}，${moodLabels[mood]}，${emotionLabels[resolvedEmotion]}，${petActionLabels[action]}`}
+      aria-label={`${name}，${personalityLabels[personality]}，${moodLabels[mood]}，${emotionLabels[resolvedEmotion]}，${petActionLabels[action]}`}
       style={{ "--pet-scale": scale } as CSSProperties}
       onPointerMove={updateGaze}
       onPointerLeave={resetGaze}

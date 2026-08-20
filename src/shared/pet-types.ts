@@ -70,10 +70,20 @@ export type PetAttribute =
   | "organization"
   | "courage";
 
+/** A low-pressure companion style that changes presence, not task facts. */
+export type PetPersonality =
+  | "gentle"
+  | "energetic"
+  | "calm"
+  | "playful"
+  | "witty"
+  | "quiet";
+
 export interface PetProfile {
   id: string;
   name: string;
   species: "task-sprite";
+  personality: PetPersonality;
   stage: "seed" | "companion" | "partner" | "guardian";
   level: number;
   experience: number;
@@ -128,6 +138,7 @@ export interface PetCustomizationPatch {
   outfit?: PetOutfit;
   roomTheme?: PetRoomTheme;
   decorations?: string[];
+  personality?: PetPersonality;
 }
 
 export interface PetAdventureChoice {

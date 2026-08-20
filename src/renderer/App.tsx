@@ -149,6 +149,7 @@ import type {
   PetGoal,
   PetGoalMetric,
   PetMemoryEntry,
+  PetPersonality,
   PetSnapshot,
   WeatherSnapshot,
 } from "../shared/pet-types";
@@ -7727,6 +7728,7 @@ function PetHomePage({
             interactive
             palette={snapshot.appearance.palette}
             outfit={snapshot.appearance.outfit}
+            personality={profile.personality}
           />
         </div>
       </header>
@@ -7883,6 +7885,7 @@ function PetHomePage({
               interactive
               palette={snapshot.appearance.palette}
               outfit={snapshot.appearance.outfit}
+              personality={profile.personality}
             />
           </div>
           <div className="pet-room-controls">
@@ -7910,6 +7913,30 @@ function PetHomePage({
                 <option value="sunset">日落糖</option>
                 <option value="midnight">星夜</option>
               </select>
+            </label>
+            <label>
+              <span>陪伴性格</span>
+              <select
+                value={profile.personality}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      personality: event.target.value as PetPersonality,
+                    });
+                  }, "性格已调整")
+                }
+              >
+                <option value="gentle">温柔陪伴 · 轻声鼓励</option>
+                <option value="energetic">元气鼓励 · 更有活力</option>
+                <option value="calm">冷静管家 · 少打扰</option>
+                <option value="playful">活泼淘气 · 更爱互动</option>
+                <option value="witty">轻微淘气 · 偶尔逗你</option>
+                <option value="quiet">安静陪伴 · 慢节奏</option>
+              </select>
+              <small className="pet-personality-hint">
+                只改变动作节奏和表达方式，不改变任务、提醒或同步规则。
+              </small>
             </label>
             <label>
               <span>服装</span>
@@ -7997,6 +8024,7 @@ function PetHomePage({
               emotion={adventure?.completedAt ? "proud" : "curious"}
               palette={snapshot.appearance.palette}
               outfit="explorer"
+              personality={profile.personality}
             />
           </div>
           <article className="pet-adventure-card">
@@ -13782,6 +13810,7 @@ function FloatingPetCoopGame({
   petName,
   palette,
   outfit,
+  personality,
   season,
   positionLocked,
   onDragStart,
@@ -13795,6 +13824,7 @@ function FloatingPetCoopGame({
   petName: string;
   palette: PetPalette;
   outfit: PetOutfit;
+  personality: PetPersonality;
   season?: PetSeason;
   positionLocked: boolean;
   onDragStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -14004,6 +14034,7 @@ function FloatingPetCoopGame({
               name={petName}
               palette={palette}
               outfit={outfit}
+              personality={personality}
               season={season}
             />
           </div>
@@ -14062,6 +14093,7 @@ function FloatingPetCoopGame({
             name={petName}
             palette={palette}
             outfit={outfit}
+            personality={personality}
             season={season}
           />
           <strong>我们一起跳过了 {jumpStats.score} 下</strong>
@@ -14107,6 +14139,7 @@ function FloatingPetCoopGame({
             name={petName}
             palette={palette}
             outfit={outfit}
+            personality={personality}
             season={season}
           />
         </div>
@@ -14284,6 +14317,14 @@ function FloatingWindow() {
     roomTheme: "cloud-room" as const,
     decorations: ["cloud-lamp"],
   };
+  const petPersonality: PetPersonality =
+    petData.snapshot?.profile.personality ?? "gentle";
+  const personalityActionPack =
+    petPersonality === "energetic" || petPersonality === "playful"
+      ? "playful"
+      : petPersonality === "calm" || petPersonality === "quiet"
+        ? "calm"
+        : petSettings.pet.actionPack;
   const petSeasonEvent = petSettings.pet.seasonalEvents
     ? petSeasonalEventForDate()
     : undefined;
@@ -14354,7 +14395,7 @@ function FloatingWindow() {
     },
     petName,
     petSettings.pet.interactionsEnabled,
-    petSettings.pet.actionPack,
+    personalityActionPack,
     installedActionPacks.activePack?.idleActions,
   );
   useEffect(() => {
@@ -15800,6 +15841,7 @@ function FloatingWindow() {
               interactive
               palette={petAppearance.palette}
               outfit={petAppearance.outfit}
+              personality={petPersonality}
               season={petSeason}
             />
           </button>
@@ -16199,6 +16241,7 @@ function FloatingWindow() {
             petName={petName}
             palette={petAppearance.palette}
             outfit={petAppearance.outfit}
+            personality={petPersonality}
             season={petSeason}
             positionLocked={floatingLocked}
             onDragStart={beginFloatingHandleDrag}
@@ -16652,6 +16695,7 @@ function FloatingWindow() {
                     interactive
                     palette={petAppearance.palette}
                     outfit={petAppearance.outfit}
+                    personality={petPersonality}
                     season={petSeason}
                   />
                   <p className="pet-focus-kicker">
@@ -16770,6 +16814,7 @@ function FloatingWindow() {
                       interactive
                       palette={petAppearance.palette}
                       outfit={petAppearance.outfit}
+                      personality={petPersonality}
                       season={petSeason}
                     />
                     <div>

@@ -20,6 +20,7 @@ import {
   type PetMiniGameRecord,
   type PetProfile,
   type PetPortableState,
+  type PetPersonality,
   type ProactiveMessageRecord,
   type PetReward,
   type PetSnapshot,
@@ -36,6 +37,7 @@ function createProfile(name: string, now = Date.now()): PetProfile {
     id: randomUUID(),
     name: name.trim() || "小序",
     species: "task-sprite",
+    personality: "gentle",
     stage: "seed",
     level: 1,
     experience: 0,
@@ -50,6 +52,18 @@ function createProfile(name: string, now = Date.now()): PetProfile {
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+}
+
+function normalizePersonality(value: unknown): PetPersonality {
+  if (value === "gentle" || value === "energetic" || value === "calm" || value === "playful" || value === "witty" || value === "quiet") {
+    return value;
+  }
+  // Accept the names used briefly by the pre-release renderer so an
+  // interrupted upgrade cannot discard a user's chosen style.
+  if (value === "warm") return "gentle";
+  if (value === "lively") return "energetic";
+  if (value === "focused") return "calm";
+  return "gentle";
 }
 
 export function createDefaultPetState(name = "小序", now = Date.now()): PetState {
@@ -153,6 +167,7 @@ function normalizeState(value: unknown, name: string): PetState {
     profile: {
       ...defaults.profile,
       ...clone(raw.profile),
+      personality: normalizePersonality(raw.profile.personality),
       attributes: {
         ...defaults.profile.attributes,
         ...clone(raw.profile.attributes ?? {}),
@@ -381,6 +396,14 @@ export class PetService {
     const palettes = new Set(["lavender", "mint", "sunset", "midnight"]);
     const outfits = new Set(["none", "scarf", "explorer", "starlight"]);
     const rooms = new Set(["cloud-room", "forest-nook", "night-library"]);
+    const personalities = new Set<PetPersonality>([
+      "gentle",
+      "energetic",
+      "calm",
+      "playful",
+      "witty",
+      "quiet",
+    ]);
     return this.#mutate((draft, now, events) => {
       if (patch.palette !== undefined) {
         if (!palettes.has(patch.palette)) throw new Error("INVALID_PET_PALETTE");
@@ -395,6 +418,10 @@ export class PetService {
       if (patch.roomTheme !== undefined) {
         if (!rooms.has(patch.roomTheme)) throw new Error("INVALID_PET_ROOM");
         draft.appearance.roomTheme = patch.roomTheme;
+      }
+      if (patch.personality !== undefined) {
+        if (!personalities.has(patch.personality)) throw new Error("INVALID_PET_PERSONALITY");
+        draft.profile.personality = patch.personality;
       }
       if (patch.decorations !== undefined) {
         draft.appearance.decorations = Array.from(

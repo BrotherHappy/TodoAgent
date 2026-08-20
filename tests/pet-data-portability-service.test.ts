@@ -61,6 +61,7 @@ describe("PetDataPortabilityService", () => {
     const bundle = JSON.parse(json) as { format: string; data: { pet: PetPortableState } };
     expect(bundle.format).toBe("todo-agent-pet-portable-data");
     expect(bundle.data.pet.profile.name).toBe("团团");
+    expect(bundle.data.pet.profile.personality).toBe("gentle");
     expect(bundle.data.pet.habits.map((habit) => habit.id)).toContain("water");
     expect(bundle.data.pet.goals).toEqual([]);
     expect("focus" in bundle.data.pet).toBe(false);
