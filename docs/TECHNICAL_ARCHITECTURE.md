@@ -125,6 +125,7 @@ flowchart LR
 - 小窝季节装饰：`src/renderer/pet-room-season.ts` 为四季返回固定的三项装饰数据，`PetHomePage` 只在 `AppSettings.pet.seasonalEvents` 开启时将其投影到房间舞台。坐标是百分比、内容是内置字符，动画只作用于装饰层的 transform；它不写入 `PetState`、localStorage、任务、奖励或飞书 payload，并通过 `prefers-reduced-motion` 停止漂移。
 - 房间伙伴互动：`src/renderer/pet-companion-interactions.ts` 按伙伴种类和陪伴性格生成固定短句；`PetHomePage` 只在 renderer 内保存当前回应和 3.2 秒的临时动作状态。伙伴按钮使用原生键盘可聚焦控件，回应不读取任务/Agent/飞书数据，不写入 `PetState`、奖励或同步队列；减少动态效果时跳过问候动画。
 - 小队一起开工：`src/renderer/pet-team-huddle.ts` 从当前任务快照确定性挑选一项开放任务，并把最多 3 个房间伙伴映射到固定的侦察、稳节奏、整理和守护角色；`PetTeamHuddleCard` 允许用户临时选择领队并展示其角色提示，可展开的协作简报以领队优先、固定角色顺序逐步点亮准备节奏；同一张卡还可展开最多 3 项的当前小队路线预览，按预计时长汇总并允许切换当前开工目标；所有准备与路线操作只调用既有任务控制器，不保存伙伴分工、不复制任务、不调用额外 Agent 工具、不写入飞书或 PetService。
+- 今日明信片：`src/renderer/pet-postcard.ts` 只从当前任务快照、完成的专注历史和已有天气快照生成当天的文案、语气、统计和天气行；`PetPostcardCard` 在小窝成长首页展示并提供 Today 导航。它不持久化、不创建任务、不写入 PetService、Agent 或飞书，也不把文案升级为长期记忆。
 - 桌面天气胶囊：`src/renderer/pet-weather-chip.ts` 将已有 `WeatherSnapshot` 纯函数化为温度、状况、降水、缓存和严重天气提示；`FloatingWindow` 仅在天气开关开启、已有快照且不是仅宠物模式/小游戏时显示可点击胶囊，点击切换到既有小窗天气卡片。隐私模式只隐藏城市文案；该层不读取定位、不请求新网络、不创建任务、不改变 PetState 或 Feishu payload。
 - `src/renderer/pet-collection.ts` 与 `PetCollectionCard` 只把 `PetSnapshot.inventory` 映射为固定收藏目录，合并数量、标记解锁状态并显示来源提示；它不保存新字段、不复制任务或奖励，也不参与成长、权限或飞书同步。
 - `src/renderer/pet-project-chapters.ts` 与 `PetProjectChapters` 从同一份任务快照和项目实体投影最多 4 个活跃章节，按完成比例和开放任务选择下一步；它只导航到既有项目/任务入口，不创建章节实体、不维护第二套进度、不触发同步。

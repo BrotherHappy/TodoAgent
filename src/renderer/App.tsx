@@ -238,6 +238,7 @@ import {
   kindLabels as petCompanionKindLabels,
 } from "./PetCompanionAvatar";
 import { PetTeamHuddleCard } from "./PetTeamHuddleCard";
+import { PetPostcardCard } from "./PetPostcardCard";
 import { petCompanionGreeting } from "./pet-companion-interactions";
 import {
   petInteractionFromPoint,
@@ -7868,6 +7869,14 @@ function PetHomePage({
 
       {section === "home" && (
         <div className="pet-dashboard">
+          <PetPostcardCard
+            name={profile.name}
+            personality={profile.personality}
+            tasks={tasks}
+            focusHistory={snapshot.focusHistory}
+            weather={weather}
+            onOpenToday={() => onNavigate("today")}
+          />
           <section className="pet-level-card">
             <div className="pet-level-number">Lv.{profile.level}</div>
             <div>
