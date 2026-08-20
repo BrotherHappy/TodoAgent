@@ -15281,7 +15281,11 @@ function FloatingWindow() {
   ): Promise<void> {
     const completing = task.status === "open";
     await controller.toggleComplete(task);
-    if (completing) petBehavior.celebrate("完成一件，真不错。");
+    if (completing) {
+      petBehavior.taskComplete(
+        privacyMode ? "盖章完成，真不错。" : `盖章完成：${task.title}`,
+      );
+    }
   }
   async function runFocusAction(operation: () => Promise<unknown>) {
     setFocusBusy(true);
