@@ -2212,6 +2212,100 @@ select {
   color: var(--app-brand-strong);
   background: var(--app-brand-soft);
 }
+.dependency-chain-card {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 9px;
+  margin: 12px 0 2px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-brand-soft) 45%, var(--app-surface));
+}
+.dependency-chain-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.dependency-chain-heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--app-text);
+  font-weight: 600;
+}
+.dependency-chain-heading small {
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.dependency-chain-track {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 1px 1px 4px;
+  scrollbar-width: thin;
+}
+.dependency-chain-node,
+.dependency-chain-current {
+  display: grid;
+  flex: 0 0 126px;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--app-line);
+  border-radius: 11px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  text-align: left;
+}
+.dependency-chain-node {
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+.dependency-chain-node:hover {
+  border-color: var(--app-brand);
+  background: var(--app-brand-soft);
+  transform: translateY(-1px);
+}
+.dependency-chain-node:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 2px;
+}
+.dependency-chain-node.is-complete {
+  border-color: color-mix(in srgb, var(--app-success) 35%, var(--app-line));
+  background: color-mix(in srgb, var(--app-success-soft) 55%, var(--app-surface));
+}
+.dependency-chain-current {
+  border-color: color-mix(in srgb, var(--app-brand) 42%, var(--app-line));
+  background: var(--app-brand-soft);
+  box-shadow: 0 4px 13px color-mix(in srgb, var(--app-brand) 12%, transparent);
+}
+.dependency-chain-node small,
+.dependency-chain-current small {
+  color: var(--app-text-faint);
+  font-size: 10px;
+  font-weight: 600;
+}
+.dependency-chain-node span,
+.dependency-chain-current span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dependency-chain-warning {
+  margin: 0;
+  color: var(--app-warning-strong, var(--app-warning));
+  font-size: 11px;
+  line-height: 1.4;
+}
 
 .detail-group {
   padding: 14px 0;

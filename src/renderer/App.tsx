@@ -28,6 +28,7 @@ import {
   Filter,
   Focus,
   FolderKanban,
+  GitBranch,
   GripVertical,
   Heart,
   Inbox,
@@ -138,6 +139,7 @@ import {
 } from "./focus-environment-sound";
 import { DailyPlanSheet } from "./DailyPlanSheet";
 import { InboxTriageSheet } from "./InboxTriageSheet";
+import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
 import {
   localDateTimeInputToIso,
@@ -3421,6 +3423,7 @@ function TaskInspector({
       relatedTasks.find((candidate) => candidate.id === dependencyId)?.status !==
       "completed",
   ).length;
+  const dependencyChain = buildDependencyChain(task, relatedTasks);
   const pendingTemporalChange = Boolean(
     pendingPatch &&
       ["plannedDate", "startAt", "dueAt", "timeBlock", "reminders"].some(
@@ -3752,6 +3755,66 @@ function TaskInspector({
               <small className="field-hint">仅本地，不同步飞书</small>
             )}
           </div>
+          {(dependencyChain.ancestors.length > 0 ||
+            dependencyChain.downstream.length > 0 ||
+            dependencyChain.missingDependencyIds.length > 0 ||
+            dependencyChain.cycleDetected) && (
+            <section className="dependency-chain-card" aria-label="任务依赖链">
+              <div className="dependency-chain-heading">
+                <span>
+                  <GitBranch size={14} aria-hidden="true" />
+                  执行关系
+                </span>
+                <small>
+                  {dependencyChain.ancestors.length > 0
+                    ? `先做 ${dependencyChain.ancestors.length} 项`
+                    : dependencyChain.downstream.length > 0
+                      ? `后续 ${dependencyChain.downstream.length} 项`
+                      : "需要检查"}
+                </small>
+              </div>
+              <div className="dependency-chain-track">
+                {dependencyChain.ancestors.map((item) => (
+                  <button
+                    key={`ancestor-${item.task.id}`}
+                    type="button"
+                    className={`dependency-chain-node ${item.task.status === "completed" ? "is-complete" : ""}`}
+                    onClick={() => controller.select(item.task.id)}
+                    title="打开前置任务"
+                  >
+                    <small>前置</small>
+                    <span>{item.task.title}</span>
+                  </button>
+                ))}
+                <span className="dependency-chain-current" aria-current="true">
+                  <small>当前</small>
+                  <span>{task.title}</span>
+                </span>
+                {dependencyChain.downstream.map((item) => (
+                  <button
+                    key={`downstream-${item.task.id}`}
+                    type="button"
+                    className={`dependency-chain-node ${item.task.status === "completed" ? "is-complete" : ""}`}
+                    onClick={() => controller.select(item.task.id)}
+                    title="打开后续任务"
+                  >
+                    <small>后续</small>
+                    <span>{item.task.title}</span>
+                  </button>
+                ))}
+              </div>
+              {dependencyChain.missingDependencyIds.length > 0 && (
+                <p className="dependency-chain-warning">
+                  还有 {dependencyChain.missingDependencyIds.length} 项依赖暂时不可见，关系已保留。
+                </p>
+              )}
+              {dependencyChain.cycleDetected && (
+                <p className="dependency-chain-warning">
+                  检测到循环依赖；这里只展示事实，不会自动改写。
+                </p>
+              )}
+            </section>
+          )}
         </div>
         <div className="detail-group">
           <h3>链接与上下文</h3>
