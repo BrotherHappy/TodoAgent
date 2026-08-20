@@ -9734,6 +9734,22 @@ function SettingsPage({
                 <option value="gentle">舒缓</option>
               </select>
             </div>
+            <div className="settings-row">
+              <div>
+                <strong>工作时回应</strong>
+                <p>只读取系统最近是否有输入，让宠物偶尔敲键盘或翻书；不读取按键内容，默认关闭</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.inputReactionsEnabled}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, inputReactionsEnabled: value },
+                  }, value ? "已开启工作时回应" : "已关闭工作时回应")
+                }
+                label="工作时回应"
+              />
+            </div>
             <div className="settings-subheading">
               <span>可安装动作包</span>
               <p>动作包只是一组已有待机动作；可以调节动作冷却和出现频率，不允许脚本、网络请求、文件读取或外部代码。</p>
@@ -14867,6 +14883,20 @@ function FloatingWindow() {
     personalityActionPack,
     customIdleProfile,
   );
+  const petBehaviorRef = useRef(petBehavior);
+  petBehaviorRef.current = petBehavior;
+  useEffect(() => {
+    if (!window.desktopApi || !petSettings.pet.inputReactionsEnabled) {
+      return undefined;
+    }
+    return window.desktopApi.events.onPetInputActivity((event) => {
+      petBehaviorRef.current.act(
+        event.kind === "typing" ? "type" : "read",
+        undefined,
+        event.kind === "typing" ? 2_200 : 3_200,
+      );
+    });
+  }, [petSettings.pet.inputReactionsEnabled]);
   useEffect(() => {
     if (petBehavior.message) setReactionBubbleCollapsed(false);
     if (

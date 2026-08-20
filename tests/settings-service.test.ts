@@ -81,11 +81,13 @@ describe('SettingsService', () => {
     const settingsPath = path.join(root, 'settings.v1.json');
     const legacy = JSON.parse(await readFile(settingsPath, 'utf8')) as {
       floating: Record<string, unknown>;
+      pet: Record<string, unknown>;
     };
     delete legacy.floating.hoverExpandDelayMs;
     delete legacy.floating.selectedTab;
     delete legacy.floating.scalePercent;
     delete legacy.floating.mousePassthrough;
+    delete legacy.pet.inputReactionsEnabled;
     legacy.floating.shape = 'orb';
     legacy.floating.topMode = 'focus-only';
     await writeFile(settingsPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8');
@@ -97,13 +99,16 @@ describe('SettingsService', () => {
     expect(migrated.get().floating.selectedTab).toBe('all');
     expect(migrated.get().floating.scalePercent).toBe(100);
     expect(migrated.get().floating.mousePassthrough).toBe(false);
+    expect(migrated.get().pet.inputReactionsEnabled).toBe(false);
     const persistedMigration = JSON.parse(await readFile(settingsPath, 'utf8')) as {
       floating: Record<string, unknown>;
+      pet: Record<string, unknown>;
     };
     expect(persistedMigration.floating.topMode).toBe('always');
     expect(persistedMigration.floating.selectedTab).toBe('all');
     expect(persistedMigration.floating.scalePercent).toBe(100);
     expect(persistedMigration.floating.mousePassthrough).toBe(false);
+    expect(persistedMigration.pet.inputReactionsEnabled).toBe(false);
     expect(persistedMigration.floating).not.toHaveProperty('shape');
     const replaced = await migrated.replace({
       ...migrated.get(),
@@ -113,6 +118,10 @@ describe('SettingsService', () => {
         topMode: 'never',
         mousePassthrough: true,
       },
+      pet: {
+        ...migrated.get().pet,
+        inputReactionsEnabled: true,
+      },
     });
     expect(replaced.floating.topMode).toBe('always');
 
@@ -121,6 +130,7 @@ describe('SettingsService', () => {
     expect(reloaded.get().floating.hoverExpandDelayMs).toBe(1_700);
     expect(reloaded.get().floating.topMode).toBe('always');
     expect(reloaded.get().floating.mousePassthrough).toBe(true);
+    expect(reloaded.get().pet.inputReactionsEnabled).toBe(true);
   });
 
   it('clamps malformed on-disk hover delays to the supported range', async () => {

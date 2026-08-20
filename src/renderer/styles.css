@@ -4967,6 +4967,7 @@ select {
 .pet-prop-snack { fill: #e7ad61; stroke: #9b632f; }
 .pet-prop-snack .pet-snack-chip { fill: #7b4a2a; stroke: none; }
 .pet-prop-task-card { fill: #fff; stroke: color-mix(in srgb, var(--pet-body-dark) 70%, #fff); }
+.pet-prop-keyboard { fill: #eef0ff; stroke: #7477b8; }
 .pet-prop-magnifier { fill: color-mix(in srgb, #dff1ff 75%, transparent); stroke: #4f89b6; }
 .pet-prop-sync-box { fill: #dfeeff; stroke: #4a8ddf; }
 .pet-season-prop { stroke-width: 1.6; stroke-linejoin: round; }
@@ -5099,6 +5100,7 @@ select {
 .pet-action-inspect .pet-prop-magnifier,
 .pet-action-search .pet-prop-magnifier,
 .pet-action-tidy .pet-prop-task-card,
+.pet-action-type .pet-prop-keyboard,
 .pet-action-task-carry .pet-prop-task-card,
 .pet-action-task-drop .pet-prop-task-card,
 .pet-action-task-plan .pet-prop-task-card,
@@ -11673,6 +11675,10 @@ select {
   .pet-action-search .pet-prop-magnifier { animation: pet-inspect 1.2s ease-in-out infinite; }
   .pet-action-tidy .pet-prop-task-card,
   .pet-action-task-plan .pet-prop-task-card { animation: pet-card-tidy 850ms ease-in-out infinite; }
+  .pet-action-type .pet-prop-keyboard { animation: pet-keyboard 520ms ease-in-out infinite alternate; }
+  .pet-action-type .pet-arm-left-rig,
+  .pet-action-type .pet-arm-right-rig { animation: pet-type-arms 420ms ease-in-out infinite alternate; }
+  .pet-action-type .pet-head-rig { animation: pet-type-head 1.4s ease-in-out infinite; }
   .pet-action-tidy .pet-arm-left-rig,
   .pet-action-tidy .pet-arm-right-rig,
   .pet-action-work .pet-arm-left-rig,
@@ -12016,6 +12022,18 @@ select {
   @keyframes pet-work-arms {
     from { transform: translateY(-1px) rotate(-5deg); }
     to { transform: translateY(3px) rotate(8deg); }
+  }
+  @keyframes pet-keyboard {
+    from { transform: translateY(0) scaleY(1); }
+    to { transform: translateY(1px) scaleY(0.96); }
+  }
+  @keyframes pet-type-arms {
+    from { transform: translateY(-1px) rotate(-8deg); }
+    to { transform: translateY(3px) rotate(10deg); }
+  }
+  @keyframes pet-type-head {
+    0%, 100% { transform: translateY(0) rotate(0); }
+    50% { transform: translateY(1px) rotate(-2deg); }
   }
   @keyframes pet-grounded-hop {
     0%, 100% { transform: translateY(0) scale(1); }

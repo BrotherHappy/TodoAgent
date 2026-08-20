@@ -108,6 +108,7 @@ flowchart LR
 - 菜单栏 / 系统托盘今日入口：`electron/tray-task-preview.ts` 从 `TaskService.listTasks({ view: "today", statuses: ["open"] })` 纯投影最多 3 项任务和总数；`TrayManager` 异步刷新菜单并以 token 丢弃过期读取，点击只导航到既有 Today 视图。隐私模式把标题替换为“私人任务”，读取异常只保留基础托盘菜单，不复制任务、不新增 IPC 写入、不改变飞书载荷。
 - Todo Pet：唯一桌面悬浮窗口；透明不规则命中区、可拖动、置顶、多显示器，并支持紧凑、悬停预览、展开、专注和安静状态。
 - 鼠标穿透：`FloatingSettings.mousePassthrough` 默认关闭，由设置服务做旧配置迁移；`WindowManager` 将它映射为 Electron `setIgnoreMouseEvents(..., { forward: true })`，保持宠物可见并把点击交给后方窗口。主窗口设置与托盘共用同一持久字段，关闭任一入口即可恢复互动；穿透不改变任务、Agent、专注、同步或权限事实。
+- 工作时回应：`PetBehaviorSettings.inputReactionsEnabled` 默认关闭；主进程每 4 秒读取 Electron `powerMonitor.getSystemIdleTime()` 的秒级结果，经 14 秒节流后只广播 `typing` / `reading` 两种粗粒度姿态给浮窗。该链路不读取按键、指针、前台窗口、窗口标题或内容，也不持久化、不上传；会议模式、隐私模式或浮窗关闭时不广播，renderer 只把事件映射为内置 `type` / `read` 动作。
 - 时间线日视图：`TimelinePage` 用 `timelineNowIndicator` 将本地时钟投影到 08:00–22:00 的半小时槽，仅对当天显示“现在”线；打开当天时只做一次温和滚动定位，用户也可手动回到当前时刻。该投影不创建 `Task`、不写入 `timeBlock`、日历或 Feishu；历史/未来日期和工作时段之外返回空值，避免伪造实时状态。
 - 专注守护：`FocusSettings.shieldMode` 与 `shieldApplications` 只保存在本地设置；`FloatingWindow` 在专注阶段按低频间隔调用已有 `shell.readActiveWindow`，只使用脱离标题的 `appName` 做大小写不敏感匹配。`gentle` 仅显示可折叠气泡，`pause` 复用既有 Pet/Task 专注暂停 API；不持久化窗口标题或内容，不关闭、阻挡、控制外部应用，也不抢夺焦点，默认关闭并随隐私/会议/全屏/安静策略收敛。
 - Boss Mode 复用 `src/shared/boss-mode.ts` 的纯设置投影：一次 `settings.replace` 同时将 `pet.meetingMode` 置为 `true`、隐藏 `floating.enabled`，退出时反向恢复；宠物右键菜单和系统托盘调用同一投影，托盘的退出入口不依赖悬浮窗口存在。该模式只抑制宠物主动消息，不取消任务、专注、飞书同步或系统安全通知，也不新增任务字段或 IPC。

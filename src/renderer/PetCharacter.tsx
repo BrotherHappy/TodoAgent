@@ -292,6 +292,10 @@ export function PetCharacter({
             <rect x="35" y="66" width="45" height="29" rx="6" />
             <path className="pet-prop-line" d="m43 80 5 5 8-11M61 77h11M61 84h9" />
           </g>
+          <g className="pet-prop pet-prop-keyboard">
+            <rect x="29" y="86" width="56" height="13" rx="4" />
+            <path className="pet-prop-line" d="M35 90h4M42 90h4M49 90h4M56 90h4M63 90h4M70 90h4M38 95h30" />
+          </g>
           <g className="pet-prop pet-prop-magnifier">
             <circle cx="72" cy="72" r="10" />
             <path className="pet-prop-line" d="m79 79 10 11" />

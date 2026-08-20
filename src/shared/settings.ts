@@ -105,6 +105,8 @@ export interface WeatherSettings {
 export interface PetBehaviorSettings {
   interactionsEnabled: boolean;
   proactiveMessages: boolean;
+  /** Derive a coarse typing/reading posture from system idle time; off by default. */
+  inputReactionsEnabled: boolean;
   wellbeingReminders: boolean;
   autoDiary: boolean;
   relationshipMemory: boolean;
@@ -268,6 +270,7 @@ export const defaultSettings: AppSettings = {
   pet: {
     interactionsEnabled: true,
     proactiveMessages: true,
+    inputReactionsEnabled: false,
     wellbeingReminders: true,
     autoDiary: true,
     relationshipMemory: false,

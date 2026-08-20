@@ -75,6 +75,11 @@ import { NodeDataDesktopFilePort } from "./services/node-data-desktop-file-port"
 import { PetService } from "./services/pet-service";
 import { WeatherService } from "./services/weather-service";
 import { TaskAttachmentService } from "./services/task-attachment-service";
+import {
+  PET_INPUT_ACTIVITY_POLL_MS,
+  petInputActivityKind,
+  shouldEmitPetInputActivity,
+} from "./pet-input-activity";
 
 const hasInstanceLock = app.requestSingleInstanceLock();
 if (!hasInstanceLock) app.quit();
@@ -92,6 +97,8 @@ let notificationRuntime: ElectronNotificationRuntime | undefined;
 let petService: PetService | undefined;
 let weatherService: WeatherService | undefined;
 let petTickTimer: ReturnType<typeof setInterval> | undefined;
+let petInputActivityTimer: ReturnType<typeof setInterval> | undefined;
+let lastPetInputActivityAt = 0;
 let weatherRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let pendingMainRoute: string | undefined;
 let lastSevereWeatherNotificationKey: string | undefined;
@@ -1611,6 +1618,37 @@ async function startApplication(): Promise<void> {
       );
     });
   }, 1_000);
+  const pollPetInputActivity = (): void => {
+    const settings = settingsService?.get();
+    if (
+      !settings?.pet.inputReactionsEnabled ||
+      !settings.floating.enabled ||
+      settings.floating.privacyMode ||
+      settings.pet.meetingMode
+    ) {
+      lastPetInputActivityAt = 0;
+      return;
+    }
+    let idleSeconds: number;
+    try {
+      idleSeconds = powerMonitor.getSystemIdleTime();
+    } catch {
+      return;
+    }
+    const kind = petInputActivityKind(idleSeconds);
+    const now = Date.now();
+    if (!kind || !shouldEmitPetInputActivity(now, lastPetInputActivityAt, kind)) return;
+    lastPetInputActivityAt = now;
+    windows?.broadcast(DESKTOP_CHANNELS.eventPetInputActivity, {
+      kind,
+      at: new Date(now).toISOString(),
+      idleSeconds,
+    });
+  };
+  petInputActivityTimer = setInterval(
+    pollPetInputActivity,
+    PET_INPUT_ACTIVITY_POLL_MS,
+  );
   weatherRefreshTimer = setInterval(() => {
     void weatherService?.refresh(false).then((weather) => {
       if (!weather) return;
@@ -1693,6 +1731,7 @@ app.on("before-quit", () => {
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   if (petTickTimer) clearInterval(petTickTimer);
+  if (petInputActivityTimer) clearInterval(petInputActivityTimer);
   if (weatherRefreshTimer) clearInterval(weatherRefreshTimer);
   feishuMutationSync?.dispose();
   feishuController?.stopPolling();

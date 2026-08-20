@@ -2,9 +2,12 @@ import { contextBridge, ipcRenderer } from "electron";
 import { DESKTOP_CHANNELS, type DesktopApi } from "../src/shared/desktop-api";
 import type { AppSettings } from "../src/shared/settings";
 import type { AgentRunEvent } from "../src/shared/agent-types";
-import type { AgentApprovalView } from "../src/shared/desktop-api";
-import type { FeishuStatusView } from "../src/shared/desktop-api";
-import type { InAppNotificationView } from "../src/shared/desktop-api";
+import type {
+  AgentApprovalView,
+  FeishuStatusView,
+  InAppNotificationView,
+  PetInputActivityEvent,
+} from "../src/shared/desktop-api";
 import type { PetEvent } from "../src/shared/pet-types";
 
 function subscribe<Payload>(
@@ -325,6 +328,8 @@ const desktopApi: DesktopApi = {
       ),
     onPetEvent: (listener) =>
       subscribe<PetEvent>(DESKTOP_CHANNELS.eventPet, listener),
+    onPetInputActivity: (listener) =>
+      subscribe<PetInputActivityEvent>(DESKTOP_CHANNELS.eventPetInputActivity, listener),
   },
 };
 

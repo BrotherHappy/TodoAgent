@@ -408,6 +408,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     pet: {
       interactionsEnabled: merged.pet.interactionsEnabled,
       proactiveMessages: merged.pet.proactiveMessages,
+      inputReactionsEnabled: merged.pet.inputReactionsEnabled,
       wellbeingReminders: merged.pet.wellbeingReminders,
       autoDiary: merged.pet.autoDiary,
       relationshipMemory: merged.pet.relationshipMemory,
@@ -513,6 +514,7 @@ export class SettingsService {
         JSON.stringify(raw.notifications?.taskReminderSourceMode) !== JSON.stringify(this.#settings.notifications.taskReminderSourceMode) ||
         JSON.stringify(raw.notifications?.taskReminderProjectMode) !== JSON.stringify(this.#settings.notifications.taskReminderProjectMode) ||
         raw.pet?.proactiveDailyLimit !== this.#settings.pet.proactiveDailyLimit ||
+        raw.pet?.inputReactionsEnabled !== this.#settings.pet.inputReactionsEnabled ||
         raw.floating?.selectedTab !== this.#settings.floating.selectedTab ||
         raw.floating?.scalePercent !== this.#settings.floating.scalePercent ||
         raw.floating?.mousePassthrough !== this.#settings.floating.mousePassthrough ||

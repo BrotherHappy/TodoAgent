@@ -89,7 +89,7 @@ const settingsSchema = z
           z.string(),
           z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
         ),
-        mousePassthrough: z.boolean(),
+        mousePassthrough: z.boolean().default(false),
       })
       .strict(),
     focus: z
@@ -135,6 +135,7 @@ const settingsSchema = z
       .object({
         interactionsEnabled: z.boolean(),
         proactiveMessages: z.boolean(),
+        inputReactionsEnabled: z.boolean().default(false),
         wellbeingReminders: z.boolean(),
         autoDiary: z.boolean(),
         relationshipMemory: z.boolean(),

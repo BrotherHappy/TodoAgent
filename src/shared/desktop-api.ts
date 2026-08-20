@@ -61,6 +61,16 @@ import type {
   WeatherSnapshot,
 } from "./pet-types";
 
+/** A coarse, local-only posture cue derived from system idle time. */
+export type PetInputActivityKind = "typing" | "reading";
+
+export interface PetInputActivityEvent {
+  kind: PetInputActivityKind;
+  at: string;
+  /** Seconds since the last system input; never contains key or pointer data. */
+  idleSeconds: number;
+}
+
 export interface UpdateTaskRequest {
   id: TaskId;
   patch: UpdateTaskInput;
@@ -754,6 +764,7 @@ export interface DesktopEventApi {
   onFeishuStatus(listener: (status: FeishuStatusView) => void): () => void;
   onNotification(listener: (event: InAppNotificationView) => void): () => void;
   onPetEvent(listener: (event: PetEvent) => void): () => void;
+  onPetInputActivity(listener: (event: PetInputActivityEvent) => void): () => void;
 }
 
 export interface DesktopApi {
@@ -902,6 +913,7 @@ export const DESKTOP_CHANNELS = {
   eventFeishuStatus: "event:feishu-status",
   eventNotification: "event:notification",
   eventPet: "event:pet",
+  eventPetInputActivity: "event:pet-input-activity",
 } as const;
 
 declare global {

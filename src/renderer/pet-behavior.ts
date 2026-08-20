@@ -19,6 +19,7 @@ export type PetIdleAction =
   | "hum"
   | "inspect"
   | "tidy"
+  | "type"
   | "float"
   | "peek";
 
@@ -230,6 +231,7 @@ export const petActionLabels: Record<PetAction, string> = {
   hum: "哼着小曲",
   inspect: "拿放大镜观察",
   tidy: "整理任务卡",
+  type: "轻轻敲键盘",
   float: "原地蹦一下",
   peek: "探头看看你",
   pet: "享受抚摸",
@@ -289,6 +291,7 @@ export const petActionDefinitions: Record<PetAction, PetActionDefinition> = {
   hum: passiveDefinition("happy", 3_500),
   inspect: passiveDefinition("curious", 4_000),
   tidy: passiveDefinition("focused", 4_000),
+  type: passiveDefinition("focused", 2_200),
   float: passiveDefinition("happy", 3_400),
   peek: passiveDefinition("curious", 2_800),
   pet: { priority: 35, durationMs: 2_900, interruptible: true, emotion: "happy" },

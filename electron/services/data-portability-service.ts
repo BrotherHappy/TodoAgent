@@ -990,7 +990,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     ? {}
     : expectRecord(settings.pet, `${path}.pet`);
   assertOnlyKeys(importedPet, [
-    'interactionsEnabled', 'proactiveMessages', 'wellbeingReminders',
+    'interactionsEnabled', 'proactiveMessages', 'inputReactionsEnabled', 'wellbeingReminders',
     'autoDiary', 'relationshipMemory', 'actionPack', 'animationIntensity',
     'proactiveIntervalMinutes', 'proactiveDailyLimit', 'meetingMode', 'seasonalEvents',
   ], `${path}.pet`);
@@ -999,7 +999,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     ...importedPet,
   };
   ([
-    'interactionsEnabled', 'proactiveMessages', 'wellbeingReminders',
+    'interactionsEnabled', 'proactiveMessages', 'inputReactionsEnabled', 'wellbeingReminders',
     'autoDiary', 'relationshipMemory', 'meetingMode', 'seasonalEvents',
   ] as const).forEach((key) =>
     expectBoolean(pet[key], `${path}.pet.${key}`),
