@@ -29,6 +29,7 @@ const petTabs = new Set(['all', 'today', 'focus', 'chat', 'home']);
 const environmentSounds = new Set(['off', 'rain', 'forest', 'cafe', 'white-noise']);
 const petActionPacks = new Set(['balanced', 'calm', 'playful', 'focused']);
 const petAnimationIntensities = new Set(['gentle', 'lively']);
+const focusShieldModes = new Set(['off', 'gentle', 'pause']);
 const aiRoutingModes = new Set(['primary-only', 'fallback-on-error', 'local-only']);
 const aiAuthenticationModes = new Set(['bearer', 'none']);
 const taskReminderSourceModes = new Set(['normal', 'important-only', 'off']);
@@ -189,6 +190,22 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   if (!environmentSounds.has(merged.focus.environmentSound)) {
     merged.focus.environmentSound = defaultSettings.focus.environmentSound;
   }
+  merged.focus.shieldMode = focusShieldModes.has(merged.focus.shieldMode)
+    ? merged.focus.shieldMode
+    : defaultSettings.focus.shieldMode;
+  const shieldApplications = Array.isArray(merged.focus.shieldApplications)
+    ? merged.focus.shieldApplications
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim().slice(0, 80))
+        .filter(Boolean)
+    : [];
+  const seenShieldApplications = new Set<string>();
+  merged.focus.shieldApplications = shieldApplications.filter((value) => {
+    const key = value.toLocaleLowerCase();
+    if (seenShieldApplications.has(key)) return false;
+    seenShieldApplications.add(key);
+    return true;
+  }).slice(0, 12);
   merged.planning.urgencyWeights = {
     deadline: clampInteger(
       merged.planning.urgencyWeights.deadline,
@@ -311,6 +328,8 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       autoStartBreak: merged.focus.autoStartBreak,
       autoStartNextRound: merged.focus.autoStartNextRound,
       environmentSound: merged.focus.environmentSound,
+      shieldMode: merged.focus.shieldMode,
+      shieldApplications: [...merged.focus.shieldApplications],
     },
     planning: {
       urgencyWeights: {

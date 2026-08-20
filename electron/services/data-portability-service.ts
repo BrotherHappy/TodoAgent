@@ -929,6 +929,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   assertOnlyKeys(focus, [
     'focusMinutes', 'shortBreakMinutes', 'longBreakMinutes', 'cycles',
     'autoStartBreak', 'autoStartNextRound', 'environmentSound',
+    'shieldMode', 'shieldApplications',
   ], `${path}.focus`);
   expectNumber(focus.focusMinutes, `${path}.focus.focusMinutes`, { integer: true, minimum: 1, maximum: 240 });
   expectNumber(focus.shortBreakMinutes, `${path}.focus.shortBreakMinutes`, { integer: true, minimum: 1, maximum: 60 });
@@ -937,6 +938,23 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectBoolean(focus.autoStartBreak, `${path}.focus.autoStartBreak`);
   expectBoolean(focus.autoStartNextRound, `${path}.focus.autoStartNextRound`);
   expectEnum(focus.environmentSound, ['off', 'rain', 'forest', 'cafe', 'white-noise'] as const, `${path}.focus.environmentSound`);
+  const shieldMode = focus.shieldMode === undefined
+    ? defaultSettings.focus.shieldMode
+    : expectEnum(focus.shieldMode, ['off', 'gentle', 'pause'] as const, `${path}.focus.shieldMode`);
+  const shieldApplications = focus.shieldApplications === undefined
+    ? []
+    : (() => {
+        if (!Array.isArray(focus.shieldApplications)) {
+          throw new DataImportValidationError('Expected an array', `${path}.focus.shieldApplications`);
+        }
+        return focus.shieldApplications.map((entry, index) => {
+          const value = expectString(entry, `${path}.focus.shieldApplications[${index}]`, false).trim();
+          if (value.length > 80) {
+            throw new DataImportValidationError('Application name is too long', `${path}.focus.shieldApplications[${index}]`);
+          }
+          return value;
+        });
+      })();
 
   const planning = settings.planning === undefined
     ? expectRecord(clone(defaultSettings.planning), `${path}.planning`)
@@ -1102,7 +1120,12 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     ...clone(portableFloating),
     topMode: 'always',
   } as AppSettings['floating'];
-  validated.focus = clone(focus) as unknown as AppSettings['focus'];
+  validated.focus = {
+    ...clone(defaultSettings.focus),
+    ...clone(focus),
+    shieldMode,
+    shieldApplications,
+  } as AppSettings['focus'];
   validated.planning = clone({
     urgencyWeights: clone(urgencyWeights),
   }) as unknown as AppSettings['planning'];

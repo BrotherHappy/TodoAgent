@@ -65,7 +65,14 @@ export interface FocusSettings {
   autoStartBreak: boolean;
   autoStartNextRound: boolean;
   environmentSound: 'off' | 'rain' | 'forest' | 'cafe' | 'white-noise';
+  /** Optional, local-only protection against opening distracting apps while focusing. */
+  shieldMode: FocusShieldMode;
+  /** App-name fragments to watch while a focus session is running. */
+  shieldApplications: string[];
 }
+
+/** How the pet reacts when a watched app becomes the frontmost application. */
+export type FocusShieldMode = 'off' | 'gentle' | 'pause';
 
 /**
  * Transparent, local-only weights used when the pet chooses a next task.
@@ -231,6 +238,8 @@ export const defaultSettings: AppSettings = {
     autoStartBreak: false,
     autoStartNextRound: false,
     environmentSound: 'off',
+    shieldMode: 'off',
+    shieldApplications: [],
   },
   planning: {
     urgencyWeights: {

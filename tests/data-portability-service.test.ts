@@ -352,6 +352,38 @@ describe('DataPortabilityService export safety', () => {
     },
   );
 
+  it('imports legacy focus settings with safe shield defaults and validates new values', async () => {
+    const source = new MemoryPortabilityRepository(snapshot());
+    const bundle = JSON.parse(await serviceFor(source).exportJson()) as {
+      data: { settings: { focus: Record<string, unknown> } };
+    };
+    delete bundle.data.settings.focus.shieldMode;
+    delete bundle.data.settings.focus.shieldApplications;
+    const target = new MemoryPortabilityRepository(snapshot());
+
+    await serviceFor(target).importJson(JSON.stringify(bundle), { strategy: 'overwrite' });
+    expect(target.state.settings.focus.shieldMode).toBe('off');
+    expect(target.state.settings.focus.shieldApplications).toEqual([]);
+
+    const invalid = JSON.parse(JSON.stringify(bundle)) as typeof bundle;
+    invalid.data.settings.focus.shieldMode = 'block-other-apps';
+    await expect(
+      serviceFor(new MemoryPortabilityRepository(snapshot())).previewImport(
+        JSON.stringify(invalid),
+        'overwrite',
+      ),
+    ).rejects.toThrow('Expected one of: off, gentle, pause');
+
+    const tooLong = JSON.parse(JSON.stringify(bundle)) as typeof bundle;
+    tooLong.data.settings.focus.shieldApplications = ['x'.repeat(81)];
+    await expect(
+      serviceFor(new MemoryPortabilityRepository(snapshot())).previewImport(
+        JSON.stringify(tooLong),
+        'overwrite',
+      ),
+    ).rejects.toThrow('Application name is too long');
+  });
+
   it('exports selected domains while applying a non-bypassable credential firewall', async () => {
     const secretTask = makeTask('task-1', 'Private task', {
       notes: 'Authorization: Bearer top-secret-token',

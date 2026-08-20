@@ -5189,6 +5189,60 @@ select {
   font-size: 11px;
   white-space: nowrap;
 }
+.pet-focus-shield-bubble {
+  border-color: color-mix(in srgb, #d58a32 40%, var(--floating-line));
+  background: color-mix(in srgb, var(--floating-surface-strong) 94%, #f3bd68 6%);
+}
+.pet-focus-shield-bubble::before {
+  border-color: color-mix(in srgb, #d58a32 40%, var(--floating-line));
+  background: color-mix(in srgb, var(--floating-surface-strong) 94%, #f3bd68 6%);
+}
+.pet-focus-shield-bubble.is-paused {
+  border-color: color-mix(in srgb, var(--app-brand) 38%, var(--floating-line));
+  background: color-mix(in srgb, var(--floating-surface-strong) 94%, var(--app-brand-soft) 6%);
+}
+.pet-focus-shield-bubble.is-paused::before {
+  border-color: color-mix(in srgb, var(--app-brand) 38%, var(--floating-line));
+  background: color-mix(in srgb, var(--floating-surface-strong) 94%, var(--app-brand-soft) 6%);
+}
+.pet-focus-shield-toggle {
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+}
+.pet-focus-shield-app {
+  max-width: 118px;
+  overflow: hidden;
+  color: var(--app-text-soft);
+  font-size: 10px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-focus-shield-body {
+  display: grid;
+  gap: 7px;
+  padding: 0 9px 8px;
+}
+.pet-focus-shield-body > p {
+  margin: 0;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.pet-focus-shield-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.pet-focus-shield-actions button {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9px;
+  padding: 4px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
 @keyframes pet-bubble-arrive {
   from {
     opacity: 0;
@@ -8708,6 +8762,32 @@ select {
 .settings-row .settings-select {
   min-width: 150px;
   cursor: pointer;
+}
+.settings-row-stack {
+  align-items: start;
+}
+.settings-textarea {
+  min-height: 82px;
+  resize: vertical;
+  line-height: 1.45;
+}
+.settings-note-quiet {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 12px;
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-brand-soft) 28%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-note-quiet svg {
+  flex: 0 0 auto;
+  color: var(--app-brand-strong);
+  margin-top: 1px;
 }
 .settings-row-actions {
   display: flex;

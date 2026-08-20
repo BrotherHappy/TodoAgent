@@ -151,6 +151,35 @@ describe('SettingsService', () => {
     expect(migrated.get().pet.proactiveDailyLimit).toBe(20);
   });
 
+  it('migrates and normalizes the local-only focus shield settings', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-focus-shield-'));
+    const service = new SettingsService(root, encryption);
+    await service.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const raw = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      focus: Record<string, unknown>;
+    };
+    delete raw.focus.shieldMode;
+    delete raw.focus.shieldApplications;
+    await writeFile(settingsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().focus.shieldMode).toBe('off');
+    expect(migrated.get().focus.shieldApplications).toEqual([]);
+
+    await migrated.replace({
+      ...migrated.get(),
+      focus: {
+        ...migrated.get().focus,
+        shieldMode: 'pause',
+        shieldApplications: [' Chrome ', 'chrome', '', 'YouTube', 3 as never],
+      },
+    });
+    expect(migrated.get().focus.shieldMode).toBe('pause');
+    expect(migrated.get().focus.shieldApplications).toEqual(['Chrome', 'YouTube']);
+  });
+
   it('migrates missing Todo Pet domains and normalizes malformed focus, planning and weather values', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-pet-settings-'));
     const service = new SettingsService(root, encryption);

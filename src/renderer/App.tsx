@@ -170,6 +170,12 @@ import {
 } from "./project-reminder-policy";
 import { filterTasksForPetView } from "./pet-smart-view";
 import {
+  FOCUS_SHIELD_DISMISS_MS,
+  FOCUS_SHIELD_POLL_INTERVAL_MS,
+  matchesShieldApplication,
+  normalizeShieldApplications,
+} from "./focus-shield";
+import {
   defaultGoalTitle,
   projectPetGoal,
   weekRangeFor,
@@ -9274,6 +9280,59 @@ function SettingsPage({
               </select>
             </div>
             <div className="settings-subheading">
+              <span>专注守护</span>
+              <p>只在专注进行时检查前台应用名，宠物提醒你回到节奏。</p>
+            </div>
+            <div className="settings-row settings-row-select">
+              <div>
+                <strong>守护方式</strong>
+                <p>温和提醒不会打断；自动暂停只暂停 Todo Agent 的这次专注。</p>
+              </div>
+              <select
+                className="settings-input settings-select"
+                aria-label="专注守护方式"
+                value={appSettings.focus.shieldMode}
+                onChange={(event) => {
+                  const value = event.target.value as AppSettings["focus"]["shieldMode"];
+                  const next = {
+                    ...appSettings,
+                    focus: { ...appSettings.focus, shieldMode: value },
+                  };
+                  setAppSettings(next);
+                  void persist(next, "专注守护已更新");
+                }}
+              >
+                <option value="off">关闭</option>
+                <option value="gentle">温和提醒</option>
+                <option value="pause">匹配时自动暂停</option>
+              </select>
+            </div>
+            <div className="settings-row settings-row-stack">
+              <div>
+                <strong>关注的应用</strong>
+                <p>每行一个名称或片段，例如 Chrome、YouTube。最多 12 个。</p>
+              </div>
+              <textarea
+                className="settings-input settings-textarea"
+                aria-label="专注守护应用"
+                rows={3}
+                placeholder="Chrome\nYouTube"
+                value={appSettings.focus.shieldApplications.join("\n")}
+                onChange={(event) => {
+                  const values = normalizeShieldApplications(event.target.value.split("\n"));
+                  setAppSettings((current) => ({
+                    ...current,
+                    focus: { ...current.focus, shieldApplications: values },
+                  }));
+                }}
+                onBlur={() => void persist(appSettings, "专注守护应用已更新")}
+              />
+            </div>
+            <div className="settings-note settings-note-quiet">
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span>隐私边界：只读取当前前台应用名，不读取窗口标题或内容，不关闭、阻挡或控制其他应用；可随时关闭。</span>
+            </div>
+            <div className="settings-subheading">
               <span>天气卡片</span>
               <p>只需城市名，不申请精确位置权限；结果会在本机缓存。</p>
             </div>
@@ -13577,6 +13636,15 @@ function FloatingPetCoopGame({
   );
 }
 
+interface FocusShieldNotice {
+  appName: string;
+  matchedLabel: string;
+  paused: boolean;
+  kind: "pet" | "task";
+  taskId?: string;
+  at: number;
+}
+
 function FloatingWindow() {
   // Keep both task collections live. The floating panel can switch between
   // the open all-task overview and the complete Today list without waiting
@@ -13616,6 +13684,11 @@ function FloatingWindow() {
   const [reactionBubbleCollapsed, setReactionBubbleCollapsed] = useState(false);
   const [taskBubbleCollapsed, setTaskBubbleCollapsed] = useState(false);
   const [focusBubbleCollapsed, setFocusBubbleCollapsed] = useState(false);
+  const [focusShieldBubbleCollapsed, setFocusShieldBubbleCollapsed] = useState(false);
+  const [focusShieldNotice, setFocusShieldNotice] =
+    useState<FocusShieldNotice>();
+  const focusShieldDismissedUntilRef = useRef(0);
+  const focusShieldMatchRef = useRef<string | undefined>(undefined);
   const [heldTaskBubbleCollapsed, setHeldTaskBubbleCollapsed] = useState(false);
   const [heldTaskId, setHeldTaskId] = useState<string>();
   const [taskDropActive, setTaskDropActive] = useState(false);
@@ -13677,6 +13750,18 @@ function FloatingWindow() {
   const focusedTask = todayController.tasks.find(
     (task) => task.id === petFocus?.taskId || task.focusStartedAt,
   );
+  const focusShieldTask = allController.tasks.find(
+    (task) => task.status === "open" && Boolean(task.focusStartedAt),
+  ) ?? todayController.tasks.find(
+    (task) => task.status === "open" && Boolean(task.focusStartedAt),
+  );
+  const focusShieldKind: "pet" | "task" | undefined =
+    petFocus?.status === "running" && petFocus.phase === "focus"
+      ? "pet"
+      : focusShieldTask
+        ? "task"
+        : undefined;
+  const focusShieldActive = Boolean(focusShieldKind);
   const carousel = useFloatingTodayCarousel(
     todayController.tasks,
     focusedTask,
@@ -13782,6 +13867,9 @@ function FloatingWindow() {
       setProactiveTask(undefined);
     }
   }, [petBehavior.message, proactiveTask]);
+  useEffect(() => {
+    if (focusShieldNotice) setFocusShieldBubbleCollapsed(false);
+  }, [focusShieldNotice?.at]);
   useEffect(() => {
     if (!privacyMode) return;
     proactiveMessageRef.current = undefined;
@@ -14568,6 +14656,181 @@ function FloatingWindow() {
     return todayController.tasks.some((candidate) => candidate.id === task.id)
       ? todayController
       : allController;
+  }
+  async function pauseFocusForShield(): Promise<
+    { kind: "pet" } | { kind: "task"; taskId: string } | undefined
+  > {
+    if (!window.desktopApi || !focusShieldKind) return undefined;
+    if (focusShieldKind === "pet" && petFocus?.status === "running" && petFocus.phase === "focus") {
+      await window.desktopApi.pet.pauseFocus("专注守护");
+      return { kind: "pet" };
+    }
+    const task = focusShieldTask;
+    if (!task) return undefined;
+    await controllerForPetTask(task).pauseFocus(task.id);
+    return { kind: "task", taskId: task.id };
+  }
+  async function resumeFocusForShield(notice: FocusShieldNotice): Promise<void> {
+    if (!window.desktopApi) return;
+    if (notice.kind === "pet") {
+      await window.desktopApi.pet.resumeFocus();
+      return;
+    }
+    if (notice.taskId) {
+      const task = [...allController.tasks, ...todayController.tasks].find(
+        (candidate) => candidate.id === notice.taskId,
+      );
+      if (task) await controllerForPetTask(task).startFocus(task.id);
+    }
+  }
+  useEffect(() => {
+    const mode = petSettings.focus.shieldMode;
+    const applications = petSettings.focus.shieldApplications;
+    if (
+      mode === "off" ||
+      applications.length === 0 ||
+      !window.desktopApi?.shell.readActiveWindow
+    ) {
+      focusShieldMatchRef.current = undefined;
+      setFocusShieldNotice(undefined);
+      return undefined;
+    }
+    if (!focusShieldActive) {
+      focusShieldMatchRef.current = undefined;
+      setFocusShieldNotice((current) => (current?.paused ? current : undefined));
+      return undefined;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    const check = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        if (
+          shouldSuppressPetProactive({
+            settings: petSettings,
+            now: new Date(),
+            focusActive: false,
+            fullscreen: Boolean(document.fullscreenElement),
+          })
+        ) {
+          focusShieldMatchRef.current = undefined;
+          setFocusShieldNotice(undefined);
+          return;
+        }
+        const context = await window.desktopApi!.shell.readActiveWindow();
+        if (cancelled) return;
+        const appName = context.status === "captured" ? context.appName?.trim() : undefined;
+        const matchedLabel = appName
+          ? matchesShieldApplication(appName, applications)
+          : undefined;
+        if (!appName || !matchedLabel) {
+          focusShieldMatchRef.current = undefined;
+          setFocusShieldNotice(undefined);
+          return;
+        }
+        if (Date.now() < focusShieldDismissedUntilRef.current) return;
+        const matchKey = `${focusShieldKind}:${appName.toLocaleLowerCase()}`;
+        if (focusShieldMatchRef.current === matchKey) return;
+        focusShieldMatchRef.current = matchKey;
+        if (mode === "pause") {
+          const paused = await pauseFocusForShield();
+          if (!paused || cancelled) return;
+          if (paused.kind === "pet") await petData.refresh();
+          setFocusShieldNotice({
+            appName,
+            matchedLabel,
+            paused: true,
+            kind: paused.kind,
+            taskId: paused.kind === "task" ? paused.taskId : undefined,
+            at: Date.now(),
+          });
+          petBehavior.act(
+            "focus",
+            privacyMode
+              ? "我先帮你暂停一下，等你准备好再继续。"
+              : `我先帮你暂停一下（检测到 ${matchedLabel}）。`,
+            5_000,
+          );
+        } else {
+          setFocusShieldNotice({
+            appName,
+            matchedLabel,
+            paused: false,
+            kind: focusShieldKind ?? "pet",
+            taskId: focusShieldKind === "task" ? focusShieldTask?.id : undefined,
+            at: Date.now(),
+          });
+          petBehavior.act(
+            "focus",
+            privacyMode
+              ? "检测到分心应用，专注还在继续。"
+              : `我看到你打开了 ${matchedLabel}，专注还在继续。`,
+            5_000,
+          );
+        }
+      } catch (reason) {
+        focusShieldMatchRef.current = undefined;
+        if (!cancelled) {
+          petBehavior.act(
+            "sync-error",
+            reason instanceof Error ? reason.message : "专注守护暂时无法读取前台应用。",
+            4_000,
+          );
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), FOCUS_SHIELD_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    allController.tasks,
+    petSettings.focus.shieldApplications,
+    focusShieldActive,
+    focusShieldKind,
+    focusShieldTask,
+    petBehavior,
+    petData.refresh,
+    petFocus,
+    petSettings,
+    petSettings.focus.shieldMode,
+    petSettings.focus.shieldApplications,
+    privacyMode,
+    todayController.tasks,
+  ]);
+  function dismissFocusShieldNotice(): void {
+    focusShieldDismissedUntilRef.current = Date.now() + FOCUS_SHIELD_DISMISS_MS;
+    focusShieldMatchRef.current = undefined;
+    setFocusShieldNotice(undefined);
+  }
+  function pauseFocusFromShieldNotice(): void {
+    const current = focusShieldNotice;
+    if (!current || current.paused) return;
+    void runFocusAction(async () => {
+      const paused = await pauseFocusForShield();
+      if (!paused) throw new Error("当前没有正在进行的专注");
+      setFocusShieldNotice({
+        ...current,
+        paused: true,
+        kind: paused.kind,
+        taskId: paused.kind === "task" ? paused.taskId : undefined,
+        at: Date.now(),
+      });
+    });
+  }
+  function resumeFocusFromShieldNotice(): void {
+    const current = focusShieldNotice;
+    if (!current || !current.paused) return;
+    void runFocusAction(async () => {
+      await resumeFocusForShield(current);
+      focusShieldMatchRef.current = undefined;
+      setFocusShieldNotice(undefined);
+    });
   }
   async function handlePetTaskDrop(
     targetId: PetTaskDropTargetId,
@@ -15365,6 +15628,66 @@ function FloatingWindow() {
                     </div>
                   </div>
                 )}
+              </section>
+            )}
+            {focusShieldNotice && (
+              <section
+                className={`pet-speech-bubble pet-focus-shield-bubble ${focusShieldNotice.paused ? "is-paused" : ""} ${focusShieldBubbleCollapsed ? "is-collapsed" : ""}`}
+                aria-label="专注守护提示"
+              >
+                <button
+                  type="button"
+                  className="pet-bubble-toggle pet-focus-shield-toggle"
+                  aria-expanded={!focusShieldBubbleCollapsed}
+                  aria-label={focusShieldBubbleCollapsed ? "展开专注守护气泡" : "折叠专注守护气泡"}
+                  onClick={() => setFocusShieldBubbleCollapsed((value) => !value)}
+                >
+                  <span className="pet-bubble-label">
+                    {focusShieldNotice.paused ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+                    专注守护
+                    <small>{focusShieldNotice.paused ? "已暂停" : "温和提醒"}</small>
+                  </span>
+                  <span className="pet-focus-shield-app">
+                    {privacyMode ? "其他应用" : focusShieldNotice.matchedLabel}
+                  </span>
+                  <ChevronDown size={15} />
+                </button>
+                {!focusShieldBubbleCollapsed && <div className="pet-focus-shield-body">
+                  <p>
+                    {focusShieldNotice.paused
+                      ? "我先替你按下暂停，准备好后再继续。"
+                      : `检测到 ${privacyMode ? "其他应用" : focusShieldNotice.matchedLabel}，专注还在继续。`}
+                  </p>
+                  <div className="pet-focus-shield-actions">
+                    {focusShieldNotice.paused ? (
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={focusBusy}
+                        onClick={resumeFocusFromShieldNotice}
+                      >
+                        <Play size={13} /> 继续专注
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={focusBusy}
+                        onClick={pauseFocusFromShieldNotice}
+                      >
+                        <Pause size={13} /> 暂停这次专注
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="soft-button"
+                      disabled={focusBusy}
+                      onClick={dismissFocusShieldNotice}
+                    >
+                      {focusShieldNotice.paused ? "稍后再说" : "暂时忽略"}
+                    </button>
+                  </div>
+                </div>}
               </section>
             )}
           </div>
