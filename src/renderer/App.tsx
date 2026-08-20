@@ -7,6 +7,7 @@ import {
   ArrowUp,
   Bell,
   CalendarDays,
+  CalendarClock,
   Check,
   CheckCircle2,
   Clipboard,
@@ -157,6 +158,7 @@ import {
 import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
 import { readCalendarEvents, writeCalendarEvents } from "./calendar-store";
+import { buildMorningCalendarSummary } from "./morning-calendar";
 import {
   localDateTimeInputToIso,
   toLocalDateTimeInput,
@@ -209,6 +211,7 @@ import {
   useTaskTemplates,
 } from "./task-templates";
 import { suggestDailyPlan } from "../shared/daily-planner";
+import { formatDailyScheduleTime } from "../shared/daily-schedule";
 import {
   inferTaskTheme,
   type TaskThemeActionPack,
@@ -1251,12 +1254,23 @@ function MorningBrief({
   planningTasks,
   notify,
   onPlanToday,
+  calendarEvents = [],
+  onOpenTimeline,
 }: {
   controller: TaskController;
   planningTasks?: Task[];
   notify: (message: string, kind?: ToastKind) => void;
   onPlanToday: (preset?: MorningKickoffPreset) => void;
+  calendarEvents?: readonly CalendarEvent[];
+  onOpenTimeline?: () => void;
 }) {
+  const formatBriefMinutes = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    if (!hours) return `${rest} 分钟`;
+    return rest ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`;
+  };
+  const formatClock = formatDailyScheduleTime;
   const [aiSummary, setAiSummary] = useState<string>();
   const [aiRefreshing, setAiRefreshing] = useState(false);
   const [shortPlanOpen, setShortPlanOpen] = useState(false);
@@ -1277,6 +1291,11 @@ function MorningBrief({
         maxSuggestedItems: 3,
       }),
     [controller.tasks, planningTasks],
+  );
+  const today = dateKey();
+  const todayCalendar = useMemo(
+    () => buildMorningCalendarSummary(calendarEvents, today),
+    [calendarEvents, today],
   );
   const localSummary =
     openTasks.length === 0
@@ -1368,6 +1387,31 @@ function MorningBrief({
         <span>晨间简报</span>
       </div>
       <p className="brief-copy">{aiSummary ?? localSummary}</p>
+      {todayCalendar.blocks.length > 0 && (
+        <section className="brief-calendar" aria-label="今日议程">
+          <div className="brief-calendar-heading">
+            <div>
+              <strong><CalendarClock size={14} /> 今日议程</strong>
+              <small>{todayCalendar.events.length} 个事件 · 占用 {formatBriefMinutes(todayCalendar.busyMinutes)}</small>
+            </div>
+            {onOpenTimeline && (
+              <button type="button" className="ghost-button" onClick={onOpenTimeline}>
+                打开时间线
+              </button>
+            )}
+          </div>
+          <div className="brief-calendar-list">
+            {todayCalendar.blocks.slice(0, 4).map((block) => (
+              <div className="brief-calendar-row" key={block.id}>
+                <span>{block.startMinutes === 0 && block.endMinutes >= 1_440 ? "全天" : `${formatClock(block.startMinutes)}–${formatClock(block.endMinutes)}`}</span>
+                <strong>{block.title}</strong>
+                <small>{block.sourceName}</small>
+              </div>
+            ))}
+            {todayCalendar.blocks.length > 4 && <small className="brief-calendar-more">还有 {todayCalendar.blocks.length - 4} 个事件</small>}
+          </div>
+        </section>
+      )}
       <div className="brief-actions">
         <button type="button" className="primary-button" onClick={() => onPlanToday()}>
           <CalendarDays size={15} />
@@ -1674,6 +1718,8 @@ function TaskListPage({
   onAskAgent,
   onPlanToday,
   onSourceChange,
+  calendarEvents = [],
+  onOpenTimeline,
 }: {
   route: TaskView;
   controller: TaskController;
@@ -1691,6 +1737,8 @@ function TaskListPage({
   onAskAgent: (prompt: string) => void;
   onPlanToday: (preset?: MorningKickoffPreset) => void;
   onSourceChange: (source?: TaskSourceType) => void;
+  calendarEvents?: readonly CalendarEvent[];
+  onOpenTimeline?: () => void;
 }) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [inboxTriageOpen, setInboxTriageOpen] = useState(false);
@@ -2328,6 +2376,8 @@ function TaskListPage({
           planningTasks={planningTasks}
           notify={notify}
           onPlanToday={onPlanToday}
+          calendarEvents={calendarEvents}
+          onOpenTimeline={onOpenTimeline}
         />
       )}
       {bulkMode && (
@@ -11454,6 +11504,8 @@ function MainWindow() {
                 onAskAgent={askAgent}
                 onPlanToday={openTodayPlan}
                 onSourceChange={(source) => navigate(taskView, source, { replace: true })}
+                calendarEvents={calendarEvents}
+                onOpenTimeline={() => navigate("timeline")}
               />
               <TaskInspector
                 task={controller.selected}

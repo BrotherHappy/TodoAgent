@@ -992,6 +992,73 @@ select {
   color: var(--app-text-soft);
   line-height: 1.65;
 }
+.brief-calendar {
+  margin-top: 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 20%, var(--app-line));
+  border-radius: 14px;
+  padding: 10px 11px;
+  background: color-mix(in srgb, var(--app-brand-soft) 44%, var(--app-glass-soft));
+}
+.brief-calendar-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.brief-calendar-heading strong,
+.brief-calendar-heading small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.brief-calendar-heading strong {
+  color: var(--app-text);
+  font-size: 12px;
+}
+.brief-calendar-heading small {
+  margin-top: 3px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.brief-calendar-heading .ghost-button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.brief-calendar-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.brief-calendar-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 27px;
+  border-top: 1px solid color-mix(in srgb, var(--app-line) 70%, transparent);
+  padding-top: 5px;
+}
+.brief-calendar-row > span,
+.brief-calendar-row > small {
+  color: var(--app-text-soft);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.brief-calendar-row > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.brief-calendar-row > small {
+  text-align: right;
+}
+.brief-calendar-more {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
 .brief-actions {
   display: flex;
   gap: 8px;
@@ -8954,6 +9021,22 @@ select {
   }
   .page-heading {
     align-items: center;
+  }
+  .brief-calendar-heading {
+    display: grid;
+  }
+  .brief-calendar-row {
+    grid-template-columns: 1fr auto;
+  }
+  .brief-calendar-row > span {
+    grid-column: 1;
+  }
+  .brief-calendar-row > small {
+    grid-column: 2;
+  }
+  .brief-calendar-row > strong {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
   .timeline-summary {
     align-items: flex-start;
