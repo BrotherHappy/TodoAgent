@@ -1474,7 +1474,8 @@ select {
   min-height: 340px;
 }
 .timeline-week-board,
-.timeline-week-review {
+.timeline-week-review,
+.timeline-focus-insights {
   border: 1px solid var(--app-line);
   border-radius: 20px;
   padding: 12px;
@@ -1614,6 +1615,128 @@ select {
   background: var(--app-surface-raised);
   font-size: 11px;
   cursor: pointer;
+}
+
+.timeline-focus-insights {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+.timeline-focus-insights > .timeline-section-heading > svg {
+  margin-left: auto;
+  color: var(--app-success);
+}
+.timeline-focus-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.timeline-focus-metrics > div {
+  display: grid;
+  gap: 2px;
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: var(--app-glass-soft);
+}
+.timeline-focus-metrics strong {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-focus-metrics span {
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.timeline-focus-bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 128px;
+  align-items: end;
+  padding: 8px 6px 0;
+  border-top: 1px solid var(--app-line);
+}
+.timeline-focus-day {
+  display: grid;
+  grid-template-rows: 18px 76px auto auto;
+  justify-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.timeline-focus-day-value {
+  color: var(--app-text-soft);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-focus-bar-track {
+  position: relative;
+  width: min(28px, 72%);
+  height: 76px;
+  display: flex;
+  align-items: end;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-success-soft) 48%, var(--app-glass-soft));
+}
+.timeline-focus-bar-track i {
+  display: block;
+  width: 100%;
+  min-height: 3px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, var(--app-success), color-mix(in srgb, var(--app-brand) 70%, var(--app-success)));
+  transition: height 180ms ease;
+}
+.timeline-focus-day strong {
+  color: var(--app-text);
+  font-size: 11px;
+}
+.timeline-focus-day small {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.timeline-focus-top-tasks {
+  display: grid;
+  gap: 7px;
+  padding-top: 11px;
+  border-top: 1px solid var(--app-line);
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.timeline-focus-top-tasks > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.timeline-focus-top-tasks button {
+  display: grid;
+  gap: 2px;
+  max-width: min(100%, 280px);
+  border: 1px solid var(--app-line);
+  border-radius: 11px;
+  padding: 7px 9px;
+  color: var(--app-text);
+  background: var(--app-surface-raised);
+  text-align: left;
+  cursor: pointer;
+}
+.timeline-focus-top-tasks button:hover,
+.timeline-focus-top-tasks button:focus-visible {
+  border-color: var(--app-brand);
+  background: var(--app-brand-soft);
+}
+.timeline-focus-top-tasks strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-focus-top-tasks small {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.timeline-focus-empty {
+  margin: 0;
+  color: var(--app-text-faint);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .timeline-work-cycle {
@@ -8256,6 +8379,9 @@ select {
   }
   .timeline-review-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .timeline-focus-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .timeline-project-health-heading {
     gap: 10px;

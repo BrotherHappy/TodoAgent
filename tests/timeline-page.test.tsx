@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelinePage, type TimelinePageProps } from "../src/renderer/TimelinePage";
 import type { Task } from "../src/shared/models";
@@ -128,5 +128,36 @@ describe("TimelinePage", () => {
     expect(screen.getByText("完成任务")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`${date.slice(5).replace("-", "/")}`) }));
     expect(screen.getByText(date)).toBeVisible();
+  });
+
+  it("shows focus rhythm and lets the user return to a focused task", () => {
+    const onSelect = vi.fn();
+    render(
+      <TimelinePage
+        {...props({
+          onSelect,
+          tasks: [
+            makeTask("研究方案", {
+              focusSessions: [
+                {
+                  id: "focus-1",
+                  startedAt: `${date}T10:00:00.000Z`,
+                  endedAt: `${date}T10:25:00.000Z`,
+                  elapsedSeconds: 1_500,
+                },
+              ],
+            }),
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "周" }));
+    expect(screen.getByText("专注节奏")).toBeVisible();
+    const insights = screen.getByRole("region", { name: "专注节奏" });
+    expect(within(insights).getByText("专注分钟")).toBeVisible();
+    expect(within(insights).getByText("25 分钟 · 1 段")).toBeVisible();
+    fireEvent.click(within(insights).getByRole("button", { name: /研究方案/ }));
+    expect(onSelect).toHaveBeenCalledWith("研究方案");
   });
 });

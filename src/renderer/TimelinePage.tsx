@@ -25,6 +25,7 @@ import {
   workCycleFor,
   type WorkCycleWeeks,
 } from "./work-cycles";
+import { buildFocusInsights } from "./focus-insights";
 
 type ToastKind = "success" | "error" | "info";
 
@@ -95,6 +96,7 @@ export function TimelinePage({
   const unscheduled = useMemo(() => unscheduledTimelineTasks(tasks, date), [date, tasks]);
   const weekDates = useMemo(() => weekDateKeys(date), [date]);
   const weeklySummary = useMemo(() => weeklyReviewSummary(tasks, date), [date, tasks]);
+  const focusInsights = useMemo(() => buildFocusInsights(tasks, date), [date, tasks]);
   const workCycle = useMemo(
     () => workCycleFor(date, cycleWeeks, weeklyCapacityHours * 60),
     [date, cycleWeeks, weeklyCapacityHours],
@@ -487,6 +489,58 @@ export function TimelinePage({
                   ))}
                 </div>
               </div>
+            )}
+          </section>
+
+          <section className="timeline-focus-insights" aria-labelledby="timeline-focus-insights-title">
+            <div className="timeline-section-heading">
+              <div>
+                <h2 id="timeline-focus-insights-title">专注节奏</h2>
+                <p>把真正投入的时间变成看得见的节奏，不用连续打卡。</p>
+              </div>
+              <Clock3 size={17} aria-hidden="true" />
+            </div>
+            <div className="timeline-focus-metrics">
+              <div><strong>{focusInsights.totalMinutes}</strong><span>专注分钟</span></div>
+              <div><strong>{focusInsights.totalSessions}</strong><span>专注段</span></div>
+              <div><strong>{focusInsights.averageSessionMinutes || "—"}</strong><span>平均分钟</span></div>
+            </div>
+            <div className="timeline-focus-bars" role="list" aria-label="一周每日专注时长">
+              {(() => {
+                const maxMinutes = Math.max(1, ...focusInsights.days.map((day) => day.minutes));
+                return focusInsights.days.map((day) => {
+                  const height = day.minutes > 0
+                    ? Math.max(10, Math.round((day.minutes / maxMinutes) * 100))
+                    : 4;
+                  const weekday = new Intl.DateTimeFormat("zh-CN", { weekday: "short" })
+                    .format(new Date(`${day.date}T12:00:00`));
+                  return (
+                    <div className="timeline-focus-day" role="listitem" key={day.date}>
+                      <span className="timeline-focus-day-value">{day.minutes ? `${day.minutes}′` : "·"}</span>
+                      <div className="timeline-focus-bar-track" aria-hidden="true">
+                        <i style={{ height: `${height}%` }} />
+                      </div>
+                      <strong>{weekday}</strong>
+                      <small>{day.date.slice(5).replace("-", "/")}</small>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            {focusInsights.topTasks.length > 0 ? (
+              <div className="timeline-focus-top-tasks">
+                <span>投入最多</span>
+                <div>
+                  {focusInsights.topTasks.map((item) => (
+                    <button type="button" key={item.taskId} onClick={() => onSelect(item.taskId)}>
+                      <strong>{item.title}</strong>
+                      <small>{item.minutes} 分钟 · {item.sessions} 段</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="timeline-focus-empty">完成一段专注后，这里会记录你的投入，而不是只看勾选数量。</p>
             )}
           </section>
 

@@ -93,6 +93,7 @@ flowchart LR
 - 清单实体通过 `lists:list/create/update/delete` 类型化 IPC 暴露给渲染层。旧状态文件缺少 `lists` 时由 LocalStore 在内存中迁移为空对象；数据导出/导入包含清单元数据，复制策略为冲突清单生成新 ID 并同时重映射任务及撤销快照中的 `listId`，避免复制后任务指向原清单。删除清单与解除任务关联在同一 LocalStore 事务内完成，且不产生可恢复的任务操作。
 - Quick Capture：无边框、快捷键呼出、失焦可恢复草稿。
 - Todo Pet：唯一桌面悬浮窗口；透明不规则命中区、可拖动、置顶、多显示器，并支持紧凑、悬停预览、展开、专注和安静状态。
+- `src/renderer/focus-insights.ts` 从任务 `focusSessions` 及兼容的聚合专注字段投影一周节奏；`TimelinePage` 只读展示每日柱状图、总投入、专注段、平均时长和投入最多任务，不修改 `Task`、operation 或 Feishu payload。
 - `src/renderer/pet-task-drop-zones.ts` 只定义“专注 / 完成 / 稍后”三种任务搬运目标；`FloatingWindow` 在任务卡原生拖拽期间显示目标区，放下后复用现有 `startPetFocus`、`toggleTaskFromPet` 或 `heldTaskId` 气泡，不创建第二份任务。目标区只负责交互投影，权限、错误处理、撤销与飞书同步仍由原任务控制器和服务承接。
 - Todo Pet 动作包：渲染进程只接受版本化 JSON 声明，经过字段白名单、动作白名单、长度和唯一性校验后写入本地设置；动作包只能引用内置 `PetIdleAction`，不执行脚本、网络请求、文件读写或动态代码。
 - 工作流模板：渲染进程只保存版本化模板 JSON；模板步骤仅允许任务标题、备注、标签、优先级、预计时长和有限的相对日期，变量只支持 `title/date/now`。快速捕获先生成确定性预览，再逐项写入本地或飞书；不会执行模板脚本、后台定时器或隐式外部调用。Quick Capture 解析 `@情境` 与 `情境：情境` 为本地 contexts，并把解析结果作为可编辑 chip 展示；同时把 `预计 45 分钟`、`用时 1 小时`、`30m/1h` 标准化为 5–720 分钟的本地 `estimatedMinutes`，把 `每天`、`每个工作日`、`每周一/三/五`、`每月15日` 和 `每隔 2 周` 转成受限的本地 `RecurrenceRule`，均在保存前显示 chip。解析不触发定位或后台监听；模板批量创建仍使用各步骤自己的估时定义，快速捕获循环只写入非模板本地任务。
