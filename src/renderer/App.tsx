@@ -238,6 +238,12 @@ import { feishuSyncVisualState } from "./feishu-status";
 import { ProjectPage } from "./ProjectPage";
 import { ListPage } from "./ListPage";
 import { petSeasonalEventForDate } from "./pet-season";
+import {
+  applyCompanionStrategy,
+  companionStrategyLabels,
+  detectCompanionStrategy,
+  type CompanionStrategy,
+} from "./companion-presets";
 
 type MainRoute =
   | TaskView
@@ -8123,6 +8129,30 @@ function SettingsPage({
             <div className="settings-subheading">
               <span>陪伴行为</span>
               <p>互动默认克制，不使用惩罚、连续签到压力或负面措辞。</p>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>陪伴策略模板</strong>
+                <p>一键组合主动程度、提醒语气、动作性格和专注自动衔接；也可以逐项改成自定义。</p>
+              </div>
+              <select
+                className="settings-input"
+                aria-label="陪伴策略模板"
+                value={detectCompanionStrategy(appSettings)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "custom") return;
+                  void persist(
+                    applyCompanionStrategy(appSettings, value as CompanionStrategy),
+                    `${companionStrategyLabels[value as CompanionStrategy]}已启用`,
+                  );
+                }}
+              >
+                <option value="custom">自定义</option>
+                {(Object.keys(companionStrategyLabels) as CompanionStrategy[]).map((strategy) => (
+                  <option value={strategy} key={strategy}>{companionStrategyLabels[strategy]}</option>
+                ))}
+              </select>
             </div>
             <div className="settings-row">
               <div>
