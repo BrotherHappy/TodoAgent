@@ -7334,9 +7334,9 @@ select {
   color: #746ee2;
   font-weight: 800;
 }
-.cloud-lamp { top: 28px; right: 38px; font-size: 47px; }
-.room-plant { right: 18%; bottom: 20%; color: #4d9a78; font-size: 58px; }
-.room-books { left: 17%; bottom: 17%; color: #bd6a78; font-size: 52px; }
+.cloud-lamp { color: #746ee2; font-size: 47px; }
+.room-plant { color: #4d9a78; font-size: 58px; }
+.room-books { color: #bd6a78; font-size: 52px; }
 .pet-room-controls,
 .pet-adventure-card,
 .pet-game-card {
@@ -7399,6 +7399,96 @@ select {
   border-color: color-mix(in srgb, var(--app-brand) 42%, var(--app-line));
   color: var(--app-brand-strong);
   background: var(--app-brand-soft);
+}
+.pet-room-layout-controls {
+  display: grid;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 17px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--app-brand-soft) 35%, transparent);
+}
+.pet-room-layout-controls legend {
+  width: auto;
+  margin: 0;
+  padding: 0 5px;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 760;
+}
+.pet-room-layout-hint,
+.pet-room-layout-empty {
+  margin: 0;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.pet-room-layout-list { display: grid; gap: 9px; }
+.pet-room-layout-row {
+  display: grid;
+  grid-template-columns: 76px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.pet-room-layout-row > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.pet-room-layout-nudge {
+  display: grid;
+  grid-template-columns: repeat(4, 28px);
+  gap: 3px;
+}
+.pet-room-layout-nudge button {
+  width: 28px;
+  min-height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+  padding: 0;
+  color: var(--app-text-soft);
+  background: var(--app-surface-raised);
+  font-size: 14px;
+  line-height: 1;
+}
+.pet-room-layout-nudge button:hover:not(:disabled),
+.pet-room-layout-nudge button:focus-visible {
+  border-color: var(--app-brand);
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.pet-room-layout-scale {
+  display: grid !important;
+  grid-template-columns: auto minmax(62px, 1fr) 36px !important;
+  gap: 6px !important;
+  min-width: 0;
+  color: var(--app-text-soft);
+  font-size: 10px;
+}
+.pet-room-layout-scale input { min-width: 0; accent-color: var(--app-brand); }
+.pet-room-layout-scale output { text-align: right; font-variant-numeric: tabular-nums; }
+.pet-room-layout-reset {
+  justify-self: start;
+  min-height: 30px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--app-text-soft);
+  background: var(--app-surface-raised);
+  font-size: 11px;
+}
+.pet-room-layout-reset:hover:not(:disabled),
+.pet-room-layout-reset:focus-visible {
+  border-color: var(--app-brand);
+  color: var(--app-brand-strong);
+}
+@media (max-width: 620px) {
+  .pet-room-layout-row { grid-template-columns: 76px auto; }
+  .pet-room-layout-scale { grid-column: 1 / -1; }
 }
 .pet-adventure-scene {
   min-height: 360px;

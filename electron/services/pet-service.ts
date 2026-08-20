@@ -14,6 +14,7 @@ import {
   type PetCustomizationPatch,
   type PetCompanion,
   type PetCompanionKind,
+  type PetDecorationPlacement,
   type PetEvent,
   type PetMemoryEntry,
   type PetHabit,
@@ -29,6 +30,11 @@ import {
   type PetState,
   type StartFocusRequest,
 } from "../../src/shared/pet-types";
+import {
+  PET_ROOM_DECORATION_DEFAULTS,
+  clampPetDecorationPlacement,
+  isPetRoomDecorationId,
+} from "../../src/shared/pet-room-layout";
 
 const clone = <T>(value: T): T => structuredClone(value);
 const isoNow = (now = Date.now()): string => new Date(now).toISOString();
@@ -76,6 +82,19 @@ const COMPANION_DEFAULTS: Record<PetCompanionKind, { name: string; personality: 
 };
 
 const COMPANION_KINDS = new Set<PetCompanionKind>(Object.keys(COMPANION_DEFAULTS) as PetCompanionKind[]);
+
+function normalizeDecorationPositions(value: unknown): Record<string, PetDecorationPlacement> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const normalized: Record<string, PetDecorationPlacement> = {};
+  for (const [id, placement] of Object.entries(value)) {
+    if (!isPetRoomDecorationId(id)) continue;
+    normalized[id] = clampPetDecorationPlacement(
+      placement,
+      PET_ROOM_DECORATION_DEFAULTS[id],
+    );
+  }
+  return normalized;
+}
 
 function normalizeCompanions(value: unknown, now: number): PetCompanion[] {
   if (!Array.isArray(value)) return [];
@@ -202,6 +221,22 @@ function normalizeState(value: unknown, name: string, now = Date.now()): PetStat
   const raw = value as Partial<PetState>;
   if (raw.schemaVersion !== 1 || !raw.profile) return createDefaultPetState(name);
   const defaults = createDefaultPetState(name);
+  const rawAppearance = raw.appearance && typeof raw.appearance === "object"
+    ? raw.appearance
+    : undefined;
+  const appearance = {
+    ...defaults.appearance,
+    ...clone(rawAppearance ?? {}),
+    decorations: Array.isArray(rawAppearance?.decorations)
+      ? clone(rawAppearance.decorations)
+      : defaults.appearance.decorations,
+  };
+  const decorationPositions = normalizeDecorationPositions(
+    (rawAppearance as { decorationPositions?: unknown } | undefined)?.decorationPositions,
+  );
+  if (decorationPositions !== undefined) {
+    appearance.decorationPositions = decorationPositions;
+  }
   return {
     ...defaults,
     ...clone(raw),
@@ -222,13 +257,7 @@ function normalizeState(value: unknown, name: string, now = Date.now()): PetStat
     focusHistory: Array.isArray(raw.focusHistory) ? clone(raw.focusHistory) : [],
     rewards: Array.isArray(raw.rewards) ? clone(raw.rewards) : [],
     inventory: Array.isArray(raw.inventory) ? clone(raw.inventory) : [],
-    appearance: {
-      ...defaults.appearance,
-      ...clone(raw.appearance ?? {}),
-      decorations: Array.isArray(raw.appearance?.decorations)
-        ? clone(raw.appearance.decorations)
-        : defaults.appearance.decorations,
-    },
+    appearance,
     adventures: Array.isArray(raw.adventures) ? clone(raw.adventures) : [],
     miniGames: Array.isArray(raw.miniGames) ? clone(raw.miniGames) : [],
     diary: Array.isArray(raw.diary)
@@ -478,6 +507,25 @@ export class PetService {
               .filter(Boolean),
           ),
         ).slice(0, 12);
+      }
+      if (patch.decorationPositions !== undefined) {
+        const positions = { ...(draft.appearance.decorationPositions ?? {}) };
+        for (const [id, placement] of Object.entries(patch.decorationPositions)) {
+          if (!isPetRoomDecorationId(id)) continue;
+          if (placement === null) {
+            delete positions[id];
+            continue;
+          }
+          positions[id] = clampPetDecorationPlacement(
+            placement,
+            PET_ROOM_DECORATION_DEFAULTS[id],
+          );
+        }
+        if (Object.keys(positions).length) {
+          draft.appearance.decorationPositions = positions;
+        } else {
+          delete draft.appearance.decorationPositions;
+        }
       }
       draft.profile.updatedAt = isoNow(now);
       events.push({ type: "customization-changed", at: isoNow(now) });

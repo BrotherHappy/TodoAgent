@@ -222,6 +222,8 @@ import { PetActionPackEditor } from "./PetActionPackEditor";
 import { PetCollectionCard } from "./PetCollectionCard";
 import { PetCompletionStampsCard } from "./PetCompletionStampsCard";
 import { PetProjectChapters } from "./PetProjectChapters";
+import { PetRoomLayoutControls } from "./PetRoomLayoutControls";
+import { projectPetRoomPlacements } from "./pet-room-layout";
 import {
   PetCompanionAvatar,
   kindLabels as petCompanionKindLabels,
@@ -7720,6 +7722,7 @@ function PetHomePage({
     );
   }
   const profile = snapshot.profile;
+  const roomPlacements = projectPetRoomPlacements(snapshot.appearance.decorationPositions);
   const hasUnlocked = (itemId: string) =>
     snapshot.inventory.some((item) => item.id === itemId);
   const levelProgress = profile.experience % 100;
@@ -7894,15 +7897,28 @@ function PetHomePage({
         <section className="pet-room-section">
           <div className={`pet-room-stage room-${snapshot.appearance.roomTheme}`}>
             <span className="pet-room-window" aria-hidden="true">☁</span>
-            {snapshot.appearance.decorations.includes("cloud-lamp") && (
-              <span className="pet-room-decoration cloud-lamp" aria-hidden="true">☼</span>
-            )}
-            {snapshot.appearance.decorations.includes("plant") && (
-              <span className="pet-room-decoration room-plant" aria-hidden="true">♧</span>
-            )}
-            {snapshot.appearance.decorations.includes("books") && (
-              <span className="pet-room-decoration room-books" aria-hidden="true">▥</span>
-            )}
+            {([
+              ["cloud-lamp", "☼", "cloud-lamp"],
+              ["plant", "♧", "room-plant"],
+              ["books", "▥", "room-books"],
+            ] as const).map(([id, glyph, className]) => {
+              if (!snapshot.appearance.decorations.includes(id)) return null;
+              const placement = roomPlacements[id];
+              return (
+                <span
+                  key={id}
+                  className={`pet-room-decoration ${className}`}
+                  aria-hidden="true"
+                  style={{
+                    left: `${placement.x}%`,
+                    top: `${placement.y}%`,
+                    transform: `translate(-50%, -50%) scale(${placement.scale})`,
+                  }}
+                >
+                  {glyph}
+                </span>
+              );
+            })}
             {snapshot.companions.length > 0 && (
               <div className="pet-room-companions" aria-label="小窝里的陪伴小伙伴">
                 {snapshot.companions.map((companion) => (
@@ -8049,6 +8065,18 @@ function PetHomePage({
                 );
               })}
             </fieldset>
+            <PetRoomLayoutControls
+              decorations={snapshot.appearance.decorations}
+              positions={roomPlacements}
+              disabled={busy}
+              onChange={(positions) =>
+                void run(async () => {
+                  await window.desktopApi?.pet.customize({
+                    decorationPositions: positions,
+                  });
+                }, "摆件位置已更新")
+              }
+            />
             <section className="pet-companion-roster" aria-labelledby="pet-companion-roster-title">
               <div className="pet-companion-roster-heading">
                 <div>

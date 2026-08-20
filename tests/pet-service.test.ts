@@ -332,6 +332,28 @@ describe("PetService", () => {
     expect(restored.snapshot().profile.personality).toBe("calm");
   });
 
+  it("persists safe room decoration positions without affecting task data", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-room-layout-"));
+    const service = new PetService({ userDataPath: root });
+    await service.initialize();
+    await service.customize({
+      decorationPositions: {
+        plant: { x: 120, y: -10, scale: 2 },
+        books: { x: 31, y: 64, scale: 0.8 },
+        "made-up": { x: 50, y: 50 },
+      },
+    });
+    expect(service.snapshot().appearance.decorationPositions).toEqual({
+      plant: { x: 92, y: 10, scale: 1.3 },
+      books: { x: 31, y: 64, scale: 0.8 },
+    });
+    const restored = new PetService({ userDataPath: root });
+    await restored.initialize();
+    expect(restored.snapshot().appearance.decorationPositions).toEqual(
+      service.snapshot().appearance.decorationPositions,
+    );
+  });
+
   it("creates one pressure-free daily adventure and rewards its choice exactly once", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-adventure-"));
     const service = new PetService({ userDataPath: root, initialName: "团团" });

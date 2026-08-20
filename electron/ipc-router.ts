@@ -914,6 +914,19 @@ export function registerDesktopIpc(
           .enum(["cloud-room", "forest-nook", "night-library"])
           .optional(),
         decorations: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
+        decorationPositions: z
+          .record(
+            z.string().trim().min(1).max(80),
+            z
+              .object({
+                x: z.number().finite(),
+                y: z.number().finite(),
+                scale: z.number().finite().optional(),
+              })
+              .strict()
+              .or(z.null()),
+          )
+          .optional(),
         personality: z.enum(["gentle", "energetic", "calm", "playful", "witty", "quiet"]).optional(),
       })
       .strict()

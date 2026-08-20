@@ -145,11 +145,24 @@ export type PetPalette = "lavender" | "mint" | "sunset" | "midnight";
 export type PetOutfit = "none" | "scarf" | "explorer" | "starlight";
 export type PetRoomTheme = "cloud-room" | "forest-nook" | "night-library";
 
+/**
+ * A room-only placement. Coordinates are percentages of the room stage so
+ * the same saved layout remains useful when the desktop window is resized.
+ * The service clamps values before persisting them.
+ */
+export interface PetDecorationPlacement {
+  x: number;
+  y: number;
+  scale?: number;
+}
+
 export interface PetAppearance {
   palette: PetPalette;
   outfit: PetOutfit;
   roomTheme: PetRoomTheme;
   decorations: string[];
+  /** Optional for backwards-compatible pet archives created before layouts. */
+  decorationPositions?: Record<string, PetDecorationPlacement>;
 }
 
 export interface PetCustomizationPatch {
@@ -157,6 +170,8 @@ export interface PetCustomizationPatch {
   outfit?: PetOutfit;
   roomTheme?: PetRoomTheme;
   decorations?: string[];
+  /** Set a placement, or null to remove a saved override and use the default. */
+  decorationPositions?: Record<string, PetDecorationPlacement | null>;
   personality?: PetPersonality;
 }
 
