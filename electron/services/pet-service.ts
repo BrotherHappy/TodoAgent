@@ -26,6 +26,7 @@ import {
   type PetPersonality,
   type ProactiveMessageRecord,
   type PetReward,
+  type PetRoomAtmosphere,
   type PetSnapshot,
   type PetState,
   type StartFocusRequest,
@@ -94,6 +95,12 @@ function normalizeDecorationPositions(value: unknown): Record<string, PetDecorat
     );
   }
   return normalized;
+}
+
+function normalizeRoomAtmosphere(value: unknown): PetRoomAtmosphere | undefined {
+  return value === "daylight" || value === "cozy" || value === "moonlit"
+    ? value
+    : undefined;
 }
 
 function normalizeCompanions(value: unknown, now: number): PetCompanion[] {
@@ -237,6 +244,10 @@ function normalizeState(value: unknown, name: string, now = Date.now()): PetStat
   if (decorationPositions !== undefined) {
     appearance.decorationPositions = decorationPositions;
   }
+  const atmosphere = normalizeRoomAtmosphere(
+    (rawAppearance as { atmosphere?: unknown } | undefined)?.atmosphere,
+  );
+  if (atmosphere) appearance.atmosphere = atmosphere;
   return {
     ...defaults,
     ...clone(raw),
@@ -472,6 +483,7 @@ export class PetService {
     const palettes = new Set(["lavender", "mint", "sunset", "midnight"]);
     const outfits = new Set(["none", "scarf", "explorer", "starlight"]);
     const rooms = new Set(["cloud-room", "forest-nook", "night-library"]);
+    const atmospheres = new Set<PetRoomAtmosphere>(["daylight", "cozy", "moonlit"]);
     const personalities = new Set<PetPersonality>([
       "gentle",
       "energetic",
@@ -494,6 +506,10 @@ export class PetService {
       if (patch.roomTheme !== undefined) {
         if (!rooms.has(patch.roomTheme)) throw new Error("INVALID_PET_ROOM");
         draft.appearance.roomTheme = patch.roomTheme;
+      }
+      if (patch.atmosphere !== undefined) {
+        if (!atmospheres.has(patch.atmosphere)) throw new Error("INVALID_PET_ROOM_ATMOSPHERE");
+        draft.appearance.atmosphere = patch.atmosphere;
       }
       if (patch.personality !== undefined) {
         if (!personalities.has(patch.personality)) throw new Error("INVALID_PET_PERSONALITY");

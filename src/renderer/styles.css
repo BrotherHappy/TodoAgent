@@ -6914,6 +6914,22 @@ select {
     radial-gradient(circle at 20% 16%, rgba(147, 157, 255, 0.2), transparent 18%),
     linear-gradient(165deg, #2f3454 0 64%, #20263f 64%);
 }
+.pet-room-stage.atmosphere-cozy {
+  background:
+    radial-gradient(circle at 74% 22%, rgba(255, 219, 154, 0.34), transparent 24%),
+    linear-gradient(165deg, #f3e7d7 0 64%, #e6d3bd 64%);
+}
+.pet-room-stage.atmosphere-moonlit {
+  background:
+    radial-gradient(circle at 76% 18%, rgba(174, 190, 255, 0.32), transparent 23%),
+    linear-gradient(165deg, #46527b 0 64%, #303855 64%);
+}
+.pet-room-stage.atmosphere-moonlit .pet-room-window {
+  color: #dce4ff;
+  background: #8799d4;
+  border-color: rgba(226, 233, 255, 0.56);
+  box-shadow: 0 0 26px rgba(171, 191, 255, 0.34);
+}
 .pet-room-stage .pet-character,
 .pet-adventure-scene .pet-character {
   --pet-scale: 2.15 !important;

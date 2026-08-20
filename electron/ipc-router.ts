@@ -913,6 +913,7 @@ export function registerDesktopIpc(
         roomTheme: z
           .enum(["cloud-room", "forest-nook", "night-library"])
           .optional(),
+        atmosphere: z.enum(["daylight", "cozy", "moonlit"]).optional(),
         decorations: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
         decorationPositions: z
           .record(

@@ -354,6 +354,18 @@ describe("PetService", () => {
     );
   });
 
+  it("persists a safe local room atmosphere and keeps old archives compatible", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-room-atmosphere-"));
+    const service = new PetService({ userDataPath: root });
+    await service.initialize();
+    expect(service.snapshot().appearance.atmosphere).toBeUndefined();
+    await service.customize({ atmosphere: "moonlit" });
+    expect(service.snapshot().appearance.atmosphere).toBe("moonlit");
+    const restored = new PetService({ userDataPath: root });
+    await restored.initialize();
+    expect(restored.snapshot().appearance.atmosphere).toBe("moonlit");
+  });
+
   it("creates one pressure-free daily adventure and rewards its choice exactly once", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-adventure-"));
     const service = new PetService({ userDataPath: root, initialName: "团团" });

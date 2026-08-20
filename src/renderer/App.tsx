@@ -7723,6 +7723,7 @@ function PetHomePage({
   }
   const profile = snapshot.profile;
   const roomPlacements = projectPetRoomPlacements(snapshot.appearance.decorationPositions);
+  const roomAtmosphere = snapshot.appearance.atmosphere ?? "daylight";
   const hasUnlocked = (itemId: string) =>
     snapshot.inventory.some((item) => item.id === itemId);
   const levelProgress = profile.experience % 100;
@@ -7895,7 +7896,7 @@ function PetHomePage({
 
       {section === "room" && (
         <section className="pet-room-section">
-          <div className={`pet-room-stage room-${snapshot.appearance.roomTheme}`}>
+          <div className={`pet-room-stage room-${snapshot.appearance.roomTheme} atmosphere-${roomAtmosphere}`}>
             <span className="pet-room-window" aria-hidden="true">☁</span>
             {([
               ["cloud-lamp", "☼", "cloud-lamp"],
@@ -8033,6 +8034,27 @@ function PetHomePage({
                 <option value="forest-nook">森林角落</option>
                 <option value="night-library">夜航书房</option>
               </select>
+            </label>
+            <label>
+              <span>小窝氛围</span>
+              <select
+                value={roomAtmosphere}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      atmosphere: event.target.value as typeof roomAtmosphere,
+                    });
+                  }, "小窝氛围已调整")
+                }
+              >
+                <option value="daylight">明亮日光 · 清爽工作</option>
+                <option value="cozy">柔和灯光 · 安静陪伴</option>
+                <option value="moonlit">月光夜色 · 慢慢收尾</option>
+              </select>
+              <small className="pet-personality-hint">
+                只改变小窝的光线和色彩，不影响任务、提醒或专注计时。
+              </small>
             </label>
             <fieldset>
               <legend>摆件</legend>

@@ -144,6 +144,7 @@ export interface PetInventoryItem {
 export type PetPalette = "lavender" | "mint" | "sunset" | "midnight";
 export type PetOutfit = "none" | "scarf" | "explorer" | "starlight";
 export type PetRoomTheme = "cloud-room" | "forest-nook" | "night-library";
+export type PetRoomAtmosphere = "daylight" | "cozy" | "moonlit";
 
 /**
  * A room-only placement. Coordinates are percentages of the room stage so
@@ -163,12 +164,15 @@ export interface PetAppearance {
   decorations: string[];
   /** Optional for backwards-compatible pet archives created before layouts. */
   decorationPositions?: Record<string, PetDecorationPlacement>;
+  /** Optional so pre-atmosphere archives keep their exact shape. */
+  atmosphere?: PetRoomAtmosphere;
 }
 
 export interface PetCustomizationPatch {
   palette?: PetPalette;
   outfit?: PetOutfit;
   roomTheme?: PetRoomTheme;
+  atmosphere?: PetRoomAtmosphere;
   decorations?: string[];
   /** Set a placement, or null to remove a saved override and use the default. */
   decorationPositions?: Record<string, PetDecorationPlacement | null>;
