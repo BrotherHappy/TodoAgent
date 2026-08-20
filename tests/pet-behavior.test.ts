@@ -52,6 +52,24 @@ describe("Todo Pet behavior state machine", () => {
       expect(idleActionDelayMs(seed)).toBeGreaterThanOrEqual(8_000);
       expect(idleActionDelayMs(seed)).toBeLessThanOrEqual(20_000);
     }
+    expect(idleActionDelayMs(0, 30_000)).toBe(30_000);
+    expect(idleActionDelayMs(12_345, 999_999)).toBeLessThanOrEqual(72_000);
+  });
+
+  it("uses custom action weights without allowing unknown actions into the picker", () => {
+    const onlyRead = {
+      actions: ["read"] as const,
+      weights: { read: 5 },
+    };
+    expect(Array.from({ length: 20 }, (_, seed) => pickIdlePetAction(seed, 12, onlyRead))).toEqual(
+      Array.from({ length: 20 }, () => "read"),
+    );
+    const weighted = {
+      actions: ["read", "drink"] as const,
+      weights: { read: 5, drink: 1 },
+    };
+    expect(pickIdlePetAction(0, 12, weighted)).toBe("read");
+    expect(pickIdlePetAction(5, 12, weighted)).toBe("drink");
   });
 
   it("returns warm, time-boxed responses for direct interactions", () => {

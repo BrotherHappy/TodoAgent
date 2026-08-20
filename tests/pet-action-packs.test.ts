@@ -35,6 +35,31 @@ describe("pet action packs", () => {
     });
   });
 
+  it("validates local pacing and frequency preferences", () => {
+    expect(validatePetActionPack({
+      id: "paced-reading",
+      name: "慢慢阅读",
+      idleActions: ["read", "drink"],
+      cooldownMs: 30_000,
+      actionWeights: { read: 5, drink: 1 },
+    })).toMatchObject({
+      ok: true,
+      pack: { cooldownMs: 30_000, actionWeights: { read: 5, drink: 1 } },
+    });
+    expect(validatePetActionPack({
+      id: "too-fast",
+      name: "太快",
+      idleActions: ["read"],
+      cooldownMs: 1_000,
+    })).toMatchObject({ ok: false, message: expect.stringContaining("冷却") });
+    expect(validatePetActionPack({
+      id: "unknown-weight",
+      name: "越界",
+      idleActions: ["read"],
+      actionWeights: { dance: 5 },
+    })).toMatchObject({ ok: false, message: expect.stringContaining("当前动作包") });
+  });
+
   it("installs, updates, activates and removes packs without executing content", () => {
     const storage = new MemoryStorage();
     const first = validatePetActionPack({
@@ -48,9 +73,19 @@ describe("pet action packs", () => {
     setActivePetActionPackId(first.pack.id, storage);
     expect(getActivePetActionPackId(storage)).toBe("cozy-reading");
 
-    const updated = { ...first.pack, name: "安静阅读 2", idleActions: ["read", "stretch"] as PetIdleAction[] };
+    const updated = {
+      ...first.pack,
+      name: "安静阅读 2",
+      idleActions: ["read", "stretch"] as PetIdleAction[],
+      cooldownMs: 24_000,
+      actionWeights: { read: 5, stretch: 2 },
+    };
     expect(installPetActionPack(updated, storage)).toMatchObject([{ name: "安静阅读 2" }]);
     expect(loadInstalledPetActionPacks(storage)[0].idleActions).toEqual(["read", "stretch"]);
+    expect(loadInstalledPetActionPacks(storage)[0]).toMatchObject({
+      cooldownMs: 24_000,
+      actionWeights: { read: 5, stretch: 2 },
+    });
     expect(removePetActionPack("cozy-reading", storage)).toEqual([]);
     expect(getActivePetActionPackId(storage)).toBeUndefined();
   });

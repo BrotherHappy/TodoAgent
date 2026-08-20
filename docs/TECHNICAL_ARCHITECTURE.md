@@ -119,8 +119,8 @@ flowchart LR
 - `src/renderer/focus-insights.ts` 从任务 `focusSessions` 及兼容的聚合专注字段投影一周节奏；`TimelinePage` 只读展示每日柱状图、总投入、专注段、平均时长和投入最多任务，不修改 `Task`、operation 或 Feishu payload。
 - 同一 `focus-insights.ts` 还以任务 `estimatedMinutes` 和本周实际专注秒数投影 `timeAccounting`：汇总预计/实际分钟、偏差和最多 4 项偏差任务；仅纳入本周有计划或投入、且填写预计时长的未删除任务，`TimelinePage` 提供回到原任务的只读复盘入口，不创建 operation、不改变宠物档案或 Feishu payload。
 - `src/renderer/pet-task-drop-zones.ts` 只定义“专注 / 完成 / 稍后”三种任务搬运目标；`FloatingWindow` 在任务卡原生拖拽期间显示目标区，放下后复用现有 `startPetFocus`、`toggleTaskFromPet` 或 `heldTaskId` 气泡，不创建第二份任务。目标区只负责交互投影，权限、错误处理、撤销与飞书同步仍由原任务控制器和服务承接。
-- Todo Pet 动作包：渲染进程只接受版本化 JSON 声明，经过字段白名单、动作白名单、长度和唯一性校验后写入本地设置；动作包只能引用内置 `PetIdleAction`，不执行脚本、网络请求、文件读写或动态代码。
-- `PetActionPackEditor` 只是上述动作包校验器的可视化前端：它只能提交 `id`、`name`、`description` 和内置 `PetIdleAction[]`，载入/清空/安装启用都停留在 renderer 设置层；编辑器不会引入脚本、动态代码、网络、文件或外部素材路径。
+- Todo Pet 动作包：渲染进程只接受版本化 JSON 声明，经过字段白名单、动作白名单、长度、唯一性、冷却范围和频率范围校验后写入本地设置；动作包只能引用内置 `PetIdleAction`，可选 `cooldownMs`（8–60 秒）和 `actionWeights`（1–5）只改变待机节奏，不执行脚本、网络请求、文件读写或动态代码。旧包缺失新字段时沿用原有 8–20 秒随机间隔和等权选择。
+- `PetActionPackEditor` 只是上述动作包校验器的可视化前端：它只能提交 `id`、`name`、`description`、内置 `PetIdleAction[]`、冷却秒数和动作出现频率，载入/清空/安装启用都停留在 renderer 设置层；编辑器不会引入脚本、动态代码、网络、文件或外部素材路径。待机调度使用确定性加权选择和最小冷却，状态动作仍按既有优先级/可打断规则覆盖待机动作。
 - 小窝主题包：`src/renderer/pet-room-theme-packs.ts` 只在 renderer 本机 `localStorage` 保存最多 12 个安装包和当前选择；`PetRoomThemeEditor` 提交 `id`、`name`、`description`、四个六位十六进制颜色和可选的 512 KB 以内 PNG/JPEG/WebP 本地图片数据，并支持生成可读 JSON、从本地 JSON 解析到编辑器预览后再安装。校验器拒绝未知字段、脚本、网络 URL、图片路径、SVG、任意 CSS 和超长值；图片只允许受限 base64 data URL，主题包通过 CSS 变量改变房间舞台视觉，不进入 `PetState`、任务、Agent 上下文、权限或飞书 payload，也不会随 `.todo-pet.json` 迁移。第三方连接器和网络主题市场仍以后续安全边界另行设计。
 - 小窝季节装饰：`src/renderer/pet-room-season.ts` 为四季返回固定的三项装饰数据，`PetHomePage` 只在 `AppSettings.pet.seasonalEvents` 开启时将其投影到房间舞台。坐标是百分比、内容是内置字符，动画只作用于装饰层的 transform；它不写入 `PetState`、localStorage、任务、奖励或飞书 payload，并通过 `prefers-reduced-motion` 停止漂移。
 - 房间伙伴互动：`src/renderer/pet-companion-interactions.ts` 按伙伴种类和陪伴性格生成固定短句；`PetHomePage` 只在 renderer 内保存当前回应和 3.2 秒的临时动作状态。伙伴按钮使用原生键盘可聚焦控件，回应不读取任务/Agent/飞书数据，不写入 `PetState`、奖励或同步队列；减少动态效果时跳过问候动画。

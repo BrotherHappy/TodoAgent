@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   idlePetActions,
   petActionLabels,
+  PET_IDLE_COOLDOWN_MAX_MS,
+  PET_IDLE_COOLDOWN_MIN_MS,
   type PetIdleAction,
 } from "./pet-behavior";
 import {
@@ -16,6 +18,9 @@ export interface PetActionPackEditorProps {
 }
 
 const defaultActions: PetIdleAction[] = ["idle", "stretch", "read", "drink", "peek"];
+const defaultCooldownSeconds = String(PET_IDLE_COOLDOWN_MIN_MS / 1000);
+const defaultActionWeights = (): Record<PetIdleAction, number> =>
+  Object.fromEntries(idlePetActions.map((action) => [action, 3])) as Record<PetIdleAction, number>;
 
 /**
  * A safe visual editor for declarative action packs. It only emits the same
@@ -31,6 +36,8 @@ export function PetActionPackEditor({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [selected, setSelected] = useState<PetIdleAction[]>(defaultActions);
+  const [cooldownSeconds, setCooldownSeconds] = useState(defaultCooldownSeconds);
+  const [actionWeights, setActionWeights] = useState<Record<PetIdleAction, number>>(defaultActionWeights);
   const [error, setError] = useState("");
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
@@ -40,6 +47,8 @@ export function PetActionPackEditor({
     setName("");
     setDescription("");
     setSelected(defaultActions);
+    setCooldownSeconds(defaultCooldownSeconds);
+    setActionWeights(defaultActionWeights());
     setError("");
   };
 
@@ -49,6 +58,8 @@ export function PetActionPackEditor({
     setName(activePack.name);
     setDescription(activePack.description);
     setSelected([...activePack.idleActions]);
+    setCooldownSeconds(String(Math.round((activePack.cooldownMs ?? PET_IDLE_COOLDOWN_MIN_MS) / 1000)));
+    setActionWeights({ ...defaultActionWeights(), ...(activePack.actionWeights ?? {}) });
     setError("");
   };
 
@@ -80,6 +91,10 @@ export function PetActionPackEditor({
       name,
       description,
       idleActions: selected,
+      cooldownMs: Number(cooldownSeconds) * 1000,
+      actionWeights: Object.fromEntries(
+        selected.map((action) => [action, actionWeights[action] ?? 3]),
+      ),
     });
     if (!result.ok) {
       setError(result.message);
@@ -133,6 +148,21 @@ export function PetActionPackEditor({
           maxLength={160}
         />
       </label>
+      <label className="pet-action-pack-cooldown">
+        <span>动作冷却（秒）</span>
+        <input
+          className="settings-input"
+          aria-label="动作冷却（秒）"
+          type="number"
+          min={PET_IDLE_COOLDOWN_MIN_MS / 1000}
+          max={PET_IDLE_COOLDOWN_MAX_MS / 1000}
+          step={1}
+          value={cooldownSeconds}
+          disabled={disabled}
+          onChange={(event) => { setCooldownSeconds(event.target.value); setError(""); }}
+        />
+        <small>每次待机动作至少间隔 {PET_IDLE_COOLDOWN_MIN_MS / 1000}–{PET_IDLE_COOLDOWN_MAX_MS / 1000} 秒，避免桌面过度打扰。</small>
+      </label>
       <div className="pet-action-pack-action-grid" role="group" aria-label="选择待机动作">
         {idlePetActions.map((action) => (
           <label className={`pet-action-pack-action ${selectedSet.has(action) ? "is-selected" : ""}`} key={action}>
@@ -143,6 +173,32 @@ export function PetActionPackEditor({
               onChange={() => toggle(action)}
             />
             <span>{petActionLabels[action]}</span>
+          </label>
+        ))}
+      </div>
+      <div className="pet-action-pack-frequency" role="group" aria-label="动作出现频率">
+        <div className="pet-action-pack-frequency-heading">
+          <strong>出现频率</strong>
+          <span>1 偶尔 · 3 正常 · 5 常见</span>
+        </div>
+        {selected.map((action) => (
+          <label key={action} className="pet-action-pack-frequency-row">
+            <span>{petActionLabels[action]}</span>
+            <input
+              type="range"
+              min={1}
+              max={5}
+              step={1}
+              aria-label={`${petActionLabels[action]}出现频率`}
+              value={actionWeights[action] ?? 3}
+              disabled={disabled}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                setActionWeights((current) => ({ ...current, [action]: value }));
+                setError("");
+              }}
+            />
+            <output>{actionWeights[action] ?? 3}</output>
           </label>
         ))}
       </div>

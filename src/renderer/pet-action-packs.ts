@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  PET_IDLE_COOLDOWN_MAX_MS,
+  PET_IDLE_COOLDOWN_MIN_MS,
   idlePetActions,
   type PetActionPack,
   type PetIdleAction,
@@ -14,6 +16,10 @@ export interface InstalledPetActionPack {
   name: string;
   description: string;
   idleActions: PetIdleAction[];
+  /** Minimum pause between ambient actions. Older packs omit this field. */
+  cooldownMs?: number;
+  /** Relative appearance frequency for selected actions (1–5). */
+  actionWeights?: Partial<Record<PetIdleAction, number>>;
   installedAt: string;
 }
 
@@ -48,11 +54,20 @@ const emitChanged = (): void => {
 const clonePack = (pack: InstalledPetActionPack): InstalledPetActionPack => ({
   ...pack,
   idleActions: [...pack.idleActions],
+  actionWeights: pack.actionWeights ? { ...pack.actionWeights } : undefined,
 });
 
 export const validatePetActionPack = (value: unknown): PetActionPackImportResult => {
   if (!isRecord(value)) return { ok: false, message: "动作包必须是一个 JSON 对象。" };
-  const allowedKeys = new Set(["id", "name", "description", "idleActions", "installedAt"]);
+  const allowedKeys = new Set([
+    "id",
+    "name",
+    "description",
+    "idleActions",
+    "cooldownMs",
+    "actionWeights",
+    "installedAt",
+  ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) {
     return { ok: false, message: "动作包只允许包含名称、说明和已有待机动作，不接受脚本或其他扩展字段。" };
   }
@@ -78,6 +93,37 @@ export const validatePetActionPack = (value: unknown): PetActionPackImportResult
   if (new Set(idleActions).size !== idleActions.length) {
     return { ok: false, message: "动作包中的待机动作不能重复。" };
   }
+  let cooldownMs: number | undefined;
+  if (value.cooldownMs !== undefined) {
+    if (
+      typeof value.cooldownMs !== "number" ||
+      !Number.isInteger(value.cooldownMs) ||
+      value.cooldownMs < PET_IDLE_COOLDOWN_MIN_MS ||
+      value.cooldownMs > PET_IDLE_COOLDOWN_MAX_MS
+    ) {
+      return {
+        ok: false,
+        message: `动作冷却需要是 ${PET_IDLE_COOLDOWN_MIN_MS / 1000}–${PET_IDLE_COOLDOWN_MAX_MS / 1000} 秒的整数。`,
+      };
+    }
+    cooldownMs = value.cooldownMs;
+  }
+  let actionWeights: Partial<Record<PetIdleAction, number>> | undefined;
+  if (value.actionWeights !== undefined) {
+    if (!isRecord(value.actionWeights)) {
+      return { ok: false, message: "动作频率偏好必须是对象。" };
+    }
+    actionWeights = {};
+    for (const [action, weight] of Object.entries(value.actionWeights)) {
+      if (!allowedActions.has(action as PetIdleAction) || !idleActions.includes(action as PetIdleAction)) {
+        return { ok: false, message: "动作频率偏好只能配置当前动作包中的待机动作。" };
+      }
+      if (typeof weight !== "number" || !Number.isInteger(weight) || weight < 1 || weight > 5) {
+        return { ok: false, message: "动作频率偏好只能是 1–5 的整数。" };
+      }
+      actionWeights[action as PetIdleAction] = weight;
+    }
+  }
   return {
     ok: true,
     pack: {
@@ -85,6 +131,8 @@ export const validatePetActionPack = (value: unknown): PetActionPackImportResult
       name,
       description,
       idleActions,
+      ...(cooldownMs === undefined ? {} : { cooldownMs }),
+      ...(actionWeights === undefined ? {} : { actionWeights }),
       installedAt: new Date().toISOString(),
     },
   };

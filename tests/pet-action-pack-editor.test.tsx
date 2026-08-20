@@ -12,7 +12,9 @@ describe("PetActionPackEditor", () => {
     fireEvent.change(screen.getByLabelText("包 ID"), { target: { value: "cozy-reading" } });
     fireEvent.change(screen.getByLabelText("名称"), { target: { value: "安静阅读" } });
     fireEvent.change(screen.getByLabelText("说明"), { target: { value: "陪你读一会儿" } });
+    fireEvent.change(screen.getByLabelText("动作冷却（秒）"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "轻轻跳舞" }));
+    fireEvent.change(screen.getByLabelText("安静看书出现频率"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: "安装并启用" }));
 
     expect(onInstall).toHaveBeenCalledWith(expect.objectContaining({
@@ -20,6 +22,8 @@ describe("PetActionPackEditor", () => {
       name: "安静阅读",
       description: "陪你读一会儿",
       idleActions: expect.arrayContaining(["read", "dance"]),
+      cooldownMs: 30_000,
+      actionWeights: expect.objectContaining({ read: 5 }),
     }));
   });
 
@@ -33,6 +37,8 @@ describe("PetActionPackEditor", () => {
           name: "专注",
           description: "安静",
           idleActions: ["idle", "read"],
+          cooldownMs: 24_000,
+          actionWeights: { read: 5 },
           installedAt: "2026-08-21T00:00:00.000Z",
         }}
       />,

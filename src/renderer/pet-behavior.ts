@@ -76,6 +76,19 @@ export type PetInteractionKind =
 
 export type PetActionPack = "balanced" | "calm" | "playful" | "focused";
 
+/**
+ * A local-only declaration for a custom idle rhythm.  The action list stays
+ * closed over the built-in animation vocabulary; weights only change how
+ * often an already-approved action is selected.
+ */
+export interface PetIdleActionProfile {
+  actions: readonly PetIdleAction[];
+  /** Minimum pause before the next ambient action, in milliseconds. */
+  cooldownMs?: number;
+  /** Relative appearance frequency from 1 (occasional) to 5 (often). */
+  weights?: Partial<Record<PetIdleAction, number>>;
+}
+
 export interface PetBehaviorContext {
   reducedMotion: boolean;
   focus?: {
@@ -131,6 +144,17 @@ export const idlePetActions: readonly PetIdleAction[] = [
   "float",
   "peek",
 ];
+
+export const PET_IDLE_COOLDOWN_MIN_MS = 8_000;
+export const PET_IDLE_COOLDOWN_MAX_MS = 60_000;
+
+const boundedIdleCooldownMs = (value: number | undefined): number => {
+  if (!Number.isFinite(value)) return PET_IDLE_COOLDOWN_MIN_MS;
+  return Math.min(
+    PET_IDLE_COOLDOWN_MAX_MS,
+    Math.max(PET_IDLE_COOLDOWN_MIN_MS, Math.floor(value as number)),
+  );
+};
 
 const calmIdleActions: readonly PetIdleAction[] = [
   "idle",
@@ -329,21 +353,39 @@ export function emotionForPetAction(action: PetAction): PetEmotion {
 export function pickIdlePetAction(
   seed: number,
   hour: number,
-  pack: PetActionPack | readonly PetIdleAction[] = "balanced",
+  pack: PetActionPack | readonly PetIdleAction[] | PetIdleActionProfile = "balanced",
 ): PetIdleAction {
-  const actions = Array.isArray(pack)
-    ? pack
-    : hour >= 22 || hour < 7
-      ? quietIdleActions
-      : pack === "calm"
-        ? calmIdleActions
-        : pack === "playful"
-          ? playfulIdleActions
-          : pack === "focused"
-            ? focusedIdleActions
-            : idlePetActions;
+  const customProfile = !Array.isArray(pack) && typeof pack === "object"
+    ? (pack as PetIdleActionProfile)
+    : undefined;
+  const actions: readonly PetIdleAction[] = customProfile
+    ? customProfile.actions
+    : Array.isArray(pack)
+      ? pack as readonly PetIdleAction[]
+      : hour >= 22 || hour < 7
+        ? quietIdleActions
+        : pack === "calm"
+          ? calmIdleActions
+          : pack === "playful"
+            ? playfulIdleActions
+            : pack === "focused"
+              ? focusedIdleActions
+              : idlePetActions;
   const safeSeed = Number.isFinite(seed) ? Math.abs(Math.floor(seed)) : 0;
-  return actions[safeSeed % actions.length] ?? "idle";
+  if (actions.length === 0) return "idle";
+  const weights = customProfile?.weights;
+  if (!weights) return actions[safeSeed % actions.length] ?? "idle";
+  const totalWeight = actions.reduce((total, action) => {
+    const weight = weights[action];
+    return total + (Number.isFinite(weight) && (weight as number) > 0 ? Math.floor(weight as number) : 1);
+  }, 0);
+  let cursor = safeSeed % totalWeight;
+  for (const action of actions) {
+    const weight = weights[action];
+    cursor -= Number.isFinite(weight) && (weight as number) > 0 ? Math.floor(weight as number) : 1;
+    if (cursor < 0) return action;
+  }
+  return actions[actions.length - 1] ?? "idle";
 }
 
 export function interactionResponse(
@@ -455,9 +497,9 @@ export function isProtectedPetAction(action: PetAction): boolean {
   return !petActionDefinitions[action].interruptible;
 }
 
-export function idleActionDelayMs(seed: number): number {
+export function idleActionDelayMs(seed: number, cooldownMs?: number): number {
   const safeSeed = Number.isFinite(seed) ? Math.abs(Math.floor(seed)) : 0;
-  return 8_000 + (safeSeed % 12_001);
+  return boundedIdleCooldownMs(cooldownMs) + (safeSeed % 12_001);
 }
 
 export function idleActionDurationMs(action: PetAction): number {

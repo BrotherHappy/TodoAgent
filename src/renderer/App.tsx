@@ -244,6 +244,7 @@ import { petCompanionGreeting } from "./pet-companion-interactions";
 import {
   petInteractionFromPoint,
   type PetAction,
+  type PetIdleActionProfile,
   type PetInteractionKind,
 } from "./pet-behavior";
 import {
@@ -9719,7 +9720,7 @@ function SettingsPage({
             </div>
             <div className="settings-subheading">
               <span>可安装动作包</span>
-              <p>动作包只是一组已有待机动作，不允许脚本、网络请求、文件读取或外部代码。</p>
+              <p>动作包只是一组已有待机动作；可以调节动作冷却和出现频率，不允许脚本、网络请求、文件读取或外部代码。</p>
             </div>
             <div className="settings-row">
               <div>
@@ -9747,7 +9748,7 @@ function SettingsPage({
                   setActionPackJson(event.target.value);
                   setActionPackError("");
                 }}
-                placeholder={'粘贴动作包 JSON，例如：{\n  "id": "cozy-reading",\n  "name": "安静阅读",\n  "description": "更多阅读和休息动作",\n  "idleActions": ["read", "drink", "stretch", "nap"]\n}'}
+                placeholder={'粘贴动作包 JSON，例如：{\n  "id": "cozy-reading",\n  "name": "安静阅读",\n  "description": "更多阅读和休息动作",\n  "idleActions": ["read", "drink", "stretch", "nap"],\n  "cooldownMs": 30000,\n  "actionWeights": { "read": 5, "drink": 2 }\n}'}
                 rows={5}
               />
               <div className="settings-actions">
@@ -14761,6 +14762,15 @@ function FloatingWindow() {
       : petPersonality === "calm" || petPersonality === "quiet"
         ? "calm"
         : petSettings.pet.actionPack;
+  const customIdleProfile = useMemo<PetIdleActionProfile | undefined>(() => {
+    const pack = installedActionPacks.activePack;
+    if (!pack) return undefined;
+    return {
+      actions: pack.idleActions,
+      cooldownMs: pack.cooldownMs,
+      weights: pack.actionWeights,
+    };
+  }, [installedActionPacks.activePack]);
   const petSeasonEvent = petSettings.pet.seasonalEvents
     ? petSeasonalEventForDate()
     : undefined;
@@ -14839,7 +14849,7 @@ function FloatingWindow() {
     petName,
     petSettings.pet.interactionsEnabled,
     personalityActionPack,
-    installedActionPacks.activePack?.idleActions,
+    customIdleProfile,
   );
   useEffect(() => {
     if (petBehavior.message) setReactionBubbleCollapsed(false);

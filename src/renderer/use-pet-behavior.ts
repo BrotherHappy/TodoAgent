@@ -13,7 +13,7 @@ import {
   type PetActionPack,
   type PetBehaviorContext,
   type PetEmotion,
-  type PetIdleAction,
+  type PetIdleActionProfile,
   type PetInteractionKind,
 } from "./pet-behavior";
 
@@ -44,7 +44,7 @@ export function usePetBehavior(
   name: string,
   enabled: boolean,
   actionPack: PetActionPack = "balanced",
-  customIdleActions?: readonly PetIdleAction[],
+  customIdleProfile?: PetIdleActionProfile,
 ): PetBehaviorController {
   const [transient, setTransient] = useState<TransientPetBehavior>();
   const clearTimerRef = useRef<number | undefined>(undefined);
@@ -125,17 +125,17 @@ export function usePetBehavior(
       const action = pickIdlePetAction(
         seed,
         new Date().getHours(),
-        customIdleActions ?? actionPack,
+        customIdleProfile ?? actionPack,
       );
       showTransient(action, idleActionDurationMs(action));
-    }, idleActionDelayMs(seed));
+    }, idleActionDelayMs(seed, customIdleProfile?.cooldownMs));
     return () => {
       if (idleTimerRef.current !== undefined) {
         window.clearTimeout(idleTimerRef.current);
         idleTimerRef.current = undefined;
       }
     };
-  }, [actionPack, context.reducedMotion, customIdleActions, enabled, showTransient, systemAction, transient]);
+  }, [actionPack, context.reducedMotion, customIdleProfile, enabled, showTransient, systemAction, transient]);
 
   useEffect(
     () => () => {
