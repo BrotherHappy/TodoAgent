@@ -220,6 +220,7 @@ import {
 } from "./PetInteractionWheel";
 import { PetActionPackEditor } from "./PetActionPackEditor";
 import { PetCollectionCard } from "./PetCollectionCard";
+import { PetCompletionStampsCard } from "./PetCompletionStampsCard";
 import { PetProjectChapters } from "./PetProjectChapters";
 import {
   PetCompanionAvatar,
@@ -7834,6 +7835,11 @@ function PetHomePage({
             habits={snapshot.habits}
             refresh={refresh}
             notify={notify}
+          />
+          <PetCompletionStampsCard
+            tasks={tasks}
+            rewards={snapshot.rewards}
+            onOpenTask={onNavigateTask}
           />
           <PetProjectChapters
             tasks={tasks}

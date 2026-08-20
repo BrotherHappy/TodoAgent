@@ -6052,6 +6052,7 @@ select {
 .pet-attributes-card,
 .pet-goals-card,
 .pet-habits-card,
+.pet-completion-stamps-card,
 .pet-rewards-card {
   grid-column: 1 / -1;
 }
@@ -6097,6 +6098,16 @@ select {
 .pet-reward-list > div:last-child { border-bottom: 0; }
 .pet-reward-list small { display: block; margin-top: 2px; color: var(--app-text-soft); }
 .pet-reward-list b { color: var(--app-brand-strong); font-size: 12px; }
+.pet-stamp-count {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
 .pet-section-heading {
   display: flex;
   align-items: center;
@@ -7166,6 +7177,77 @@ select {
 .pet-collection-copy strong { color: var(--app-text); font-size: 11px; }
 .pet-collection-copy small { color: var(--app-text-faint); font-size: 10px; }
 .pet-collection-item > b { color: var(--app-brand-strong); font-size: 10px; font-variant-numeric: tabular-nums; }
+.pet-completion-stamps-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, #d49a5a 24%, var(--app-line));
+  border-radius: 23px;
+  padding: 19px;
+  background:
+    radial-gradient(circle at 88% 0%, color-mix(in srgb, #ffd995 18%, transparent), transparent 30%),
+    color-mix(in srgb, #fff3d9 38%, var(--app-surface-raised));
+}
+.pet-completion-stamps-card .pet-section-heading h2,
+.pet-completion-stamps-card .pet-section-heading p { margin: 0; }
+.pet-completion-stamps-card .pet-section-heading p { margin-top: 3px; color: var(--app-text-soft); font-size: 11px; line-height: 1.45; }
+.pet-stamp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.pet-stamp {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 62px;
+  border: 1px solid var(--app-line);
+  border-radius: 16px;
+  padding: 9px 11px;
+  color: var(--app-text);
+  background: color-mix(in srgb, var(--app-surface-raised) 88%, transparent);
+  text-align: left;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+.pet-stamp:hover,
+.pet-stamp:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 45%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 62%, var(--app-surface-raised));
+  transform: translateY(-1px);
+}
+.pet-stamp-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid color-mix(in srgb, #d49a5a 42%, var(--app-line));
+  border-radius: 50%;
+  color: #b16c2d;
+  background: color-mix(in srgb, #ffd995 34%, var(--app-brand-soft));
+  font-size: 16px;
+  font-weight: 800;
+}
+.pet-stamp.is-today .pet-stamp-mark {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(145deg, var(--app-brand), #8f89ff);
+  box-shadow: 0 7px 16px var(--app-brand-soft);
+}
+.pet-stamp-copy { min-width: 0; }
+.pet-stamp-copy strong,
+.pet-stamp-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-stamp-copy strong { font-size: 12px; }
+.pet-stamp-copy small { margin-top: 3px; color: var(--app-text-faint); font-size: 10px; }
+.pet-stamp-arrow { color: var(--app-text-faint); font-size: 14px; }
+.pet-completion-stamps-empty {
+  border: 1px dashed var(--app-line-strong);
+  border-radius: 14px;
+  padding: 17px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+  text-align: center;
+}
 .pet-project-chapters-card {
   grid-column: 1 / -1;
   display: grid;
@@ -7228,6 +7310,7 @@ select {
 }
 @media (prefers-reduced-motion: reduce) {
   .pet-companion-shape { animation: none; }
+  .pet-stamp { transition: none; }
 }
 .pet-room-window {
   position: absolute;
@@ -7551,6 +7634,7 @@ select {
 }
 @media (max-width: 520px) {
   .pet-collection-grid { grid-template-columns: 1fr; }
+  .pet-stamp-grid { grid-template-columns: 1fr; }
   .pet-project-chapters-grid { grid-template-columns: 1fr; }
 }
 .mini-composer {
