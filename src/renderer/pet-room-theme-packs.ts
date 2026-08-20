@@ -98,6 +98,12 @@ export const parsePetRoomThemePackJson = (raw: string): PetRoomThemePackImportRe
   }
 };
 
+export const serializePetRoomThemePack = (pack: InstalledPetRoomThemePack): string => {
+  const result = validatePetRoomThemePack(pack);
+  if (!result.ok) throw new Error(result.message);
+  return `${JSON.stringify(result.pack, null, 2)}\n`;
+};
+
 export const loadInstalledPetRoomThemePacks = (
   storage: Pick<Storage, "getItem"> | undefined = storageOf(),
 ): InstalledPetRoomThemePack[] => {

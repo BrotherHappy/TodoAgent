@@ -49,4 +49,18 @@ describe("PetRoomThemeEditor", () => {
     expect(screen.getByDisplayValue("focus-pack")).toBeVisible();
     expect(screen.getByDisplayValue("专注")).toBeVisible();
   });
+
+  it("offers a local JSON import without installing before confirmation", async () => {
+    const onInstall = vi.fn();
+    render(<PetRoomThemeEditor onInstall={onInstall} />);
+    const input = screen.getByLabelText("导入主题 JSON 文件");
+    const file = new File([JSON.stringify({
+      id: "imported-theme",
+      name: "导入主题",
+      colors: { top: "#112233", ground: "#223344", window: "#334455", accent: "#445566" },
+    })], "theme.json", { type: "application/json" });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(await screen.findByDisplayValue("imported-theme")).toBeVisible();
+    expect(onInstall).not.toHaveBeenCalled();
+  });
 });

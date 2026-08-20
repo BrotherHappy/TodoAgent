@@ -5,6 +5,7 @@ import {
   loadInstalledPetRoomThemePacks,
   parsePetRoomThemePackJson,
   removePetRoomThemePack,
+  serializePetRoomThemePack,
   setActivePetRoomThemePackId,
   validatePetRoomThemePack,
 } from "../src/renderer/pet-room-theme-packs";
@@ -61,6 +62,19 @@ describe("pet room theme packs", () => {
     expect(loadInstalledPetRoomThemePacks(storage)[0]?.colors.window).toBe("#c8ddff");
     expect(removePetRoomThemePack(result.pack.id, storage)).toEqual([]);
     expect(getActivePetRoomThemePackId(storage)).toBeUndefined();
+  });
+
+  it("serializes a safe, readable JSON package", () => {
+    const result = validatePetRoomThemePack({
+      id: "misty-morning",
+      name: "晨雾",
+      description: "轻一点的早晨",
+      colors: { top: "#e9e7ff", ground: "#d8d2f0", window: "#c8ddff", accent: "#746ee2" },
+    });
+    if (!result.ok) throw new Error(result.message);
+    const serialized = serializePetRoomThemePack(result.pack);
+    expect(serialized).toContain('"colors"');
+    expect(parsePetRoomThemePackJson(serialized)).toMatchObject({ ok: true, pack: { id: "misty-morning" } });
   });
 
   it("keeps the catalog bounded to twelve packs", () => {

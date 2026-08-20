@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   type InstalledPetRoomThemePack,
   type PetRoomThemeColors,
+  parsePetRoomThemePackJson,
+  serializePetRoomThemePack,
   validatePetRoomThemePack,
 } from "./pet-room-theme-packs";
 
@@ -28,6 +30,7 @@ export function PetRoomThemeEditor({
   const [description, setDescription] = useState("");
   const [colors, setColors] = useState<PetRoomThemeColors>(defaultColors);
   const [error, setError] = useState("");
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
     setId("");
@@ -61,6 +64,42 @@ export function PetRoomThemeEditor({
     }
     onInstall(result.pack);
     setError("");
+  };
+
+  const exportActive = () => {
+    if (!activePack || typeof document === "undefined") return;
+    try {
+      const blob = new Blob([serializePetRoomThemePack(activePack)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `todo-pet-theme-${activePack.id}.json`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "主题包导出失败。");
+    }
+  };
+
+  const importFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const result = parsePetRoomThemePackJson(await file.text());
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      setId(result.pack.id);
+      setName(result.pack.name);
+      setDescription(result.pack.description);
+      setColors({ ...result.pack.colors });
+      setError("");
+    } catch {
+      setError("主题包不是有效的 JSON。");
+    } finally {
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
   };
 
   const updateColor = (key: keyof PetRoomThemeColors, value: string) => {
@@ -108,6 +147,17 @@ export function PetRoomThemeEditor({
       <div className="settings-actions pet-room-theme-editor-actions">
         <button type="button" className="soft-button" disabled={disabled || !activePack} onClick={loadActive}>载入当前包</button>
         <button type="button" className="ghost-button" disabled={disabled} onClick={reset}>清空重来</button>
+        <button type="button" className="ghost-button" disabled={disabled || !activePack} onClick={exportActive}>导出 JSON</button>
+        <button type="button" className="ghost-button" disabled={disabled} onClick={() => importInputRef.current?.click()}>导入 JSON</button>
+        <input
+          ref={importInputRef}
+          className="sr-only"
+          type="file"
+          accept="application/json,.json"
+          aria-label="导入主题 JSON 文件"
+          disabled={disabled}
+          onChange={(event) => void importFile(event.target.files?.[0])}
+        />
         <span className="action-spacer" />
         <button type="button" className="primary-button" disabled={disabled || !id.trim() || !name.trim()} onClick={submit}>安装并应用</button>
       </div>
@@ -115,4 +165,3 @@ export function PetRoomThemeEditor({
     </div>
   );
 }
-
