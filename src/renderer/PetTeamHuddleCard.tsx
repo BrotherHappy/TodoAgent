@@ -5,6 +5,7 @@ import { PetCompanionAvatar } from "./PetCompanionAvatar";
 import {
   buildPetTeamBriefing,
   buildPetTeamPlan,
+  buildPetTeamRoute,
   pickPetTeamTask,
   type PetTeamBriefingStep,
   type PetTeamPlan,
@@ -31,6 +32,7 @@ export function PetTeamHuddleCard({
   const [selectedTaskId, setSelectedTaskId] = useState(() => pickPetTeamTask(openTasks)?.id ?? "");
   const [leadId, setLeadId] = useState("");
   const [phase, setPhase] = useState<HuddlePhase>("idle");
+  const [routeOpen, setRouteOpen] = useState(false);
   const [briefingOpen, setBriefingOpen] = useState(false);
   const [briefingStepIndex, setBriefingStepIndex] = useState(0);
   const [error, setError] = useState("");
@@ -39,6 +41,7 @@ export function PetTeamHuddleCard({
   const selectedTask = openTasks.find((task) => task.id === selectedTaskId) ?? openTasks[0];
   const plan: PetTeamPlan | undefined = buildPetTeamPlan(selectedTask, companions, leadId);
   const briefing: PetTeamBriefingStep[] = plan ? buildPetTeamBriefing(plan) : [];
+  const route = buildPetTeamRoute(openTasks, selectedTaskId, 3);
 
   useEffect(() => {
     if (!selectedTask || selectedTask.id !== selectedTaskId) {
@@ -119,6 +122,42 @@ export function PetTeamHuddleCard({
               ))}
             </select>
           </label>
+          <div className="pet-team-huddle-route">
+            <button
+              type="button"
+              className="pet-team-huddle-route-toggle"
+              aria-expanded={routeOpen}
+              onClick={() => setRouteOpen((open) => !open)}
+            >
+              <span>小队路线</span>
+              <small>{route.stops.length} 项 · 约 {route.totalEstimatedMinutes} 分钟</small>
+              <span aria-hidden="true">{routeOpen ? "收起" : "展开"}</span>
+            </button>
+            {routeOpen && (
+              <ol className="pet-team-huddle-route-list" aria-label="小队路线预览">
+                {route.stops.map((stop) => (
+                  <li key={stop.task.id} className={stop.isCurrent ? "is-current" : ""}>
+                    <button
+                      type="button"
+                      className="pet-team-huddle-route-stop"
+                      aria-current={stop.isCurrent ? "step" : undefined}
+                      disabled={disabled || phase !== "idle"}
+                      onClick={() => {
+                        setSelectedTaskId(stop.task.id);
+                        setError("");
+                      }}
+                    >
+                      <span className="pet-team-huddle-route-index" aria-hidden="true">{stop.position}</span>
+                      <span className="pet-team-huddle-route-copy">
+                        <strong>{stop.task.title}</strong>
+                        <small>{stop.isCurrent ? "当前开工目标" : "下一项候选"} · 约 {stop.estimatedMinutes} 分钟</small>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
           <div className={`pet-team-huddle-members is-${phase}`} data-team-phase={phase}>
             {plan.members.map((member) => (
               <button

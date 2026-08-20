@@ -7320,6 +7320,27 @@ select {
 .pet-team-huddle-task { display: grid; gap: 5px; }
 .pet-team-huddle-task > span { color: var(--app-text-soft); font-size: 10px; }
 .pet-team-huddle-task select { width: 100%; min-height: 34px; border: 1px solid var(--app-line); border-radius: 10px; padding: 6px 8px; color: var(--app-text); background: var(--app-surface-raised); font-size: 11px; }
+.pet-team-huddle-route { display: grid; gap: 7px; }
+.pet-team-huddle-route-toggle { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; width: 100%; border: 1px solid var(--app-line); border-radius: 10px; padding: 7px 9px; color: var(--app-text); background: color-mix(in srgb, var(--app-surface-raised) 74%, transparent); text-align: left; cursor: pointer; }
+.pet-team-huddle-route-toggle:hover,
+.pet-team-huddle-route-toggle:focus-visible { border-color: color-mix(in srgb, var(--app-brand) 46%, var(--app-line)); background: color-mix(in srgb, var(--app-brand-soft) 38%, var(--app-surface-raised)); }
+.pet-team-huddle-route-toggle > span:first-child { color: var(--app-brand-strong); font-size: 11px; font-weight: 700; }
+.pet-team-huddle-route-toggle small { min-width: 0; overflow: hidden; color: var(--app-text-faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.pet-team-huddle-route-toggle > span:last-child { color: var(--app-text-soft); font-size: 9px; }
+.pet-team-huddle-route-list { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.pet-team-huddle-route-list li { border: 1px solid transparent; border-radius: 10px; transition: border-color 150ms ease, background 150ms ease; }
+.pet-team-huddle-route-list li.is-current { border-color: color-mix(in srgb, var(--app-brand) 38%, var(--app-line)); background: color-mix(in srgb, var(--app-brand-soft) 30%, var(--app-surface-raised)); }
+.pet-team-huddle-route-stop { display: grid; grid-template-columns: 21px minmax(0, 1fr); align-items: center; gap: 7px; width: 100%; min-height: 36px; border: 0; border-radius: inherit; padding: 5px 6px; color: var(--app-text); background: transparent; text-align: left; cursor: pointer; }
+.pet-team-huddle-route-stop:hover,
+.pet-team-huddle-route-stop:focus-visible { background: color-mix(in srgb, var(--app-brand-soft) 38%, transparent); }
+.pet-team-huddle-route-stop:disabled { cursor: default; opacity: 0.78; }
+.pet-team-huddle-route-index { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; color: var(--app-text-faint); background: var(--app-glass-soft); font-size: 9px; font-variant-numeric: tabular-nums; }
+.pet-team-huddle-route-list li.is-current .pet-team-huddle-route-index { color: var(--app-brand-strong); background: var(--app-brand-soft); }
+.pet-team-huddle-route-copy { min-width: 0; display: grid; gap: 2px; }
+.pet-team-huddle-route-copy strong,
+.pet-team-huddle-route-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-team-huddle-route-copy strong { font-size: 10px; }
+.pet-team-huddle-route-copy small { color: var(--app-text-faint); font-size: 9px; }
 .pet-team-huddle-members { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .pet-team-huddle-member { width: 100%; display: flex; align-items: center; min-width: 0; gap: 6px; border: 1px solid var(--app-line); border-radius: 12px; padding: 7px; color: var(--app-text); background: color-mix(in srgb, var(--app-surface-raised) 86%, transparent); cursor: pointer; text-align: left; transition: border-color 150ms ease, background 150ms ease, transform 150ms ease; }
 .pet-team-huddle-member:hover,
@@ -7555,6 +7576,7 @@ select {
   .pet-room-companion-slot.is-greeting .pet-companion-shape { animation: none; }
   .pet-team-huddle-members.is-preparing .pet-team-huddle-member { animation: none; }
   .pet-team-huddle-briefing-list li { transition: none; }
+  .pet-team-huddle-route-list li { transition: none; }
   .pet-stamp { transition: none; }
 }
 .pet-room-window {

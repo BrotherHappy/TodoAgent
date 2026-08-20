@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Task } from "../src/shared/models";
 import type { PetCompanion } from "../src/shared/pet-types";
-import { buildPetTeamBriefing, buildPetTeamPlan, pickPetTeamTask } from "../src/renderer/pet-team-huddle";
+import { buildPetTeamBriefing, buildPetTeamPlan, buildPetTeamRoute, pickPetTeamTask } from "../src/renderer/pet-team-huddle";
 
 const task = (id: string, patch: Partial<Task> = {}): Task => ({
   id,
@@ -66,6 +66,19 @@ describe("pet team huddle", () => {
     expect(briefing.map((step) => step.title)).toEqual(["把干扰放轻", "先找一个落点"]);
     expect(briefing[0]?.member.line).toContain("声音放轻");
     expect(briefing.map((step) => step.id)).toEqual(["1-guard-moth", "2-scout-bird"]);
+  });
+
+  it("builds a current-first route with bounded estimates", () => {
+    const route = buildPetTeamRoute([
+      task("更晚的任务", { dueAt: "2026-08-25T10:00:00.000Z", estimatedMinutes: 45 }),
+      task("当前任务", { dueAt: "2026-08-22T10:00:00.000Z", estimatedMinutes: 20 }),
+      task("第三项", { dueAt: "2026-08-23T10:00:00.000Z", estimatedMinutes: 0 }),
+      task("已完成", { status: "completed" }),
+    ], "更晚的任务");
+    expect(route.stops.map((stop) => stop.task.id)).toEqual(["更晚的任务", "当前任务", "第三项"]);
+    expect(route.stops.map((stop) => stop.estimatedMinutes)).toEqual([45, 20, 30]);
+    expect(route.stops.filter((stop) => stop.isCurrent).map((stop) => stop.task.id)).toEqual(["更晚的任务"]);
+    expect(route.totalEstimatedMinutes).toBe(95);
   });
 
   it("does not create a plan for completed or companion-less tasks", () => {

@@ -23,6 +23,18 @@ export interface PetTeamBriefingStep {
   title: string;
 }
 
+export interface PetTeamRouteStop {
+  task: Task;
+  position: number;
+  estimatedMinutes: number;
+  isCurrent: boolean;
+}
+
+export interface PetTeamRoute {
+  stops: PetTeamRouteStop[];
+  totalEstimatedMinutes: number;
+}
+
 const priorityWeight: Record<Task["priority"], number> = {
   urgent: 0,
   high: 1,
@@ -57,18 +69,52 @@ const taskDueTimestamp = (task: Task): number => {
   return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
 };
 
+const taskEstimatedMinutes = (task: Task): number => {
+  if (!Number.isFinite(task.estimatedMinutes) || (task.estimatedMinutes ?? 0) <= 0) return 30;
+  return Math.max(1, Math.round(task.estimatedMinutes ?? 30));
+};
+
+const sortPetTeamTasks = (tasks: readonly Task[]): Task[] => tasks
+  .filter((task) => task.status === "open" && !task.deletedAt)
+  .slice()
+  .sort((left, right) =>
+    taskDueTimestamp(left) - taskDueTimestamp(right) ||
+    priorityWeight[left.priority] - priorityWeight[right.priority] ||
+    taskEstimatedMinutes(left) - taskEstimatedMinutes(right) ||
+    left.updatedAt.localeCompare(right.updatedAt) ||
+    left.id.localeCompare(right.id),
+  );
+
 /** Picks one open task without inventing a second task or urgency score. */
 export function pickPetTeamTask(tasks: readonly Task[]): Task | undefined {
-  return tasks
-    .filter((task) => task.status === "open" && !task.deletedAt)
-    .slice()
-    .sort((left, right) =>
-      taskDueTimestamp(left) - taskDueTimestamp(right) ||
-      priorityWeight[left.priority] - priorityWeight[right.priority] ||
-      (left.estimatedMinutes ?? Number.POSITIVE_INFINITY) - (right.estimatedMinutes ?? Number.POSITIVE_INFINITY) ||
-      left.updatedAt.localeCompare(right.updatedAt) ||
-      left.id.localeCompare(right.id),
-    )[0];
+  return sortPetTeamTasks(tasks)[0];
+}
+
+/**
+ * Projects a short, current-first route for the huddle. This is a local
+ * preview only: it never schedules, completes, or batches the listed tasks.
+ */
+export function buildPetTeamRoute(
+  tasks: readonly Task[],
+  currentTaskId?: string,
+  maxStops = 3,
+): PetTeamRoute {
+  const sorted = sortPetTeamTasks(tasks);
+  const current = currentTaskId ? sorted.find((task) => task.id === currentTaskId) : undefined;
+  const ordered = current
+    ? [current, ...sorted.filter((task) => task.id !== current.id)]
+    : sorted;
+  const limit = Number.isFinite(maxStops) ? Math.min(5, Math.max(1, Math.floor(maxStops))) : 3;
+  const stops = ordered.slice(0, limit).map((task, index) => ({
+    task,
+    position: index + 1,
+    estimatedMinutes: taskEstimatedMinutes(task),
+    isCurrent: task.id === current?.id || (!current && index === 0),
+  }));
+  return {
+    stops,
+    totalEstimatedMinutes: stops.reduce((total, stop) => total + stop.estimatedMinutes, 0),
+  };
 }
 
 export function buildPetTeamPlan(

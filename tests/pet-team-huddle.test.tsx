@@ -97,6 +97,25 @@ describe("PetTeamHuddleCard", () => {
     expect(screen.getByRole("button", { name: "让云团担任领队，稳住节奏" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("opens a short route preview and changes only the current huddle target", () => {
+    const secondTask = { ...task, id: "task-2", title: "回复一封邮件", estimatedMinutes: 15 };
+    render(
+      <PetTeamHuddleCard
+        companions={companions}
+        tasks={[task, secondTask]}
+        onStartFocus={vi.fn().mockResolvedValue(undefined)}
+        onOpenTask={vi.fn()}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: /小队路线/u });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: /回复一封邮件/u })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /回复一封邮件/u }));
+    expect(screen.getByRole("combobox")).toHaveValue("task-2");
+    expect(screen.getByText("当前开工目标 · 约 15 分钟")).toBeInTheDocument();
+  });
+
   it("keeps the empty state honest when every task is closed", () => {
     render(
       <PetTeamHuddleCard
