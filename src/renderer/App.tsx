@@ -103,6 +103,10 @@ import type { AuditRecord, ModelPricing } from "../shared/agent-types";
 import type { QuickCaptureResult } from "../shared/quick-capture";
 import type { CalendarEvent } from "../shared/calendar-events";
 import {
+  extractCalendarActionItems,
+  type CalendarActionItemDraft,
+} from "../shared/calendar-action-items";
+import {
   buildCalendarFollowUpDraft,
   type CalendarFollowUpDraft,
 } from "../shared/calendar-follow-up";
@@ -174,6 +178,7 @@ import {
 } from "./CommandPalette";
 import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
+import { CalendarActionItemsSheet } from "./CalendarActionItemsSheet";
 import { readCalendarEvents, writeCalendarEvents } from "./calendar-store";
 import { buildMorningCalendarSummary } from "./morning-calendar";
 import { suggestMorningRollover } from "./morning-rollover";
@@ -12215,6 +12220,10 @@ function MainWindow() {
   const [dailyPlanLoading, setDailyPlanLoading] = useState(false);
   const [dailyPlanError, setDailyPlanError] = useState<string>();
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => readCalendarEvents());
+  const [calendarActionItems, setCalendarActionItems] = useState<{
+    event: CalendarEvent;
+    drafts: CalendarActionItemDraft[];
+  }>();
   const [activeReminder, setActiveReminder] = useState<ReminderDelivery>();
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastRouteRef = useRef(route);
@@ -12534,7 +12543,7 @@ function MainWindow() {
     "trash",
   ].includes(route);
   const modalOpen = Boolean(
-    newTask || commandPaletteOpen || dailyPlanOpen || activeReminder || onboarding,
+    newTask || commandPaletteOpen || dailyPlanOpen || activeReminder || onboarding || calendarActionItems,
   );
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -12711,6 +12720,14 @@ function MainWindow() {
                   setNewTaskPreset(buildCalendarFollowUpDraft(event, dateKey()));
                   setNewTask(true);
                 }}
+                onExtractActionItems={(event) => {
+                  const drafts = extractCalendarActionItems(event, dateKey());
+                  if (!drafts.length) {
+                    notify("会议备注中没有识别到明确行动项", "info");
+                    return;
+                  }
+                  setCalendarActionItems({ event, drafts });
+                }}
               />
             </div>
           )}
@@ -12841,6 +12858,40 @@ function MainWindow() {
             initialTitle={newTaskPreset?.title}
             initialNotes={newTaskPreset?.notes}
             initialPlannedDate={newTaskPreset?.plannedDate}
+          />
+        )}
+        {calendarActionItems && (
+          <CalendarActionItemsSheet
+            event={calendarActionItems.event}
+            drafts={calendarActionItems.drafts}
+            onClose={() => setCalendarActionItems(undefined)}
+            onConfirm={async (items) => {
+              let created = 0;
+              try {
+                for (const item of items) {
+                  await controller.create(
+                    {
+                      title: item.title,
+                      notes: item.notes,
+                      plannedDate: item.plannedDate || undefined,
+                      source: { type: "local" },
+                      sync: { status: "local" },
+                    },
+                    { selectCreated: false },
+                  );
+                  created += 1;
+                }
+              } catch (reason) {
+                const detail = reason instanceof Error ? reason.message : "未知错误";
+                throw new Error(
+                  created > 0
+                    ? `已创建 ${created}/${items.length} 项，剩余行动项未创建：${detail}`
+                    : detail,
+                );
+              }
+              notify(`已创建 ${created} 项会后行动任务`, "success");
+              setCalendarActionItems(undefined);
+            }}
           />
         )}
         {commandPaletteOpen && (

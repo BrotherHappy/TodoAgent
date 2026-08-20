@@ -68,4 +68,17 @@ END:VCALENDAR`);
     expect(mergeCalendarEvents(events, events)).toHaveLength(2);
     expect(mergeCalendarEvents([], [{ ...events[0]!, endAt: "invalid" }])).toEqual([]);
   });
+
+  it("keeps an unescaped description for local action-item previews", () => {
+    const events = parseIcsCalendar(`BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:actions
+DTSTART:20260820T100000
+DTEND:20260820T103000
+SUMMARY:项目同步
+DESCRIPTION:行动项：联系客户；更新方案\\n- 确认发布时间
+END:VEVENT
+END:VCALENDAR`);
+    expect(events[0]?.description).toBe("行动项：联系客户；更新方案\n- 确认发布时间");
+  });
 });

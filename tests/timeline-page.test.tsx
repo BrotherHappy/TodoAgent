@@ -91,6 +91,26 @@ describe("TimelinePage", () => {
     expect(onCreateFollowUp).toHaveBeenCalledWith(event);
   });
 
+  it("offers action-item extraction when an event has notes", () => {
+    const onExtractActionItems = vi.fn();
+    const event = {
+      id: "calendar-actions",
+      summary: "产品同步会",
+      description: "行动项：联系客户；更新方案",
+      startAt: localIsoAt(date, 10 * 60),
+      endAt: localIsoAt(date, 11 * 60),
+      allDay: false,
+      sourceName: "工作日历",
+    };
+    render(
+      <TimelinePage
+        {...props({ calendarEvents: [event], onExtractActionItems })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "从“产品同步会”提取行动项" }));
+    expect(onExtractActionItems).toHaveBeenCalledWith(event);
+  });
+
   it("moves a task to a time slot with a local time block and offers undo", async () => {
     const onMove = vi.fn(async () => "operation-2");
     const notify = vi.fn();

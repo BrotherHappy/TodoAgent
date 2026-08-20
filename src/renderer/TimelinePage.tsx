@@ -1,4 +1,4 @@
-import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, Plus, Sparkles, Upload } from "lucide-react";
+import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, ListChecks, Plus, Sparkles, Upload } from "lucide-react";
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import type { Task, UpdateTaskInput } from "../shared/models";
 import {
@@ -48,6 +48,7 @@ export interface TimelinePageProps {
   calendarEvents?: readonly CalendarEvent[];
   onCalendarEventsChange?: (events: CalendarEvent[]) => void;
   onCreateFollowUp?: (event: CalendarEvent) => void;
+  onExtractActionItems?: (event: CalendarEvent) => void;
 }
 
 const priorityClass = (task: Task): string =>
@@ -92,6 +93,7 @@ export function TimelinePage({
   calendarEvents = [],
   onCalendarEventsChange,
   onCreateFollowUp,
+  onExtractActionItems,
 }: TimelinePageProps) {
   const [date, setDate] = useState(() => localDateKey());
   const [viewMode, setViewMode] = useState<"day" | "week" | "board">("day");
@@ -800,6 +802,17 @@ export function TimelinePage({
                             onClick={() => onCreateFollowUp(sourceEvent)}
                           >
                             <Plus size={12} aria-hidden="true" /> 跟进
+                          </button>
+                        )}
+                        {onExtractActionItems && sourceEvent?.description && (
+                          <button
+                            type="button"
+                            className="timeline-calendar-action-items"
+                            aria-label={`从“${sourceEvent.summary}”提取行动项`}
+                            title="从会议备注提取行动项"
+                            onClick={() => onExtractActionItems(sourceEvent)}
+                          >
+                            <ListChecks size={12} aria-hidden="true" /> 行动项
                           </button>
                         )}
                       </div>

@@ -9,6 +9,8 @@
 export interface CalendarEvent {
   id: string;
   summary: string;
+  /** Optional provider description, kept for local action-item previews. */
+  description?: string;
   startAt: string;
   endAt: string;
   allDay: boolean;
@@ -26,6 +28,7 @@ export interface CalendarBusyBlock {
 
 const MAX_ICS_BYTES = 2 * 1024 * 1024;
 const MAX_EVENTS = 500;
+const MAX_DESCRIPTION_CHARS = 4_000;
 const DATE_VALUE_PATTERN = /^(\d{4})(\d{2})(\d{2})$/u;
 const DATE_TIME_PATTERN = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/u;
 
@@ -169,9 +172,20 @@ function eventFromProperties(
     endAt = new Date(startParsed.getTime() + (start.allDay ? 86_400_000 : 30 * 60_000)).toISOString();
   }
   const summary = unescapeIcs(values.get("SUMMARY")?.value ?? "未命名日历事件").trim() || "未命名日历事件";
+  const description = unescapeIcs(values.get("DESCRIPTION")?.value ?? "")
+    .trim()
+    .slice(0, MAX_DESCRIPTION_CHARS);
   const uid = values.get("UID")?.value.trim();
   const id = stableId(`${uid || summary}|${start.iso}|${endAt}|${sourceName}`);
-  return { id, summary, startAt: start.iso, endAt, allDay: start.allDay, sourceName };
+  return {
+    id,
+    summary,
+    ...(description ? { description } : {}),
+    startAt: start.iso,
+    endAt,
+    allDay: start.allDay,
+    sourceName,
+  };
 }
 
 /** Parse a UTF-8 iCalendar export into a small, provider-neutral model. */

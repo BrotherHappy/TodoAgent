@@ -1836,6 +1836,28 @@ select {
   outline: 2px solid var(--app-brand);
   outline-offset: 2px;
 }
+.timeline-calendar-action-items {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--app-accent) 30%, var(--app-line));
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--app-accent-strong, var(--app-brand-strong));
+  background: color-mix(in srgb, var(--app-accent-soft, var(--app-brand-soft)) 55%, transparent);
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.timeline-calendar-action-items:hover,
+.timeline-calendar-action-items:focus-visible {
+  border-color: var(--app-accent, var(--app-brand));
+  background: var(--app-accent-soft, var(--app-brand-soft));
+}
+.timeline-calendar-action-items:focus-visible {
+  outline: 2px solid var(--app-accent, var(--app-brand));
+  outline-offset: 2px;
+}
 .timeline-calendar-empty {
   display: flex;
   align-items: center;
@@ -7744,6 +7766,109 @@ select {
   gap: 12px;
   padding: 18px;
   border-bottom: 1px solid var(--app-line);
+}
+.calendar-action-items-sheet .modal-header {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: start;
+}
+.calendar-action-items-context {
+  display: grid;
+  gap: 4px;
+  margin: 3px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-brand-soft) 35%, transparent);
+}
+.calendar-action-items-context strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.calendar-action-items-context span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.calendar-action-item-list {
+  display: grid;
+  gap: 8px;
+}
+.calendar-action-item-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 9px 10px;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-surface-raised) 72%, transparent);
+}
+.calendar-action-item-row.is-selected {
+  border-color: color-mix(in srgb, var(--app-brand) 38%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 32%, var(--app-surface-raised));
+}
+.calendar-action-item-check {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 9px;
+  color: var(--app-brand-strong);
+  cursor: pointer;
+}
+.calendar-action-item-check input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.calendar-action-item-check span {
+  opacity: 0;
+}
+.calendar-action-item-check:has(input:checked) {
+  border-color: var(--app-brand);
+  background: var(--app-brand-soft);
+}
+.calendar-action-item-check:has(input:checked) span {
+  opacity: 1;
+}
+.calendar-action-item-check:has(input:focus-visible) {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 2px;
+}
+.calendar-action-item-content {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.calendar-action-item-content label {
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.calendar-action-item-content small {
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.calendar-action-items-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.calendar-action-items-note strong {
+  color: var(--app-danger);
+  font-weight: 600;
+}
+.calendar-action-items-empty {
+  padding: 18px 4px;
+  color: var(--app-text-soft);
+  text-align: center;
 }
 .modal-header .feature-icon {
   width: 44px;
