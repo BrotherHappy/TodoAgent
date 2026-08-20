@@ -4826,6 +4826,7 @@ select {
 }
 .pet-character .pet-prop,
 .pet-character .pet-season-prop,
+.pet-character .pet-weather-prop,
 .pet-character .pet-action-mark,
 .pet-character .pet-interaction-effect,
 .pet-character .pet-jump-rope,
@@ -4981,6 +4982,17 @@ select {
 .pet-season-summer .pet-season-prop-summer,
 .pet-season-autumn .pet-season-prop-autumn,
 .pet-season-winter .pet-season-prop-winter { opacity: 1; }
+.pet-weather-rain .pet-weather-prop-rain,
+.pet-weather-snow .pet-weather-prop-snow,
+.pet-weather-storm .pet-weather-prop-storm { opacity: 1; }
+.pet-weather-prop { stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.pet-weather-prop-rain { color: #4d78af; fill: #8bbcf2; stroke: #4d78af; }
+.pet-weather-prop-snow { color: #a7c8ee; fill: none; stroke: #a7c8ee; }
+.pet-weather-prop-storm { color: #535a92; fill: #8992c9; stroke: #535a92; }
+.pet-weather-line { fill: none; stroke: currentColor; }
+.pet-weather-drop { fill: none; stroke: #5d9bdb; stroke-width: 1.4; }
+.pet-weather-dot { fill: #d8efff; stroke: #8eb7dd; }
+.pet-weather-lightning { fill: #f6d36d; stroke: #b1812e; stroke-width: 1; }
 .pet-sleep-mark,
 .pet-think-mark,
 .pet-music-mark,

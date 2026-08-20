@@ -1,5 +1,6 @@
 import { useId, useRef, type CSSProperties, type PointerEvent } from "react";
 import type { PetPersonality } from "../shared/pet-types";
+import type { PetWeatherEffect } from "./pet-weather-effect";
 import {
   petActionLabels,
   type PetAction,
@@ -23,6 +24,7 @@ interface PetCharacterProps {
   palette?: PetPalette;
   outfit?: PetOutfit;
   season?: PetSeason;
+  weatherEffect?: PetWeatherEffect;
   personality?: PetPersonality;
 }
 
@@ -82,6 +84,7 @@ export function PetCharacter({
   palette = "lavender",
   outfit = "none",
   season,
+  weatherEffect,
   personality = "gentle",
 }: PetCharacterProps) {
   const rootRef = useRef<HTMLSpanElement>(null);
@@ -107,11 +110,12 @@ export function PetCharacter({
   return (
     <span
       ref={rootRef}
-      className={`pet-character pet-mood-${mood} pet-emotion-${resolvedEmotion} pet-action-${action} pet-palette-${palette} pet-outfit-${outfit} pet-personality-${personality} ${season ? `pet-season-${season}` : ""} ${compact ? "is-compact" : ""} ${interactive ? "is-interactive" : ""}`}
+      className={`pet-character pet-mood-${mood} pet-emotion-${resolvedEmotion} pet-action-${action} pet-palette-${palette} pet-outfit-${outfit} pet-personality-${personality} ${season ? `pet-season-${season}` : ""} ${weatherEffect ? `pet-weather-${weatherEffect}` : ""} ${compact ? "is-compact" : ""} ${interactive ? "is-interactive" : ""}`}
       data-pet-action={action}
       data-pet-emotion={resolvedEmotion}
       data-pet-palette={palette}
       data-pet-outfit={outfit}
+      data-pet-weather-effect={weatherEffect ?? "clear"}
       data-pet-personality={personality}
       role="img"
       aria-label={`${name}，${personalityLabels[personality]}，${moodLabels[mood]}，${emotionLabels[resolvedEmotion]}，${petActionLabels[action]}`}
@@ -242,6 +246,21 @@ export function PetCharacter({
           <g className="pet-season-prop pet-season-prop-winter">
             <path d="M35 65c13 5 29 5 44 0l-2 8c-13 5-27 5-40 0Z" />
             <path className="pet-season-line" d="M45 68v6M57 69v6M69 68v6" />
+          </g>
+
+          <g className="pet-weather-prop pet-weather-prop-rain">
+            <path d="M82 29c4-9 17-14 27-7 4 2 7 5 8 9-4-2-7-2-10 1-3-3-7-3-10 0-3-3-7-3-10-1-2-1-3-1-5-2Z" />
+            <path className="pet-weather-line" d="M97 31v15c0 5-3 7-6 5" />
+            <path className="pet-weather-drop" d="m82 48-2 5M104 48l-2 5" />
+          </g>
+          <g className="pet-weather-prop pet-weather-prop-snow">
+            <path className="pet-weather-line" d="M98 16v16M90 24h16M92 18l12 12M104 18 92 30" />
+            <circle className="pet-weather-dot" cx="84" cy="22" r="2" />
+            <circle className="pet-weather-dot" cx="108" cy="38" r="2" />
+          </g>
+          <g className="pet-weather-prop pet-weather-prop-storm">
+            <path d="M82 28c3-8 16-12 25-6 4 2 6 5 7 9-4-2-7-2-10 1-3-3-7-3-10 0-4-3-8-3-12-1Z" />
+            <path className="pet-weather-lightning" d="m99 32-7 12h6l-4 10 11-16h-6Z" />
           </g>
 
           <g className="pet-prop pet-prop-book">

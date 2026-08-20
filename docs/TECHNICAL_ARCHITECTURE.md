@@ -127,6 +127,7 @@ flowchart LR
 - 小队一起开工：`src/renderer/pet-team-huddle.ts` 从当前任务快照确定性挑选一项开放任务，并把最多 3 个房间伙伴映射到固定的侦察、稳节奏、整理和守护角色；`PetTeamHuddleCard` 允许用户临时选择领队并展示其角色提示，可展开的协作简报以领队优先、固定角色顺序逐步点亮准备节奏；同一张卡还可展开最多 3 项的当前小队路线预览，按预计时长汇总并允许切换当前开工目标；所有准备与路线操作只调用既有任务控制器，不保存伙伴分工、不复制任务、不调用额外 Agent 工具、不写入飞书或 PetService。
 - 今日明信片：`src/renderer/pet-postcard.ts` 只从当前任务快照、完成的专注历史和已有天气快照生成当天的文案、语气、统计和天气行；`PetPostcardCard` 在小窝成长首页展示并提供 Today 导航。它不持久化、不创建任务、不写入 PetService、Agent 或飞书，也不把文案升级为长期记忆。
 - 多日天气预览：`WeatherService` 在同一份用户手工城市请求中读取最多 3 个 provider-local 日期，并将低/高温、降水、天气代码和严重标记写入 `WeatherSnapshot.forecast`；该字段可选，旧版天气缓存仍可读取。`src/renderer/pet-weather-forecast.ts` 只把这些结构化事实投影成“今天/明天/后天”卡片，`PetWeatherForecast` 在小窝天气卡中展示；预报缺失、异常或缓存过期只显示可用事实与缓存状态，不由模型推断、不读取定位、不写入任务、PetService、Agent 或 Feishu payload。
+- 宠物天气反应：`src/renderer/pet-weather-effect.ts` 只依据 `WeatherSnapshot.conditionCode` 与 `severe` 白名单映射 `rain` / `snow` / `storm`，`PetCharacter` 用固定 SVG 雨伞、雪花或雷云闪电和 `data-pet-weather-effect` 表达，不使用天气文案或模型推断；晴朗/未知状态为空，反应不持久化、不进入 PetService、任务、提醒、Agent 或 Feishu payload，缓存快照仍沿用天气卡的过期标记。
 - 桌面天气胶囊：`src/renderer/pet-weather-chip.ts` 将已有 `WeatherSnapshot` 纯函数化为温度、状况、降水、缓存和严重天气提示；`FloatingWindow` 仅在天气开关开启、已有快照且不是仅宠物模式/小游戏时显示可点击胶囊，点击切换到既有小窗天气卡片。隐私模式只隐藏城市文案；该层不读取定位、不请求新网络、不创建任务、不改变 PetState 或 Feishu payload。
 - `src/renderer/pet-collection.ts` 与 `PetCollectionCard` 只把 `PetSnapshot.inventory` 映射为固定收藏目录，合并数量、标记解锁状态并显示来源提示；它不保存新字段、不复制任务或奖励，也不参与成长、权限或飞书同步。
 - `src/renderer/pet-project-chapters.ts` 与 `PetProjectChapters` 从同一份任务快照和项目实体投影最多 4 个活跃章节，按完成比例和开放任务选择下一步；它只导航到既有项目/任务入口，不创建章节实体、不维护第二套进度、不触发同步。

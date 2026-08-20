@@ -20,4 +20,11 @@ describe("PetCharacter personality", () => {
     expect(pet).toHaveAttribute("data-pet-personality", "calm");
     expect(pet).toHaveAttribute("aria-label", expect.stringContaining("正在陪伴你"));
   });
+
+  it("exposes a static weather cue from structured weather state", () => {
+    render(<PetCharacter name="小序" weatherEffect="rain" />);
+    const pet = screen.getByRole("img", { name: /小序/u });
+    expect(pet).toHaveClass("pet-weather-rain");
+    expect(pet).toHaveAttribute("data-pet-weather-effect", "rain");
+  });
 });

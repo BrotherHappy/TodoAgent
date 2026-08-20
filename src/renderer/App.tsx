@@ -326,6 +326,7 @@ import { ProjectPage } from "./ProjectPage";
 import { ListPage } from "./ListPage";
 import { petSeasonalEventForDate } from "./pet-season";
 import { buildPetWeatherChip } from "./pet-weather-chip";
+import { petWeatherEffectFor, type PetWeatherEffect } from "./pet-weather-effect";
 import {
   applyCompanionStrategy,
   companionStrategyLabels,
@@ -7641,6 +7642,7 @@ function PetHomePage({
   onReviewAction: (task: Task, action: PetReviewAction) => Promise<void>;
 }) {
   const { snapshot, weather, refresh, setWeather } = usePetData();
+  const petWeatherEffect = petWeatherEffectFor(weather);
   const roomThemePacks = useInstalledPetRoomThemePacks();
   const [seasonalEvents, setSeasonalEvents] = useState(defaultSettings.pet.seasonalEvents);
   const legacyHabitMigrationStarted = useRef(false);
@@ -7845,6 +7847,7 @@ function PetHomePage({
             palette={snapshot.appearance.palette}
             outfit={snapshot.appearance.outfit}
             personality={profile.personality}
+            weatherEffect={petWeatherEffect}
           />
         </div>
       </header>
@@ -8109,6 +8112,7 @@ function PetHomePage({
               palette={snapshot.appearance.palette}
               outfit={snapshot.appearance.outfit}
               personality={profile.personality}
+              weatherEffect={petWeatherEffect}
             />
           </div>
           <div className="pet-room-controls">
@@ -8418,6 +8422,7 @@ function PetHomePage({
               palette={snapshot.appearance.palette}
               outfit="explorer"
               personality={profile.personality}
+              weatherEffect={petWeatherEffect}
             />
           </div>
           <article className="pet-adventure-card">
@@ -14238,6 +14243,7 @@ function FloatingPetCoopGame({
   outfit,
   personality,
   season,
+  weatherEffect,
   positionLocked,
   onDragStart,
   onDragMove,
@@ -14252,6 +14258,7 @@ function FloatingPetCoopGame({
   outfit: PetOutfit;
   personality: PetPersonality;
   season?: PetSeason;
+  weatherEffect?: PetWeatherEffect;
   positionLocked: boolean;
   onDragStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onDragMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -14462,6 +14469,7 @@ function FloatingPetCoopGame({
               outfit={outfit}
               personality={personality}
               season={season}
+              weatherEffect={weatherEffect}
             />
           </div>
           <div className="pet-stretch-instruction">
@@ -14521,6 +14529,7 @@ function FloatingPetCoopGame({
             outfit={outfit}
             personality={personality}
             season={season}
+            weatherEffect={weatherEffect}
           />
           <strong>我们一起跳过了 {jumpStats.score} 下</strong>
           <p>
@@ -14567,6 +14576,7 @@ function FloatingPetCoopGame({
             outfit={outfit}
             personality={personality}
             season={season}
+            weatherEffect={weatherEffect}
           />
         </div>
         <div className="pet-rope-cue">
@@ -14753,6 +14763,9 @@ function FloatingWindow() {
         : petSettings.pet.actionPack;
   const petSeasonEvent = petSettings.pet.seasonalEvents
     ? petSeasonalEventForDate()
+    : undefined;
+  const petWeatherEffect = petSettings.weather.enabled
+    ? petWeatherEffectFor(petData.weather)
     : undefined;
   const petWeatherChip =
     !petOnly && !floatingGame && petSettings.weather.enabled
@@ -16303,6 +16316,7 @@ function FloatingWindow() {
               outfit={petAppearance.outfit}
               personality={petPersonality}
               season={petSeason}
+              weatherEffect={petWeatherEffect}
             />
           </button>
           {taskDropActive && draggedTaskId && (
@@ -16703,6 +16717,7 @@ function FloatingWindow() {
             outfit={petAppearance.outfit}
             personality={petPersonality}
             season={petSeason}
+            weatherEffect={petWeatherEffect}
             positionLocked={floatingLocked}
             onDragStart={beginFloatingHandleDrag}
             onDragMove={updateFloatingHandleDrag}
@@ -17157,6 +17172,7 @@ function FloatingWindow() {
                     outfit={petAppearance.outfit}
                     personality={petPersonality}
                     season={petSeason}
+                    weatherEffect={petWeatherEffect}
                   />
                   <p className="pet-focus-kicker">
                     {petFocus
@@ -17276,6 +17292,7 @@ function FloatingWindow() {
                       outfit={petAppearance.outfit}
                       personality={petPersonality}
                       season={petSeason}
+                      weatherEffect={petWeatherEffect}
                     />
                     <div>
                       <span>Todo Pet</span>
