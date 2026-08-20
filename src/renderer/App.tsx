@@ -156,6 +156,7 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { PetWeatherForecast } from "./PetWeatherForecast";
 import {
   conversationTitle,
   filterStoredAgentConversations,
@@ -7896,31 +7897,34 @@ function PetHomePage({
             </div>
           </section>
           <section className="pet-weather-card">
-            <div className="pet-weather-icon">
-              {weather?.conditionLabel.includes("雨") ? "☂" : weather?.conditionLabel.includes("雪") ? "❄" : "☀"}
+            <div className="pet-weather-main">
+              <div className="pet-weather-icon">
+                {weather?.conditionLabel.includes("雨") ? "☂" : weather?.conditionLabel.includes("雪") ? "❄" : "☀"}
+              </div>
+              <div>
+                <strong>{weather ? `${Math.round(weather.temperatureC)}℃ · ${weather.conditionLabel}` : "天气未开启"}</strong>
+                <p>
+                  {weather
+                    ? `${weather.city}${weather.stale ? " · 缓存已过期" : ` · 降水 ${weather.precipitationProbability ?? "—"}%`}`
+                    : "可在设置中填写城市，不需要精确定位。"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                disabled={busy}
+                aria-label="刷新天气"
+                onClick={() =>
+                  void run(async () => {
+                    const next = await window.desktopApi?.pet.refreshWeather(true);
+                    setWeather(next);
+                  }, "天气已更新")
+                }
+              >
+                <RefreshCw size={15} />
+              </button>
             </div>
-            <div>
-              <strong>{weather ? `${Math.round(weather.temperatureC)}℃ · ${weather.conditionLabel}` : "天气未开启"}</strong>
-              <p>
-                {weather
-                  ? `${weather.city}${weather.stale ? " · 缓存已过期" : ` · 降水 ${weather.precipitationProbability ?? "—"}%`}`
-                  : "可在设置中填写城市，不需要精确定位。"}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="icon-button"
-              disabled={busy}
-              aria-label="刷新天气"
-              onClick={() =>
-                void run(async () => {
-                  const next = await window.desktopApi?.pet.refreshWeather(true);
-                  setWeather(next);
-                }, "天气已更新")
-              }
-            >
-              <RefreshCw size={15} />
-            </button>
+            <PetWeatherForecast forecast={weather?.forecast} stale={weather?.stale} />
           </section>
           <section className="pet-attributes-card">
             <h2>成长属性</h2>

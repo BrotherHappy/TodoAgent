@@ -46,10 +46,11 @@ describe("WeatherService", () => {
             weather_code: 61,
           },
           daily: {
-            temperature_2m_max: [33],
-            temperature_2m_min: [25],
-            precipitation_probability_max: [70],
-            weather_code: [61],
+            time: ["2026-08-15", "2026-08-16", "2026-08-17"],
+            temperature_2m_min: [25, 24, 26],
+            temperature_2m_max: [33, 32, 34],
+            precipitation_probability_max: [70, 40, 15],
+            weather_code: [61, 2, 0],
           },
         }),
       );
@@ -68,7 +69,38 @@ describe("WeatherService", () => {
       precipitationProbability: 70,
       stale: false,
     });
+    expect(weather?.forecast).toEqual([
+      {
+        date: "2026-08-15",
+        conditionCode: 61,
+        conditionLabel: "雨",
+        lowC: 25,
+        highC: 33,
+        precipitationProbability: 70,
+        severe: false,
+      },
+      {
+        date: "2026-08-16",
+        conditionCode: 2,
+        conditionLabel: "少云",
+        lowC: 24,
+        highC: 32,
+        precipitationProbability: 40,
+        severe: false,
+      },
+      {
+        date: "2026-08-17",
+        conditionCode: 0,
+        conditionLabel: "晴",
+        lowC: 26,
+        highC: 34,
+        precipitationProbability: 15,
+        severe: false,
+      },
+    ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    const forecastUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(forecastUrl.searchParams.get("forecast_days")).toBe("3");
     await service.refresh();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     now += 46 * 60_000;

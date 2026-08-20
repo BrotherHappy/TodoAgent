@@ -6045,6 +6045,14 @@ select {
 .pet-level-card,
 .pet-weather-card {
   min-height: 116px;
+}
+.pet-weather-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 14px;
+}
+.pet-weather-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -6073,6 +6081,84 @@ select {
   margin: 4px 0 0;
   color: var(--app-text-soft);
   font-size: 12px;
+}
+.pet-weather-forecast {
+  border-top: 1px solid color-mix(in srgb, var(--app-line) 78%, transparent);
+  padding-top: 12px;
+}
+.pet-weather-forecast-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.pet-weather-forecast-heading strong {
+  color: var(--app-text-soft);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.pet-weather-forecast-heading span {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.pet-weather-forecast-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.pet-weather-forecast-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "day icon"
+    "condition condition"
+    "temperature temperature"
+    "precipitation precipitation";
+  gap: 3px 6px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--app-line) 72%, transparent);
+  border-radius: 13px;
+  padding: 8px 9px;
+  background: color-mix(in srgb, var(--app-glass-soft) 78%, transparent);
+}
+.pet-weather-forecast-item.is-severe {
+  border-color: color-mix(in srgb, var(--app-warning) 46%, var(--app-line));
+  background: color-mix(in srgb, #fff1d0 38%, var(--app-glass-soft));
+}
+.pet-weather-forecast-day {
+  grid-area: day;
+  overflow: hidden;
+  color: var(--app-text-soft);
+  font-size: 10px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-weather-forecast-icon {
+  grid-area: icon;
+  justify-self: end;
+  font-size: 15px;
+  line-height: 1;
+}
+.pet-weather-forecast-condition {
+  grid-area: condition;
+  overflow: hidden;
+  color: var(--app-text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-weather-forecast-item > strong {
+  grid-area: temperature;
+  color: var(--app-brand-strong);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pet-weather-forecast-item > small {
+  grid-area: precipitation;
+  color: var(--app-text-faint);
+  font-size: 9px;
 }
 .pet-level-track {
   height: 7px;

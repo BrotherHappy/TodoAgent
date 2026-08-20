@@ -313,6 +313,17 @@ export interface PetSnapshot extends Omit<PetState, "focus"> {
   focus?: FocusSessionView;
 }
 
+export interface WeatherForecastDay {
+  /** Provider-local calendar date, formatted as YYYY-MM-DD. */
+  date: string;
+  conditionCode: number;
+  conditionLabel: string;
+  lowC?: number;
+  highC?: number;
+  precipitationProbability?: number;
+  severe: boolean;
+}
+
 export interface WeatherSnapshot {
   city: string;
   latitude: number;
@@ -324,6 +335,8 @@ export interface WeatherSnapshot {
   lowC?: number;
   highC?: number;
   precipitationProbability?: number;
+  /** Optional multi-day data; old cached snapshots may not contain it. */
+  forecast?: WeatherForecastDay[];
   severe: boolean;
   fetchedAt: string;
   expiresAt: string;
