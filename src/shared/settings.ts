@@ -107,6 +107,8 @@ export interface PetBehaviorSettings {
   proactiveMessages: boolean;
   /** Derive a coarse typing/reading posture from system idle time; off by default. */
   inputReactionsEnabled: boolean;
+  /** Pause proactive companion behavior without hiding the pet or changing tasks. */
+  vacationMode: boolean;
   wellbeingReminders: boolean;
   autoDiary: boolean;
   relationshipMemory: boolean;
@@ -271,6 +273,7 @@ export const defaultSettings: AppSettings = {
     interactionsEnabled: true,
     proactiveMessages: true,
     inputReactionsEnabled: false,
+    vacationMode: false,
     wellbeingReminders: true,
     autoDiary: true,
     relationshipMemory: false,

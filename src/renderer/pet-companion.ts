@@ -48,7 +48,7 @@ export function shouldSuppressPetProactive(
 ): boolean {
   const { settings, now } = context;
   if (!settings.pet.proactiveMessages) return true;
-  if (settings.pet.meetingMode || context.focusActive) return true;
+  if (settings.pet.vacationMode || settings.pet.meetingMode || context.focusActive) return true;
   if (context.fullscreen && settings.floating.hideInFullscreen) return true;
   if (withinQuietHours(settings, now)) return true;
   const mutedUntil = settings.notifications.mutedUntil;

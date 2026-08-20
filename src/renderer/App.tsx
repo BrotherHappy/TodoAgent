@@ -9750,6 +9750,22 @@ function SettingsPage({
                 label="工作时回应"
               />
             </div>
+            <div className="settings-row">
+              <div>
+                <strong>休假模式</strong>
+                <p>保留宠物、任务、同步和手动互动；暂停主动陪伴、工作时回应和自动日记，不产生连续签到压力</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.vacationMode}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, vacationMode: value },
+                  }, value ? "已进入休假模式" : "已恢复陪伴")
+                }
+                label="休假模式"
+              />
+            </div>
             <div className="settings-subheading">
               <span>可安装动作包</span>
               <p>动作包只是一组已有待机动作；可以调节动作冷却和出现频率，不允许脚本、网络请求、文件读取或外部代码。</p>
@@ -14886,7 +14902,11 @@ function FloatingWindow() {
   const petBehaviorRef = useRef(petBehavior);
   petBehaviorRef.current = petBehavior;
   useEffect(() => {
-    if (!window.desktopApi || !petSettings.pet.inputReactionsEnabled) {
+    if (
+      !window.desktopApi ||
+      !petSettings.pet.inputReactionsEnabled ||
+      petSettings.pet.vacationMode
+    ) {
       return undefined;
     }
     return window.desktopApi.events.onPetInputActivity((event) => {
@@ -14911,11 +14931,11 @@ function FloatingWindow() {
     if (focusShieldNotice) setFocusShieldBubbleCollapsed(false);
   }, [focusShieldNotice?.at]);
   useEffect(() => {
-    if (!privacyMode) return;
+    if (!privacyMode && !petSettings.pet.vacationMode) return;
     proactiveMessageRef.current = undefined;
     setProactiveTask(undefined);
     petBehavior.dismiss();
-  }, [privacyMode]);
+  }, [petSettings.pet.vacationMode, privacyMode]);
   useEffect(() => {
     const engine = new FocusEnvironmentSound();
     focusEnvironmentSoundRef.current = engine;
@@ -15445,6 +15465,18 @@ function FloatingWindow() {
             ...settings.floating,
             [preference]: !settings.floating[preference],
           },
+        }),
+      )
+      .finally(closeFloatingContextMenu);
+  }
+  function togglePetVacationMode(enabled: boolean): void {
+    if (!window.desktopApi) return;
+    void window.desktopApi.settings
+      .get()
+      .then((settings) =>
+        window.desktopApi!.settings.replace({
+          ...settings,
+          pet: { ...settings.pet, vacationMode: enabled },
         }),
       )
       .finally(closeFloatingContextMenu);
@@ -16841,6 +16873,16 @@ function FloatingWindow() {
                 <EyeOff size={16} />
                 <span>{petSettings.pet.meetingMode ? "退出 Boss Mode" : "进入 Boss Mode"}</span>
                 <small>{petSettings.pet.meetingMode ? "从托盘恢复" : "隐藏宠物并暂停宠物主动消息"}</small>
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={petSettings.pet.vacationMode}
+                onClick={() => togglePetVacationMode(!petSettings.pet.vacationMode)}
+              >
+                <Sun size={16} />
+                <span>{petSettings.pet.vacationMode ? "结束休假模式" : "进入休假模式"}</span>
+                <small>{petSettings.pet.vacationMode ? "恢复宠物主动陪伴" : "保留宠物，暂停主动消息"}</small>
               </button>
               <div className="floating-context-divider" role="separator" />
               <button

@@ -136,6 +136,7 @@ const settingsSchema = z
         interactionsEnabled: z.boolean(),
         proactiveMessages: z.boolean(),
         inputReactionsEnabled: z.boolean().default(false),
+        vacationMode: z.boolean().default(false),
         wellbeingReminders: z.boolean(),
         autoDiary: z.boolean(),
         relationshipMemory: z.boolean(),

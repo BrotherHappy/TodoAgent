@@ -88,6 +88,7 @@ describe('SettingsService', () => {
     delete legacy.floating.scalePercent;
     delete legacy.floating.mousePassthrough;
     delete legacy.pet.inputReactionsEnabled;
+    delete legacy.pet.vacationMode;
     legacy.floating.shape = 'orb';
     legacy.floating.topMode = 'focus-only';
     await writeFile(settingsPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8');
@@ -100,6 +101,7 @@ describe('SettingsService', () => {
     expect(migrated.get().floating.scalePercent).toBe(100);
     expect(migrated.get().floating.mousePassthrough).toBe(false);
     expect(migrated.get().pet.inputReactionsEnabled).toBe(false);
+    expect(migrated.get().pet.vacationMode).toBe(false);
     const persistedMigration = JSON.parse(await readFile(settingsPath, 'utf8')) as {
       floating: Record<string, unknown>;
       pet: Record<string, unknown>;
@@ -109,6 +111,7 @@ describe('SettingsService', () => {
     expect(persistedMigration.floating.scalePercent).toBe(100);
     expect(persistedMigration.floating.mousePassthrough).toBe(false);
     expect(persistedMigration.pet.inputReactionsEnabled).toBe(false);
+    expect(persistedMigration.pet.vacationMode).toBe(false);
     expect(persistedMigration.floating).not.toHaveProperty('shape');
     const replaced = await migrated.replace({
       ...migrated.get(),
@@ -121,6 +124,7 @@ describe('SettingsService', () => {
       pet: {
         ...migrated.get().pet,
         inputReactionsEnabled: true,
+        vacationMode: true,
       },
     });
     expect(replaced.floating.topMode).toBe('always');
@@ -131,6 +135,7 @@ describe('SettingsService', () => {
     expect(reloaded.get().floating.topMode).toBe('always');
     expect(reloaded.get().floating.mousePassthrough).toBe(true);
     expect(reloaded.get().pet.inputReactionsEnabled).toBe(true);
+    expect(reloaded.get().pet.vacationMode).toBe(true);
   });
 
   it('clamps malformed on-disk hover delays to the supported range', async () => {

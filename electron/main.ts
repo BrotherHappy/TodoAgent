@@ -1317,10 +1317,12 @@ async function startApplication(): Promise<void> {
       petService!.completeAdventure(adventureId, choiceId),
     recordMiniGame: (input) => petService!.recordMiniGame(input),
     recordProactiveMessage: (input) =>
-      petService!.recordProactiveMessage(input, {
-        dailyLimit: settingsService!.get().pet.proactiveDailyLimit,
-        localDate: localDateKey(),
-      }),
+      settingsService!.get().pet.vacationMode
+        ? Promise.resolve(petService!.snapshot())
+        : petService!.recordProactiveMessage(input, {
+            dailyLimit: settingsService!.get().pet.proactiveDailyLimit,
+            localDate: localDateKey(),
+          }),
     startFocus: async (request) => {
       const task = request.taskId
         ? await tasks.getTask(request.taskId, false)
@@ -1622,6 +1624,7 @@ async function startApplication(): Promise<void> {
     const settings = settingsService?.get();
     if (
       !settings?.pet.inputReactionsEnabled ||
+      settings.pet.vacationMode ||
       !settings.floating.enabled ||
       settings.floating.privacyMode ||
       settings.pet.meetingMode
@@ -1664,7 +1667,10 @@ async function startApplication(): Promise<void> {
     .listTasks({ statuses: ["completed"], includeDeleted: false })
     .then(async (items) => {
       await petService?.reconcileCompletedTasks(items);
-      if (!settingsService?.get().pet.autoDiary) return;
+      if (
+        !settingsService?.get().pet.autoDiary ||
+        settingsService.get().pet.vacationMode
+      ) return;
       const localDate = localDateKey();
       const weather = weatherService?.get();
       await petService?.generateDiary({

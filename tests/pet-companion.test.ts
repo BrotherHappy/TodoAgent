@@ -35,6 +35,15 @@ const makeTask = (id: string, title: string, overrides: Partial<Task> = {}): Tas
 describe("pet companion proactive behavior", () => {
   it("respects focus, meeting, mute, fullscreen and overnight quiet hours", () => {
     const settings = structuredClone(defaultSettings);
+    settings.pet.vacationMode = true;
+    expect(
+      shouldSuppressPetProactive({
+        settings,
+        now: new Date("2026-08-15T12:00:00"),
+        focusActive: false,
+      }),
+    ).toBe(true);
+    settings.pet.vacationMode = false;
     settings.notifications.quietHoursEnabled = true;
     settings.notifications.quietHoursStart = "22:00";
     settings.notifications.quietHoursEnd = "08:00";
