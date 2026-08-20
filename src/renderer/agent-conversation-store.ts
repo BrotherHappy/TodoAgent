@@ -21,6 +21,10 @@ export interface StoredAgentConversation {
   schemaVersion: 1;
   conversationId: string;
   updatedAt: string;
+  /** Optional local label; never sent to the model or exported as task data. */
+  title?: string;
+  /** Local pin marker used to keep important sessions at the top. */
+  pinnedAt?: string;
   messages: StoredAgentMessage[];
 }
 
@@ -63,6 +67,18 @@ const safeText = (value: unknown): string | undefined => {
   const sanitized = value.replace(/\0/gu, "");
   if (sanitized.length === 0 || sanitized.length > MAX_MESSAGE_LENGTH) return undefined;
   return sanitized;
+};
+
+const safeConversationTitle = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const sanitized = value.replace(/[\0\r\n]+/gu, " ").replace(/\s+/gu, " ").trim().slice(0, 80);
+  return sanitized || undefined;
+};
+
+const safePinnedAt = (value: unknown): string | undefined => {
+  if (typeof value !== "string" || value.length > 40) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : undefined;
 };
 
 const parseReceipt = (value: unknown): AgentFeishuSyncReceipt | undefined => {
@@ -121,6 +137,8 @@ const parseConversation = (value: unknown): StoredAgentConversation | undefined 
       typeof value.updatedAt === "string"
         ? value.updatedAt
         : new Date(0).toISOString(),
+    title: safeConversationTitle(value.title),
+    pinnedAt: safePinnedAt(value.pinnedAt),
     messages,
   };
 };
@@ -157,6 +175,8 @@ export function writeStoredAgentConversation(
       schemaVersion: SCHEMA_VERSION,
       conversationId: conversation.conversationId,
       updatedAt: conversation.updatedAt,
+      title: safeConversationTitle(conversation.title),
+      pinnedAt: safePinnedAt(conversation.pinnedAt),
       messages,
     }));
     return true;
@@ -177,12 +197,22 @@ const sortConversations = (
   conversations: readonly StoredAgentConversation[],
 ): StoredAgentConversation[] =>
   [...conversations]
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .sort((left, right) => {
+      const leftPinned = left.pinnedAt ? 1 : 0;
+      const rightPinned = right.pinnedAt ? 1 : 0;
+      if (leftPinned !== rightPinned) return rightPinned - leftPinned;
+      if (left.pinnedAt && right.pinnedAt && left.pinnedAt !== right.pinnedAt) {
+        return right.pinnedAt.localeCompare(left.pinnedAt);
+      }
+      return right.updatedAt.localeCompare(left.updatedAt);
+    })
     .slice(0, MAX_SESSIONS);
 
 export function conversationTitle(
-  conversation: Pick<StoredAgentConversation, "messages">,
+  conversation: Pick<StoredAgentConversation, "messages"> & { title?: string },
 ): string {
+  const customTitle = safeConversationTitle(conversation.title);
+  if (customTitle) return customTitle;
   const firstUserMessage = conversation.messages.find((message) => message.role === "user");
   const source = firstUserMessage?.text ?? conversation.messages[0]?.text ?? "新对话";
   const title = source.replace(/\s+/gu, " ").trim().slice(0, 56);
@@ -272,12 +302,49 @@ export function upsertStoredAgentConversation(
   legacyStorageKey = DEFAULT_STORAGE_KEY,
 ): boolean {
   const current = readStoredAgentConversationCollection(storageKey, legacyStorageKey);
+  const existing = current.conversations.find(
+    (item) => item.conversationId === conversation.conversationId,
+  );
+  const mergedConversation: StoredAgentConversation = {
+    ...conversation,
+    title: conversation.title ?? existing?.title,
+    pinnedAt: conversation.pinnedAt ?? existing?.pinnedAt,
+  };
   const conversations = [
-    conversation,
+    mergedConversation,
     ...current.conversations.filter((item) => item.conversationId !== conversation.conversationId),
   ];
   return writeStoredAgentConversationCollection(
     { schemaVersion: SCHEMA_VERSION, activeConversationId, conversations },
+    storageKey,
+  );
+}
+
+export function updateStoredAgentConversationMetadata(
+  conversationId: string,
+  patch: { title?: string; pinned?: boolean },
+  storageKey = DEFAULT_SESSIONS_STORAGE_KEY,
+  legacyStorageKey = DEFAULT_STORAGE_KEY,
+): boolean {
+  const collection = readStoredAgentConversationCollection(storageKey, legacyStorageKey);
+  const target = collection.conversations.find((item) => item.conversationId === conversationId);
+  if (!target) return false;
+  const title = patch.title === undefined ? target.title : safeConversationTitle(patch.title);
+  const pinnedAt =
+    patch.pinned === undefined
+      ? target.pinnedAt
+      : patch.pinned
+        ? target.pinnedAt ?? new Date().toISOString()
+        : undefined;
+  return writeStoredAgentConversationCollection(
+    {
+      ...collection,
+      conversations: collection.conversations.map((conversation) =>
+        conversation.conversationId === conversationId
+          ? { ...conversation, title, pinnedAt }
+          : conversation,
+      ),
+    },
     storageKey,
   );
 }
@@ -312,6 +379,7 @@ export function agentConversationMarkdown(
   const lines = [
     "# Todo Agent 对话",
     "",
+    `- 标题：${conversationTitle(conversation)}`,
     `- 会话：${conversation.conversationId}`,
     `- 更新时间：${conversation.updatedAt}`,
     "- 范围：仅本机导出；不会包含 API Key、飞书 Token 或本地文件路径。",

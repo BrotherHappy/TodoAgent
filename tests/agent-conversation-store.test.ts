@@ -7,6 +7,8 @@ import {
   filterStoredAgentConversations,
   readStoredAgentConversationCollection,
   readStoredAgentConversation,
+  updateStoredAgentConversationMetadata,
+  upsertStoredAgentConversation,
   writeStoredAgentConversationCollection,
   writeStoredAgentConversation,
 } from "../src/renderer/agent-conversation-store";
@@ -174,5 +176,41 @@ describe("agent conversation store", () => {
       sessions[1].conversationId,
     );
     expect(filterStoredAgentConversations(sessions, "  ")).toHaveLength(2);
+  });
+
+  it("keeps local session titles and pinned sessions stable across message updates", () => {
+    const sessions = [
+      {
+        schemaVersion: 1 as const,
+        conversationId,
+        updatedAt: "2026-08-21T08:00:00.000Z",
+        messages: [{ role: "user" as const, text: "整理飞书项目" }],
+      },
+      {
+        schemaVersion: 1 as const,
+        conversationId: "123e4567-e89b-12d3-a456-426614174001",
+        updatedAt: "2026-08-21T09:00:00.000Z",
+        messages: [{ role: "user" as const, text: "写发布说明" }],
+      },
+    ];
+    expect(writeStoredAgentConversationCollection({ schemaVersion: 1, conversations: sessions })).toBe(true);
+    expect(updateStoredAgentConversationMetadata(conversationId, { title: "本周发布" })).toBe(true);
+    expect(updateStoredAgentConversationMetadata(conversationId, { pinned: true })).toBe(true);
+    expect(readStoredAgentConversationCollection().conversations[0]).toMatchObject({
+      conversationId,
+      title: "本周发布",
+      pinnedAt: expect.any(String),
+    });
+    expect(upsertStoredAgentConversation({
+      schemaVersion: 1,
+      conversationId,
+      updatedAt: "2026-08-21T10:00:00.000Z",
+      messages: [{ role: "user", text: "追加一个发布检查" }],
+    })).toBe(true);
+    expect(readStoredAgentConversationCollection().conversations[0]).toMatchObject({
+      conversationId,
+      title: "本周发布",
+      pinnedAt: expect.any(String),
+    });
   });
 });

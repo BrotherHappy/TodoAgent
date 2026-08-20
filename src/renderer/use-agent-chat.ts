@@ -14,6 +14,7 @@ import {
   conversationTitle,
   readStoredAgentConversationCollection,
   removeStoredAgentConversation,
+  updateStoredAgentConversationMetadata,
   type StoredAgentConversation,
   writeStoredAgentConversation,
   writeStoredAgentConversationCollection,
@@ -550,6 +551,58 @@ export function useAgentChat({
     ],
   );
 
+  const renameConversation = useCallback(
+    (targetConversationId: string, title: string): boolean => {
+      if (!persistConversation || sendingRef.current) return false;
+      const updated = updateStoredAgentConversationMetadata(
+        targetConversationId,
+        { title },
+        conversationSessionsStorageKey,
+        conversationStorageKey,
+      );
+      if (updated) {
+        setConversationSessions(
+          readStoredAgentConversationCollection(
+            conversationSessionsStorageKey,
+            conversationStorageKey,
+          ).conversations,
+        );
+      }
+      return updated;
+    },
+    [conversationSessionsStorageKey, conversationStorageKey, persistConversation],
+  );
+
+  const toggleConversationPinned = useCallback(
+    (targetConversationId: string): boolean => {
+      if (!persistConversation || sendingRef.current) return false;
+      const current = readStoredAgentConversationCollection(
+        conversationSessionsStorageKey,
+        conversationStorageKey,
+      );
+      const target = current.conversations.find(
+        (conversation) => conversation.conversationId === targetConversationId,
+      );
+      if (!target) return false;
+      const updated = updateStoredAgentConversationMetadata(
+        targetConversationId,
+        { pinned: !target.pinnedAt },
+        conversationSessionsStorageKey,
+        conversationStorageKey,
+      );
+      if (updated) {
+        setConversationSessions(
+          readStoredAgentConversationCollection(
+            conversationSessionsStorageKey,
+            conversationStorageKey,
+          ).conversations,
+        );
+      }
+      return updated;
+    },
+    [conversationSessionsStorageKey, conversationStorageKey, persistConversation],
+  );
+
   const exportConversation = useCallback((): string => {
     const storedMessages = storedMessagesFromUi(messages);
     return agentConversationMarkdown({
@@ -716,6 +769,8 @@ export function useAgentChat({
     clearConversation,
     switchConversation,
     removeConversation,
+    renameConversation,
+    toggleConversationPinned,
     exportConversation,
   };
 }

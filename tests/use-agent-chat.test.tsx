@@ -544,6 +544,16 @@ describe("useAgentChat", () => {
     await waitFor(() => expect(result.current.conversationSessions).toHaveLength(2));
 
     act(() => {
+      expect(result.current.renameConversation(oldConversationId, "项目发布计划")).toBe(true);
+      expect(result.current.toggleConversationPinned(oldConversationId)).toBe(true);
+    });
+    expect(result.current.conversationSessions[0]).toMatchObject({
+      conversationId: oldConversationId,
+      title: "项目发布计划",
+      pinnedAt: expect.any(String),
+    });
+
+    act(() => {
       expect(result.current.switchConversation(oldConversationId)).toBe(true);
     });
     expect(result.current.conversationId).toBe(oldConversationId);

@@ -44,7 +44,10 @@ import {
   MoreHorizontal,
   PanelTop,
   Pause,
+  Pencil,
   Play,
+  Pin,
+  PinOff,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -5699,12 +5702,16 @@ function AgentPage({
     clearConversation,
     switchConversation,
     removeConversation,
+    renameConversation,
+    toggleConversationPinned,
     exportConversation,
   } = chat;
   const agentThreadRef = useRef<HTMLElement>(null);
   const chatFollowsOutputRef = useRef(true);
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [conversationSearch, setConversationSearch] = useState("");
+  const [editingConversationId, setEditingConversationId] = useState<string>();
+  const [conversationTitleDraft, setConversationTitleDraft] = useState("");
   const visibleConversationSessions = filterStoredAgentConversations(
     conversationSessions,
     conversationSearch,
@@ -5815,6 +5822,7 @@ function AgentPage({
               onClick={() => {
                 setConversationMenuOpen((value) => !value);
                 setConversationSearch("");
+                setEditingConversationId(undefined);
               }}
               title="切换本机保存的 Agent 会话"
             >
@@ -5827,6 +5835,7 @@ function AgentPage({
               onClick={() => {
                 setConversationMenuOpen(false);
                 setConversationSearch("");
+                setEditingConversationId(undefined);
                 newConversation();
               }}
               title="开始新的本机会话；当前会话会保留在本机历史中"
@@ -5895,20 +5904,82 @@ function AgentPage({
               <div className="agent-session-list">
                 {visibleConversationSessions.map((session) => (
                   <div className="agent-session-row" key={session.conversationId}>
-                    <button
-                      type="button"
-                      className={`agent-session-select ${session.conversationId === conversationId ? "is-active" : ""}`}
-                      disabled={isSending || session.conversationId === conversationId}
-                      onClick={() => {
-                        if (switchConversation(session.conversationId)) {
-                          setConversationMenuOpen(false);
-                          setConversationSearch("");
-                        }
-                      }}
-                    >
-                      <strong>{conversationTitle(session)}</strong>
-                      <small>{formatDateTime(session.updatedAt)}</small>
-                    </button>
+                    {editingConversationId === session.conversationId ? (
+                      <form
+                        className="agent-session-rename"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          if (renameConversation(session.conversationId, conversationTitleDraft.trim())) {
+                            notify("会话名称已更新", "success");
+                            setEditingConversationId(undefined);
+                          }
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          value={conversationTitleDraft}
+                          maxLength={80}
+                          aria-label="会话名称"
+                          onChange={(event) => setConversationTitleDraft(event.target.value)}
+                        />
+                        <button type="submit" className="icon-button" aria-label="保存会话名称" disabled={!conversationTitleDraft.trim()}>
+                          <Check size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="取消重命名"
+                          onClick={() => setEditingConversationId(undefined)}
+                        >
+                          <X size={14} />
+                        </button>
+                      </form>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`agent-session-select ${session.conversationId === conversationId ? "is-active" : ""}`}
+                        disabled={isSending || session.conversationId === conversationId}
+                        onClick={() => {
+                          if (switchConversation(session.conversationId)) {
+                            setConversationMenuOpen(false);
+                            setConversationSearch("");
+                            setEditingConversationId(undefined);
+                          }
+                        }}
+                      >
+                        <strong>{session.pinnedAt && <Pin size={12} aria-label="已置顶" />}{conversationTitle(session)}</strong>
+                        <small>{formatDateTime(session.updatedAt)}</small>
+                      </button>
+                    )}
+                    <div className="agent-session-actions">
+                      <button
+                        type="button"
+                        className={`icon-button agent-session-pin ${session.pinnedAt ? "is-active" : ""}`}
+                        aria-label={session.pinnedAt ? `取消置顶：${conversationTitle(session)}` : `置顶会话：${conversationTitle(session)}`}
+                        title={session.pinnedAt ? "取消置顶" : "置顶会话"}
+                        disabled={isSending || editingConversationId === session.conversationId}
+                        onClick={() => {
+                          if (toggleConversationPinned(session.conversationId)) {
+                            notify(session.pinnedAt ? "会话已取消置顶" : "会话已置顶", "success");
+                          }
+                        }}
+                      >
+                        {session.pinnedAt ? <PinOff size={14} /> : <Pin size={14} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button agent-session-rename-trigger"
+                        aria-label={`重命名会话：${conversationTitle(session)}`}
+                        title="重命名会话"
+                        disabled={isSending || editingConversationId !== undefined}
+                        onClick={() => {
+                          setEditingConversationId(session.conversationId);
+                          setConversationTitleDraft(conversationTitle(session));
+                        }}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </div>
                     <button
                       type="button"
                       className="icon-button agent-session-delete"

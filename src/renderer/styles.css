@@ -7219,7 +7219,7 @@ select {
 }
 .agent-session-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
 }
@@ -7249,9 +7249,51 @@ select {
   font-size: 12px;
   font-weight: 650;
 }
+.agent-session-select strong svg {
+  margin-right: 4px;
+  color: var(--app-brand);
+  vertical-align: -2px;
+}
 .agent-session-select small {
   color: var(--app-text-faint);
   font-size: 10px;
+}
+.agent-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.agent-session-actions .icon-button,
+.agent-session-rename .icon-button {
+  width: 30px;
+  height: 30px;
+  color: var(--app-text-faint);
+}
+.agent-session-actions .icon-button:hover:not(:disabled),
+.agent-session-actions .icon-button.is-active {
+  color: var(--app-brand);
+}
+.agent-session-rename {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 35%, var(--app-line));
+  border-radius: 11px;
+  padding: 3px 4px 3px 8px;
+  background: var(--app-surface);
+}
+.agent-session-rename input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  padding: 4px 0;
+  color: var(--app-text);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  outline: 0;
 }
 .agent-session-delete {
   width: 30px;
