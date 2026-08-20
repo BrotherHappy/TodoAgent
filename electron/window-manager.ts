@@ -97,6 +97,13 @@ export function floatingWindowInteractionOptions(
   return platform === "darwin" ? { acceptFirstMouse: true } : {};
 }
 
+export function floatingMousePassthroughOptions(enabled: boolean): {
+  ignore: boolean;
+  forward: boolean;
+} {
+  return { ignore: enabled, forward: true };
+}
+
 export class WindowManager {
   readonly #options: WindowManagerOptions;
   #main?: BrowserWindow;
@@ -280,7 +287,7 @@ export class WindowManager {
       backgroundColor: "#00000000",
       resizable: false,
       movable: !settings.locked,
-      focusable: this.#floatingExpanded,
+      focusable: this.#floatingExpanded && !settings.mousePassthrough,
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
@@ -289,6 +296,7 @@ export class WindowManager {
       ...floatingWindowInteractionOptions(),
       webPreferences: this.#webPreferences(),
     });
+    this.#applyFloatingMousePassthrough(this.#floating, settings.mousePassthrough);
     this.#keepFloatingOnTop(this.#floating);
     this.#floating.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: !settings.hideInFullscreen,
@@ -342,6 +350,7 @@ export class WindowManager {
     }
     const window = this.createFloating();
     this.#keepFloatingOnTop(window);
+    this.#applyFloatingMousePassthrough(window, settings.mousePassthrough);
     window.setMovable(!settings.locked);
     window.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: !settings.hideInFullscreen,
@@ -360,7 +369,7 @@ export class WindowManager {
     // A compact desktop pet must not keep keyboard focus away from the main
     // application. The expanded panel becomes focusable again for chat,
     // approvals and task input.
-    window.setFocusable(expanded && !this.#floatingPetOnly);
+    window.setFocusable(expanded && !this.#floatingPetOnly && !settings.mousePassthrough);
     const display = screen.getDisplayMatching(current);
     const size = floatingWindowSize(
       expanded,
@@ -404,6 +413,14 @@ export class WindowManager {
     );
     window.setBounds(next, true);
     this.#keepFloatingOnTop(window);
+  }
+
+  #applyFloatingMousePassthrough(window: BrowserWindow, enabled: boolean): void {
+    // `forward` keeps hover telemetry flowing to the renderer while clicks
+    // pass to the window underneath. The mode is opt-in and can be disabled
+    // from Settings or the system tray, so the pet never becomes unrecoverable.
+    const options = floatingMousePassthroughOptions(enabled);
+    window.setIgnoreMouseEvents(options.ignore, { forward: options.forward });
   }
 
   /**

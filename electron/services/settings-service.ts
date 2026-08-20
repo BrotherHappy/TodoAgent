@@ -376,6 +376,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       scalePercent: merged.floating.scalePercent,
       lastDisplayId: merged.floating.lastDisplayId,
       positions: clone(merged.floating.positions),
+      mousePassthrough: merged.floating.mousePassthrough,
     },
     focus: {
       focusMinutes: merged.focus.focusMinutes,
@@ -514,6 +515,7 @@ export class SettingsService {
         raw.pet?.proactiveDailyLimit !== this.#settings.pet.proactiveDailyLimit ||
         raw.floating?.selectedTab !== this.#settings.floating.selectedTab ||
         raw.floating?.scalePercent !== this.#settings.floating.scalePercent ||
+        raw.floating?.mousePassthrough !== this.#settings.floating.mousePassthrough ||
         raw.focus === undefined ||
         raw.weather === undefined ||
         raw.pet === undefined ||

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   floatingWindowSize,
   floatingWindowInteractionOptions,
+  floatingMousePassthroughOptions,
   snapToWorkArea,
 } from '../electron/window-manager';
 
@@ -25,6 +26,13 @@ describe('floatingWindowInteractionOptions', () => {
   it('does not configure the macOS-only click-through option on other platforms', () => {
     expect(floatingWindowInteractionOptions('win32')).toEqual({});
     expect(floatingWindowInteractionOptions('linux')).toEqual({});
+  });
+});
+
+describe('floatingMousePassthroughOptions', () => {
+  it('keeps the visible pet transparent to clicks only when explicitly enabled', () => {
+    expect(floatingMousePassthroughOptions(false)).toEqual({ ignore: false, forward: true });
+    expect(floatingMousePassthroughOptions(true)).toEqual({ ignore: true, forward: true });
   });
 });
 

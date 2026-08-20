@@ -9579,6 +9579,22 @@ function SettingsPage({
             </div>
             <div className="settings-row">
               <div>
+                <strong>鼠标穿透</strong>
+                <p>宠物保持可见，但鼠标点击会落到后面的窗口；可从这里或系统托盘关闭</p>
+              </div>
+              <Switch
+                checked={appSettings.floating.mousePassthrough}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    floating: { ...appSettings.floating, mousePassthrough: value },
+                  }, value ? "已开启鼠标穿透" : "已关闭鼠标穿透")
+                }
+                label="鼠标穿透 Todo Pet"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
                 <strong>全屏时隐藏</strong>
                 <p>演示、视频或游戏进入全屏后自动隐藏</p>
               </div>

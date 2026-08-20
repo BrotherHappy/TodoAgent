@@ -89,6 +89,7 @@ const settingsSchema = z
           z.string(),
           z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
         ),
+        mousePassthrough: z.boolean(),
       })
       .strict(),
     focus: z

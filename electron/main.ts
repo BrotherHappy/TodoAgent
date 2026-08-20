@@ -690,6 +690,7 @@ async function startApplication(): Promise<void> {
     sync: "local",
     agent: settingsService.get().ai.enabled ? "ready" : "disabled",
     floatingVisible: settingsService.get().floating.enabled,
+    mousePassthrough: settingsService.get().floating.mousePassthrough,
     meetingMode: settingsService.get().pet.meetingMode,
     launchAtLogin: settingsService.get().launchAtLogin,
   };
@@ -968,6 +969,7 @@ async function startApplication(): Promise<void> {
           : status.agent
         : "disabled",
       floatingVisible: settingsService?.get().floating.enabled ?? false,
+      mousePassthrough: settingsService?.get().floating.mousePassthrough ?? false,
       meetingMode: settingsService?.get().pet.meetingMode ?? false,
       launchAtLogin: settingsService?.get().launchAtLogin ?? false,
     }),
@@ -980,6 +982,16 @@ async function startApplication(): Promise<void> {
         .replace({
           ...current,
           floating: { ...current.floating, enabled: visible },
+        })
+        .then(broadcastSettings);
+    },
+    toggleMousePassthrough: (enabled) => {
+      if (!settingsService) return;
+      const current = settingsService.get();
+      void settingsService
+        .replace({
+          ...current,
+          floating: { ...current.floating, mousePassthrough: enabled },
         })
         .then(broadcastSettings);
     },

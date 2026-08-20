@@ -347,6 +347,7 @@ describe('DataPortabilityService export safety', () => {
     delete bundle.data.settings.floating.topMode;
     delete bundle.data.settings.floating.selectedTab;
     delete bundle.data.settings.floating.scalePercent;
+    delete bundle.data.settings.floating.mousePassthrough;
     bundle.data.settings.floating.shape = 'capsule';
     const target = new MemoryPortabilityRepository(snapshot());
 
@@ -358,6 +359,7 @@ describe('DataPortabilityService export safety', () => {
     expect(target.state.settings.floating.topMode).toBe('always');
     expect(target.state.settings.floating.selectedTab).toBe('all');
     expect(target.state.settings.floating.scalePercent).toBe(100);
+    expect(target.state.settings.floating.mousePassthrough).toBe(false);
     expect(target.state.settings.floating).not.toHaveProperty('shape');
   });
 

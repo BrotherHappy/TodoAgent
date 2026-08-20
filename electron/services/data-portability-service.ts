@@ -886,10 +886,13 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectOptional(notifications, 'mutedUntil', `${path}.notifications`, expectIsoDateTime);
 
   const floating = expectRecord(settings.floating, `${path}.floating`);
-  assertOnlyKeys(floating, ['enabled', 'hoverExpandDelayMs', 'topMode', 'locked', 'hideInFullscreen', 'privacyMode', 'selectedTab', 'scalePercent', 'lastDisplayId', 'positions', 'shape'], `${path}.floating`);
+  assertOnlyKeys(floating, ['enabled', 'hoverExpandDelayMs', 'topMode', 'locked', 'hideInFullscreen', 'privacyMode', 'selectedTab', 'scalePercent', 'lastDisplayId', 'positions', 'mousePassthrough', 'shape'], `${path}.floating`);
   ['enabled', 'locked', 'hideInFullscreen', 'privacyMode'].forEach((key) =>
     expectBoolean(floating[key], `${path}.floating.${key}`),
   );
+  if (floating.mousePassthrough !== undefined) {
+    expectBoolean(floating.mousePassthrough, `${path}.floating.mousePassthrough`);
+  }
   if (floating.selectedTab !== undefined) {
     expectEnum(floating.selectedTab, ['all', 'today', 'focus', 'chat', 'home'] as const, `${path}.floating.selectedTab`);
   }

@@ -57,6 +57,8 @@ export interface FloatingSettings {
   /** The most recently used display, so multi-monitor positions survive restart. */
   lastDisplayId?: string;
   positions: Record<string, { x: number; y: number }>;
+  /** Keep the pet visible while allowing clicks to pass through to other apps. */
+  mousePassthrough: boolean;
 }
 
 export interface FocusSettings {
@@ -237,6 +239,7 @@ export const defaultSettings: AppSettings = {
     selectedTab: 'all',
     scalePercent: 100,
     positions: {},
+    mousePassthrough: false,
   },
   focus: {
     focusMinutes: 25,
