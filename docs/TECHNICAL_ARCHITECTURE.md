@@ -105,6 +105,7 @@ flowchart LR
 - 清单实体通过 `lists:list/create/update/delete` 类型化 IPC 暴露给渲染层。旧状态文件缺少 `lists` 时由 LocalStore 在内存中迁移为空对象；数据导出/导入包含清单元数据，复制策略为冲突清单生成新 ID 并同时重映射任务及撤销快照中的 `listId`，避免复制后任务指向原清单。删除清单与解除任务关联在同一 LocalStore 事务内完成，且不产生可恢复的任务操作。
 - Quick Capture：无边框、快捷键呼出、失焦可恢复草稿；解析预览后可选择普通任务、无日期/项目/提醒的本地暂存或 Todo Pet 日记。任务路径复用现有 TaskService 与飞书写入边界，暂存路径只创建本地任务并清除排程字段，日记路径通过 `pet:diary-from-capture` 受限 IPC 写入标题与用户原文，不访问任务或凭据；可选 `captureId` 在 PetService 内幂等重试。Todo Pet 任务栏直接调用同一 `capture:parse` IPC，复用日期、标签、情境、时长、循环与 `p1`–`p4` 优先级解析，但强制组装 `source: local`，不从宠物小窗隐式触发飞书写入；解析服务不可用时回退原始标题。
 - 命令面板：`src/renderer/CommandPalette.tsx` 是无副作用的可搜索命令视图；MainWindow 只提供已存在的导航、快速捕获、今日规划、Agent、显示宠物、设置和飞书同步回调。`⌘/Ctrl+K` 打开面板，弹窗状态会隔离返回、新建等全局快捷键；命令面板本身不持有任务快照、不新增 IPC 写入协议，所有任务和同步动作仍走原控制器与权限边界。
+- 菜单栏 / 系统托盘今日入口：`electron/tray-task-preview.ts` 从 `TaskService.listTasks({ view: "today", statuses: ["open"] })` 纯投影最多 3 项任务和总数；`TrayManager` 异步刷新菜单并以 token 丢弃过期读取，点击只导航到既有 Today 视图。隐私模式把标题替换为“私人任务”，读取异常只保留基础托盘菜单，不复制任务、不新增 IPC 写入、不改变飞书载荷。
 - Todo Pet：唯一桌面悬浮窗口；透明不规则命中区、可拖动、置顶、多显示器，并支持紧凑、悬停预览、展开、专注和安静状态。
 - 时间线日视图：`TimelinePage` 用 `timelineNowIndicator` 将本地时钟投影到 08:00–22:00 的半小时槽，仅对当天显示“现在”线；打开当天时只做一次温和滚动定位，用户也可手动回到当前时刻。该投影不创建 `Task`、不写入 `timeBlock`、日历或 Feishu；历史/未来日期和工作时段之外返回空值，避免伪造实时状态。
 - 专注守护：`FocusSettings.shieldMode` 与 `shieldApplications` 只保存在本地设置；`FloatingWindow` 在专注阶段按低频间隔调用已有 `shell.readActiveWindow`，只使用脱离标题的 `appName` 做大小写不敏感匹配。`gentle` 仅显示可折叠气泡，`pause` 复用既有 Pet/Task 专注暂停 API；不持久化窗口标题或内容，不关闭、阻挡、控制外部应用，也不抢夺焦点，默认关闭并随隐私/会议/全屏/安静策略收敛。

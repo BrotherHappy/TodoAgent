@@ -42,6 +42,7 @@ import { LocalStore } from "./services/local-store";
 import { SettingsService } from "./services/settings-service";
 import { TaskService } from "./services/task-service";
 import { TrayManager, type TrayStatus } from "./tray-manager";
+import { buildTrayTodaySummary } from "./tray-task-preview";
 import { WindowManager } from "./window-manager";
 import { AgentDesktopService } from "./agent/agent-desktop-service";
 import { AuditLog } from "./agent/audit-log";
@@ -871,6 +872,7 @@ async function startApplication(): Promise<void> {
   };
   const handleTasksChanged = (): void => {
     windows?.broadcast(DESKTOP_CHANNELS.eventTasksChanged);
+    tray?.refresh();
     refreshFloatingFocusMode();
     schedulePendingFeishuChanges();
     void tasks
@@ -999,6 +1001,16 @@ async function startApplication(): Promise<void> {
       agentService?.stop();
       status.agent = "stopped";
       tray?.refresh();
+    },
+    getTodaySummary: async () => {
+      const todayTasks = await tasks.listTasks({
+        view: "today",
+        statuses: ["open"],
+        includeDeleted: false,
+      });
+      return buildTrayTodaySummary(todayTasks, {
+        privacyMode: settingsService?.get().floating.privacyMode === true,
+      });
     },
     quit: () => app.quit(),
   });
