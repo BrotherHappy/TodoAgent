@@ -1,9 +1,11 @@
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import {
   Menu,
   Notification,
   app,
+  clipboard,
   dialog,
   globalShortcut,
   nativeTheme,
@@ -15,13 +17,24 @@ import {
 } from "electron";
 import { DESKTOP_CHANNELS } from "../src/shared/desktop-api";
 import type {
+  ActiveWindowContextView,
   DataDesktopApi,
   FeishuConfigureRequest,
   FeishuDesktopApi,
   FeishuStatusView,
   PetDesktopApi,
+  SelectedTextContextView,
 } from "../src/shared/desktop-api";
+import type { TaskAttachment } from "../src/shared/models";
 import { defaultSettings, type AppSettings } from "../src/shared/settings";
+import {
+  buildClipboardContextPreview,
+  buildSelectedTextContextPreview,
+} from "../src/shared/context-capture";
+import {
+  buildActiveWindowContext,
+  parseActiveWindowOutput,
+} from "../src/shared/window-context";
 import type { WeatherSnapshot } from "../src/shared/pet-types";
 import { registerDesktopIpc } from "./ipc-router";
 import { LocalStore } from "./services/local-store";
@@ -58,6 +71,7 @@ import { DesktopDataRepository } from "./services/desktop-data-repository";
 import { NodeDataDesktopFilePort } from "./services/node-data-desktop-file-port";
 import { PetService } from "./services/pet-service";
 import { WeatherService } from "./services/weather-service";
+import { TaskAttachmentService } from "./services/task-attachment-service";
 
 const hasInstanceLock = app.requestSingleInstanceLock();
 if (!hasInstanceLock) app.quit();
@@ -78,6 +92,237 @@ let petTickTimer: ReturnType<typeof setInterval> | undefined;
 let weatherRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let pendingMainRoute: string | undefined;
 let lastSevereWeatherNotificationKey: string | undefined;
+
+const runBoundedCommand = (
+  executable: string,
+  args: readonly string[],
+  timeoutMs = 1_500,
+): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const child = spawn(executable, [...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback();
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(() => reject(new Error("ACTIVE_WINDOW_TIMEOUT")));
+    }, timeoutMs);
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+      if (stdout.length > 4_096) {
+        child.kill();
+        finish(() => reject(new Error("ACTIVE_WINDOW_OUTPUT_TOO_LARGE")));
+      }
+    });
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+      if (stderr.length > 4_096) stderr = stderr.slice(-4_096);
+    });
+    child.once("error", (error) => finish(() => reject(error)));
+    child.once("close", (code) => {
+      finish(() => {
+        if (code === 0) resolve(stdout);
+        else reject(new Error(stderr.trim() || `ACTIVE_WINDOW_EXIT_${code ?? "unknown"}`));
+      });
+    });
+  });
+
+const readActiveWindowContext = async (): Promise<ActiveWindowContextView> => {
+  const capturedAt = new Date();
+  if (process.platform === "darwin") {
+    const script = [
+      'tell application "System Events"',
+      "set frontProcess to first application process whose frontmost is true",
+      "set appName to name of frontProcess",
+      "set windowTitle to name of front window of frontProcess",
+      "return appName & tab & windowTitle",
+      "end tell",
+    ].join("\n");
+    try {
+      return parseActiveWindowOutput(
+        await runBoundedCommand("/usr/bin/osascript", ["-e", script]),
+        capturedAt,
+      );
+    } catch {
+      return {
+        status: "unavailable",
+        reason: "permission-denied",
+        capturedAt: capturedAt.toISOString(),
+      };
+    }
+  }
+  if (process.platform === "win32") {
+    const script = [
+      "Add-Type @'",
+      "using System; using System.Text; using System.Runtime.InteropServices;",
+      "public static class TodoAgentWin32 { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); }",
+      "'@",
+      "$handle = [TodoAgentWin32]::GetForegroundWindow()",
+      "$title = New-Object System.Text.StringBuilder 1024",
+      "[TodoAgentWin32]::GetWindowText($handle, $title, $title.Capacity) | Out-Null",
+      "$processId = [uint32]0",
+      "[TodoAgentWin32]::GetWindowThreadProcessId($handle, [ref]$processId) | Out-Null",
+      "$process = Get-Process -Id $processId -ErrorAction SilentlyContinue",
+      "$appName = if ($null -eq $process) { '' } else { $process.ProcessName }",
+      "Write-Output ($appName + [char]9 + $title.ToString())",
+    ].join("; ");
+    try {
+      return parseActiveWindowOutput(
+        await runBoundedCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]),
+        capturedAt,
+      );
+    } catch {
+      return {
+        status: "unavailable",
+        reason: "error",
+        capturedAt: capturedAt.toISOString(),
+      };
+    }
+  }
+  return buildActiveWindowContext(undefined, undefined, capturedAt);
+};
+
+const SELECTED_TEXT_CAPTURE_TIMEOUT_MS = 900;
+const SELECTED_TEXT_SETTLE_MS = 90;
+
+const selectedTextUnavailable = (
+  reason: SelectedTextContextView["reason"],
+  capturedAt = new Date(),
+): SelectedTextContextView => ({
+  status: "unavailable",
+  reason,
+  capturedAt: capturedAt.toISOString(),
+});
+
+const waitForSelectedTextClipboard = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, SELECTED_TEXT_SETTLE_MS));
+
+/**
+ * Capture the current external selection only after an explicit user action.
+ * The platform bridge sends a copy keystroke to the foreground app, reads a
+ * bounded plain-text clipboard value, then restores the previous text value.
+ * No selection is sent to a model or saved as a task automatically.
+ */
+const captureSelectedTextFromActiveApp = async (): Promise<SelectedTextContextView> => {
+  const capturedAt = new Date();
+  const previousClipboard = clipboard.readText();
+  const previousClipboardFormats = clipboard.availableFormats();
+  const previousClipboardBuffers = previousClipboardFormats.map((format) => ({
+    format,
+    data: clipboard.readBuffer(format),
+  }));
+  const restoreClipboard = () => {
+    try {
+      clipboard.clear();
+      for (const { format, data } of previousClipboardBuffers) {
+        clipboard.writeBuffer(format, data);
+      }
+      if (!previousClipboardFormats.length && previousClipboard) {
+        clipboard.writeText(previousClipboard);
+      }
+    } catch {
+      // Fall back to the previous plain-text value if a platform-specific
+      // format cannot be restored. Clipboard cleanup must never block the
+      // quick-capture window.
+      try {
+        clipboard.writeText(previousClipboard);
+      } catch {
+        // Ignore cleanup failures; the selection itself is still explicit and
+        // bounded, and no content is sent to a model automatically.
+      }
+    }
+  };
+  try {
+    if (process.platform === "darwin") {
+      const script = [
+        'tell application "System Events"',
+        "set frontProcess to first application process whose frontmost is true",
+        "set processName to name of frontProcess",
+        'if processName contains "Todo Agent" then return "__TODO_AGENT__"',
+        'keystroke "c" using {command down}',
+        "return processName",
+        "end tell",
+      ].join("\n");
+      const processName = (await runBoundedCommand(
+        "/usr/bin/osascript",
+        ["-e", script],
+        SELECTED_TEXT_CAPTURE_TIMEOUT_MS,
+      )).trim();
+      if (processName === "__TODO_AGENT__") return selectedTextUnavailable("unsupported", capturedAt);
+    } else if (process.platform === "win32") {
+      const script = [
+        "Add-Type -AssemblyName System.Windows.Forms",
+        "Add-Type @'",
+        "using System; using System.Runtime.InteropServices;",
+        "public static class TodoAgentSelection { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); }",
+        "'@",
+        "$handle = [TodoAgentSelection]::GetForegroundWindow()",
+        "$processId = [uint32]0",
+        "[TodoAgentSelection]::GetWindowThreadProcessId($handle, [ref]$processId) | Out-Null",
+        "$process = Get-Process -Id $processId -ErrorAction SilentlyContinue",
+        "$name = if ($null -eq $process) { '' } else { $process.ProcessName }",
+        "if ($name -match 'Todo Agent|electron') { Write-Output '__TODO_AGENT__'; exit 0 }",
+        "[System.Windows.Forms.SendKeys]::SendWait('^c')",
+        "Write-Output $name",
+      ].join("; ");
+      const processName = (await runBoundedCommand(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", script],
+        SELECTED_TEXT_CAPTURE_TIMEOUT_MS,
+      )).trim();
+      if (processName === "__TODO_AGENT__") return selectedTextUnavailable("unsupported", capturedAt);
+    } else {
+      return selectedTextUnavailable("unsupported", capturedAt);
+    }
+    await waitForSelectedTextClipboard();
+    const selected = clipboard.readText();
+    if (!selected.trim() || selected === previousClipboard) {
+      return selectedTextUnavailable("empty", capturedAt);
+    }
+    return {
+      status: "captured",
+      ...buildSelectedTextContextPreview(selected, capturedAt),
+    };
+  } catch {
+    return selectedTextUnavailable(
+      process.platform === "darwin" ? "permission-denied" : "error",
+      capturedAt,
+    );
+  } finally {
+    restoreClipboard();
+  }
+};
+
+let pendingSelectedText: SelectedTextContextView | undefined;
+let selectedTextCaptureInFlight: Promise<void> | undefined;
+
+const captureSelectionBeforeQuickCapture = async (): Promise<void> => {
+  if (selectedTextCaptureInFlight) return selectedTextCaptureInFlight;
+  selectedTextCaptureInFlight = captureSelectedTextFromActiveApp()
+    .then((result) => {
+      pendingSelectedText = result.status === "captured" ? result : undefined;
+    })
+    .catch(() => {
+      pendingSelectedText = undefined;
+    })
+    .finally(() => {
+      selectedTextCaptureInFlight = undefined;
+    });
+  return selectedTextCaptureInFlight;
+};
+
+const showQuickCaptureWithSelection = (): void => {
+  void captureSelectionBeforeQuickCapture().finally(() => windows?.showQuick());
+};
 
 function minuteOfDay(value: string): number | undefined {
   const match = /^(\d{2}):(\d{2})$/u.exec(value);
@@ -175,7 +420,7 @@ function registerQuickCaptureShortcut(settings: AppSettings): void {
   globalShortcut.unregisterAll();
   const registered = globalShortcut.register(
     settings.quickCaptureShortcut,
-    () => windows?.showQuick(),
+    showQuickCaptureWithSelection,
   );
   if (!registered)
     windows?.broadcast(
@@ -195,7 +440,7 @@ function buildApplicationMenu(): void {
           {
             label: "快速录入",
             accelerator: "CommandOrControl+Shift+Space",
-            click: () => windows?.showQuick(),
+            click: showQuickCaptureWithSelection,
           },
           {
             label: "打开 Today",
@@ -275,6 +520,19 @@ function traySyncState(status: FeishuStatusView): TrayStatus["sync"] {
   return status.connected ? "synced" : "local";
 }
 
+function traySyncStateForReport(
+  controller: FeishuDesktopController,
+  report: { conflicts: unknown[] },
+): TrayStatus["sync"] {
+  const state = traySyncState(controller.status());
+  // Preserve terminal/offline states; a conflict is only a warning when the
+  // connection itself is healthy.
+  if (state === "error" || state === "offline" || state === "pending") {
+    return state;
+  }
+  return report.conflicts.length > 0 ? "conflict" : state;
+}
+
 function localDateKey(date = new Date()): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -285,8 +543,31 @@ function localDateKey(date = new Date()): string {
 async function startApplication(): Promise<void> {
   const userDataPath = app.getPath("userData");
   const store = new LocalStore(path.join(userDataPath, "data"));
+  const taskAttachmentService = new TaskAttachmentService(userDataPath);
   const tasks = new TaskService(store);
   await tasks.initialize();
+  // Reconcile once before any renderer can select a new file. Running this
+  // during every task-change event would race the short window between a
+  // picker copy and the subsequent task update.
+  void tasks
+    .listTasks({ includeDeleted: true })
+    .then((items) =>
+      taskAttachmentService.removeUnreferenced(
+        new Set(
+          items.flatMap((task) =>
+            task.attachments
+              .map((attachment) => attachment.localPath)
+              .filter((value): value is string => Boolean(value)),
+          ),
+        ),
+      ),
+    )
+    .catch((error: unknown) => {
+      console.error(
+        "Failed to reconcile task attachments",
+        error instanceof Error ? error.message : error,
+      );
+    });
 
   // End-to-end profiles are disposable and must never block on a developer
   // machine's interactive Keychain prompt. Production builds always keep the
@@ -450,6 +731,31 @@ async function startApplication(): Promise<void> {
       });
       broadcastSettings(next);
     },
+    onConfigurationChange: async (configuration) => {
+      const current = settingsService!.get();
+      const next = await settingsService!.replace({
+        ...current,
+        feishu: {
+          ...current.feishu,
+          configured: true,
+          mode: configuration.mode,
+          accountId: configuration.accountId,
+          tokenCredentialId: configuration.tokenCredentialId,
+          relayBaseUrl:
+            configuration.mode === "relay"
+              ? configuration.relayBaseUrl
+              : "",
+          clientId: configuration.clientId ?? "",
+          appSecretCredentialId:
+            configuration.mode === "relay"
+              ? undefined
+              : configuration.appSecretCredentialId,
+          acknowledgeInsecureLocalCredentials:
+            configuration.mode === "local-development",
+        },
+      });
+      broadcastSettings(next);
+    },
     onOpenAuthorizationUrl: (url) => shell.openExternal(url),
   });
   feishuAutoSync = new FeishuAutoSyncCoordinator({
@@ -526,12 +832,10 @@ async function startApplication(): Promise<void> {
       syncNow: () => controller.syncNow(),
     });
     if (!report) return;
-    status.sync =
-      report.conflicts.length > 0
-        ? "conflict"
-        : report.offline
-          ? "offline"
-          : "synced";
+    // The controller status is the source of truth. A successful write can
+    // still carry a permission/error issue, so report.offline/conflicts alone
+    // must never overwrite an error with a green tray state.
+    status.sync = traySyncStateForReport(controller, report);
     windows?.broadcast(DESKTOP_CHANNELS.eventTasksChanged);
     tray?.refresh();
   };
@@ -661,7 +965,7 @@ async function startApplication(): Promise<void> {
       launchAtLogin: settingsService?.get().launchAtLogin ?? false,
     }),
     showMain: (route) => requestMainWindow(route),
-    showQuick: () => windows?.showQuick(),
+    showQuick: showQuickCaptureWithSelection,
     toggleFloating: (visible) => {
       if (!settingsService) return;
       const current = settingsService.get();
@@ -743,12 +1047,7 @@ async function startApplication(): Promise<void> {
             settingsService.get().feishu.pollingMinutes * 60_000,
           );
           const report = await feishuController!.syncNow();
-          status.sync =
-            report.conflicts.length > 0
-              ? "conflict"
-              : report.offline
-                ? "offline"
-                : "synced";
+          status.sync = traySyncStateForReport(feishuController!, report);
           windows?.broadcast(DESKTOP_CHANNELS.eventTasksChanged);
           tray?.refresh();
         }
@@ -834,12 +1133,7 @@ async function startApplication(): Promise<void> {
         await enqueuePendingFeishuChanges();
         return feishuController!.syncNow({ forceFull });
       });
-      status.sync =
-        report.conflicts.length > 0
-          ? "conflict"
-          : report.offline
-            ? "offline"
-            : "synced";
+      status.sync = traySyncStateForReport(feishuController!, report);
       windows?.broadcast(DESKTOP_CHANNELS.eventTasksChanged);
       tray?.refresh();
       return report;
@@ -853,6 +1147,7 @@ async function startApplication(): Promise<void> {
   };
   const dataApi: DataDesktopApi = {
     exportToFile: (request) => dataController.exportToFile(request),
+    exportMarkdownToFile: (request) => dataController.exportMarkdownToFile(request),
     previewImport: () => dataController.previewImport(),
     commitImport: async (previewToken, strategy) => {
       const result = await dataController.commitImport(previewToken, strategy);
@@ -901,6 +1196,10 @@ async function startApplication(): Promise<void> {
           settingsReset: request.resetSettings,
         };
         if (request.tasks) draft.taskState.tasks = {};
+        if (request.tasks) {
+          draft.taskState.projects = {};
+          draft.taskState.lists = {};
+        }
         if (request.drafts) draft.taskState.drafts = {};
         if (request.operations) draft.taskState.operations = [];
         if (request.resetSettings) {
@@ -915,7 +1214,10 @@ async function startApplication(): Promise<void> {
         if (request.tasks) draft.settings.feishu.autoSync = false;
         return result;
       });
-      if (request.tasks) feishuController?.stopPolling();
+      if (request.tasks) {
+        feishuController?.stopPolling();
+        await taskAttachmentService.clearAll();
+      }
       broadcastSettings(settingsService!.get());
       handleTasksChanged();
       return { status: "cleared", ...counts };
@@ -941,7 +1243,10 @@ async function startApplication(): Promise<void> {
       petService!.completeAdventure(adventureId, choiceId),
     recordMiniGame: (input) => petService!.recordMiniGame(input),
     recordProactiveMessage: (input) =>
-      petService!.recordProactiveMessage(input),
+      petService!.recordProactiveMessage(input, {
+        dailyLimit: settingsService!.get().pet.proactiveDailyLimit,
+        localDate: localDateKey(),
+      }),
     startFocus: async (request) => {
       const task = request.taskId
         ? await tasks.getTask(request.taskId, false)
@@ -1019,6 +1324,19 @@ async function startApplication(): Promise<void> {
         userNote,
       });
     },
+    createDiaryFromTask: async (taskId, userNote) => {
+      const task = await tasks.getTask(taskId, false);
+      if (!task || task.deletedAt) throw new Error("TASK_NOT_FOUND");
+      return petService!.createDiaryFromTask({
+        localDate: localDateKey(),
+        task: {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+        },
+        userNote,
+      });
+    },
     updateDiary: (id, patch) => petService!.updateDiary(id, patch),
     deleteDiary: (id) => petService!.deleteDiary(id),
     addMemory: (input) => petService!.addMemory(input),
@@ -1029,6 +1347,24 @@ async function startApplication(): Promise<void> {
 
   unregisterIpc = registerDesktopIpc({
     tasks,
+    taskAttachments: {
+      choose: async (): Promise<TaskAttachment[]> => {
+        const result = await dialog.showOpenDialog({
+          title: "添加本地附件",
+          defaultPath: app.getPath("documents"),
+          properties: ["openFile", "multiSelections"],
+        });
+        if (result.canceled || result.filePaths.length === 0) return [];
+        return taskAttachmentService.copySelectedFiles(result.filePaths);
+      },
+      open: async (attachment) => {
+        const filePath = await taskAttachmentService.open(attachment);
+        const error = await shell.openPath(filePath);
+        if (error) throw new Error(error);
+      },
+      preview: (attachment) => taskAttachmentService.preview(attachment),
+      remove: (attachment) => taskAttachmentService.remove(attachment),
+    },
     settings: settingsService,
     agent: agentService,
     feishu: feishuApi,
@@ -1059,8 +1395,15 @@ async function startApplication(): Promise<void> {
       secureStorageAvailable:
         process.platform === "darwin" || process.platform === "win32",
     }),
+    readClipboard: () => buildClipboardContextPreview(clipboard.readText()),
+    readActiveWindow: () => readActiveWindowContext(),
+    readSelectedText: async () => {
+      const pending = pendingSelectedText;
+      pendingSelectedText = undefined;
+      return pending ?? captureSelectedTextFromActiveApp();
+    },
     showMain: (route) => requestMainWindow(route),
-    showQuickCapture: () => windows?.showQuick(),
+    showQuickCapture: showQuickCaptureWithSelection,
     setFloatingVisible: async (visible) => {
       const current = settingsService!.get();
       const next = await settingsService!.replace({

@@ -156,7 +156,14 @@ function normalizeState(value: unknown, name: string): PetState {
     },
     adventures: Array.isArray(raw.adventures) ? clone(raw.adventures) : [],
     miniGames: Array.isArray(raw.miniGames) ? clone(raw.miniGames) : [],
-    diary: Array.isArray(raw.diary) ? clone(raw.diary) : [],
+    diary: Array.isArray(raw.diary)
+      ? raw.diary.map((entry) => ({
+          ...clone(entry),
+          taskIds: Array.isArray(entry.taskIds)
+            ? [...new Set(entry.taskIds.filter((id) => typeof id === "string" && id.trim()))]
+            : undefined,
+        }))
+      : [],
     memories: Array.isArray(raw.memories) ? clone(raw.memories) : [],
     proactiveMessages: Array.isArray(raw.proactiveMessages)
       ? clone(raw.proactiveMessages)
@@ -188,6 +195,12 @@ export interface DiaryFacts {
   localDate: string;
   completedTasks: Array<Pick<Task, "id" | "title">>;
   weatherSummary?: string;
+  userNote?: string;
+}
+
+export interface DiaryTaskFacts {
+  localDate: string;
+  task: Pick<Task, "id" | "title" | "status">;
   userNote?: string;
 }
 
@@ -391,8 +404,25 @@ export class PetService {
 
   async recordProactiveMessage(
     input: Pick<ProactiveMessageRecord, "kind" | "reason" | "dismissed">,
+    options?: {
+      /** Maximum records for the local day; 0 or omitted means unlimited. */
+      dailyLimit?: number;
+      /** Main-process local date, supplied by the settings/runtime owner. */
+      localDate?: string;
+    },
   ): Promise<PetSnapshot> {
     return this.#mutate((draft, now) => {
+      const dailyLimit = typeof options?.dailyLimit === "number" &&
+        Number.isFinite(options.dailyLimit) && options.dailyLimit > 0
+        ? Math.floor(options.dailyLimit)
+        : 0;
+      if (dailyLimit > 0) {
+        const date = options?.localDate ?? isoNow(now).slice(0, 10);
+        const shownToday = draft.proactiveMessages.filter((message) =>
+          message.shownAt.slice(0, 10) === date,
+        ).length;
+        if (shownToday >= dailyLimit) return;
+      }
       draft.proactiveMessages.unshift({
         id: randomUUID(),
         kind: input.kind,
@@ -609,6 +639,7 @@ export class PetService {
         localDate: facts.localDate,
         title: `${facts.localDate} · 和${draft.profile.name}的一天`,
         content,
+        taskIds: [...new Set(facts.completedTasks.map((task) => task.id))],
         generation: "local-template",
         completedTaskCount: facts.completedTasks.length,
         focusRounds: focusRounds.length,
@@ -626,6 +657,62 @@ export class PetService {
         ...draft.diary.filter((entry) => entry.id !== result.id),
         result,
       ].sort((a, b) => b.localDate.localeCompare(a.localDate));
+    });
+    return clone(result);
+  }
+
+  async createDiaryFromTask(facts: DiaryTaskFacts): Promise<PetDiaryEntry> {
+    let result!: PetDiaryEntry;
+    await this.#mutate((draft, now) => {
+      const localDate = /^\d{4}-\d{2}-\d{2}$/u.test(facts.localDate)
+        ? facts.localDate
+        : isoNow(now).slice(0, 10);
+      const taskId = facts.task.id;
+      const existing = draft.diary.find(
+        (entry) =>
+          entry.generation === "user" &&
+          !entry.userEdited &&
+          entry.taskIds?.length === 1 &&
+          entry.taskIds[0] === taskId,
+      );
+      const focusRounds = draft.focusHistory.filter(
+        (record) =>
+          record.taskId === taskId &&
+          record.phase === "focus" &&
+          record.outcome === "completed",
+      );
+      const statusLine =
+        facts.task.status === "completed"
+          ? `今天我们一起完成了“${facts.task.title}”。`
+          : `我们把“${facts.task.title}”记进了共同日记，下一步可以从这里继续。`;
+      const content = [
+        statusLine,
+        focusRounds.length
+          ? `这项任务一起专注了 ${focusRounds.length} 轮，共 ${Math.round(focusRounds.reduce((sum, record) => sum + record.actualSeconds, 0) / 60)} 分钟。`
+          : "这次没有完整的专注轮次，也没关系。",
+        facts.userNote?.trim() ? `你的备注：${facts.userNote.trim().slice(0, 2_000)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      result = {
+        id: existing?.id ?? randomUUID(),
+        localDate,
+        title: `${localDate} · ${facts.task.title}`.slice(0, 200),
+        content,
+        taskIds: [taskId],
+        generation: "user",
+        completedTaskCount: facts.task.status === "completed" ? 1 : 0,
+        focusRounds: focusRounds.length,
+        focusSeconds: focusRounds.reduce((sum, record) => sum + record.actualSeconds, 0),
+        rewardIds: [],
+        userEdited: existing?.userEdited ?? false,
+        createdAt: existing?.createdAt ?? isoNow(now),
+        updatedAt: isoNow(now),
+      };
+      draft.diary = [
+        ...draft.diary.filter((entry) => entry.id !== result.id),
+        result,
+      ].sort((left, right) => right.localDate.localeCompare(left.localDate));
     });
     return clone(result);
   }

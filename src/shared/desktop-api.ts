@@ -1,17 +1,31 @@
 import type {
+  ApplyTodayPlanRequest,
+  BulkTaskRequest,
+  CreateListInput,
+  CreateProjectInput,
   CreateTaskInput,
+  DeleteListResult,
+  DeleteProjectResult,
+  IsoDateTime,
   RecurrenceEditScope,
   SaveDraftInput,
   Task,
+  TaskAttachment,
+  TaskAttachmentPreview,
   TaskDraft,
   TaskFilter,
   TaskId,
+  TaskHistoryEntry,
+  TaskList,
   TaskMutationResult,
   TaskOperation,
+  TaskProject,
   TaskSyncStatus,
   TaskViewSection,
   UndoResult,
   UpdateTaskInput,
+  UpdateListInput,
+  UpdateProjectInput,
 } from "./models";
 import type {
   FeishuSyncedTaskField,
@@ -58,6 +72,16 @@ export interface MoveToTodayRequest {
   date?: string;
 }
 
+export interface UpdateProjectRequest {
+  id: string;
+  patch: UpdateProjectInput;
+}
+
+export interface UpdateListRequest {
+  id: string;
+  patch: UpdateListInput;
+}
+
 export interface TaskDesktopApi {
   create(input: CreateTaskInput): Promise<TaskMutationResult>;
   get(id: TaskId, includeDeleted?: boolean): Promise<Task | undefined>;
@@ -71,14 +95,29 @@ export interface TaskDesktopApi {
   pauseFocus(id: TaskId): Promise<TaskMutationResult>;
   resetFocus(id: TaskId): Promise<TaskMutationResult>;
   reorderToday(taskIds: TaskId[]): Promise<TaskOperation>;
+  applyTodayPlan(request: ApplyTodayPlanRequest): Promise<TaskOperation>;
+  applyBulkTaskAction(request: BulkTaskRequest): Promise<TaskOperation>;
   moveToTrash(id: TaskId): Promise<TaskMutationResult>;
   restore(id: TaskId): Promise<TaskMutationResult>;
   purge(id: TaskId): Promise<TaskOperation>;
+  history(id: TaskId, limit?: number): Promise<TaskHistoryEntry[]>;
   undo(operationId?: string): Promise<UndoResult>;
   saveDraft(input: SaveDraftInput): Promise<TaskDraft>;
   getDraft(id: string): Promise<TaskDraft | undefined>;
   listDrafts(): Promise<TaskDraft[]>;
   deleteDraft(id: string): Promise<boolean>;
+  chooseAttachments(): Promise<TaskAttachment[]>;
+  openAttachment(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<void>;
+  deleteAttachment(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<void>;
+  previewAttachment(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<TaskAttachmentPreview>;
+  listProjects(includeArchived?: boolean): Promise<TaskProject[]>;
+  createProject(input: CreateProjectInput): Promise<TaskProject>;
+  updateProject(request: UpdateProjectRequest): Promise<TaskProject>;
+  deleteProject(id: string): Promise<DeleteProjectResult>;
+  listLists(includeArchived?: boolean): Promise<TaskList[]>;
+  createList(input: CreateListInput): Promise<TaskList>;
+  updateList(request: UpdateListRequest): Promise<TaskList>;
+  deleteList(id: string): Promise<DeleteListResult>;
 }
 
 export interface AppInfo {
@@ -105,6 +144,9 @@ export interface SettingsDesktopApi {
 
 export interface ShellDesktopApi {
   getInfo(): Promise<AppInfo>;
+  readClipboard(): Promise<ClipboardContextView>;
+  readActiveWindow(): Promise<ActiveWindowContextView>;
+  readSelectedText(): Promise<SelectedTextContextView>;
   showMain(route?: string): Promise<void>;
   showQuickCapture(): Promise<void>;
   hideCurrentWindow(): Promise<void>;
@@ -116,6 +158,30 @@ export interface ShellDesktopApi {
   endFloatingDrag(): Promise<void>;
   setLaunchAtLogin(enabled: boolean): Promise<AppSettings>;
   openExternal(url: string): Promise<void>;
+}
+
+export interface ClipboardContextView {
+  text: string;
+  characters: number;
+  truncated: boolean;
+  capturedAt: IsoDateTime;
+}
+
+export interface SelectedTextContextView {
+  status: "captured" | "unavailable";
+  text?: string;
+  characters?: number;
+  truncated?: boolean;
+  capturedAt: IsoDateTime;
+  reason?: "unsupported" | "permission-denied" | "empty" | "error";
+}
+
+export interface ActiveWindowContextView {
+  status: "captured" | "unavailable";
+  appName?: string;
+  title?: string;
+  reason?: "unsupported" | "permission-denied" | "empty" | "error";
+  capturedAt: IsoDateTime;
 }
 
 export interface CaptureDesktopApi {
@@ -455,6 +521,7 @@ export interface PetDesktopApi {
   weather(): Promise<WeatherSnapshot | undefined>;
   refreshWeather(force?: boolean): Promise<WeatherSnapshot | undefined>;
   generateDiary(userNote?: string): Promise<PetDiaryEntry>;
+  createDiaryFromTask(taskId: string, userNote?: string): Promise<PetDiaryEntry>;
   updateDiary(
     id: string,
     patch: Pick<PetDiaryEntry, "title" | "content">,
@@ -481,6 +548,8 @@ export interface DataExportRequestView {
     operations: boolean;
     settings: boolean;
     permissionAudit: boolean;
+    projects: boolean;
+    lists: boolean;
   }>;
 }
 
@@ -505,6 +574,8 @@ export interface DataImportPreviewView {
   tasks: DataCategoryPlanView;
   drafts: DataCategoryPlanView;
   operations: DataCategoryPlanView;
+  projects?: DataCategoryPlanView;
+  lists?: DataCategoryPlanView;
   settings: {
     included: boolean;
     differs: boolean;
@@ -535,6 +606,8 @@ export interface DataImportResultView {
   tasks: Omit<DataCategoryPlanView, "conflicts">;
   drafts: Omit<DataCategoryPlanView, "conflicts">;
   operations: Omit<DataCategoryPlanView, "conflicts">;
+  projects?: Omit<DataCategoryPlanView, "conflicts">;
+  lists?: Omit<DataCategoryPlanView, "conflicts">;
   settings: "none" | "overwritten" | "skipped";
   permissionAudit: "none" | "replaced" | "skipped";
   copiedTaskIds: Record<string, string>;
@@ -542,6 +615,7 @@ export interface DataImportResultView {
 
 export interface DataDesktopApi {
   exportToFile(request?: DataExportRequestView): Promise<DataExportResultView>;
+  exportMarkdownToFile(request?: DataExportRequestView): Promise<DataExportResultView>;
   previewImport(): Promise<DataPreviewResultView>;
   commitImport(
     previewToken: string,
@@ -601,10 +675,25 @@ export const DESKTOP_CHANNELS = {
   taskPauseFocus: "tasks:pause-focus",
   taskResetFocus: "tasks:reset-focus",
   taskReorderToday: "tasks:reorder-today",
+  taskApplyTodayPlan: "tasks:apply-today-plan",
+  taskApplyBulkAction: "tasks:apply-bulk-action",
   taskTrash: "tasks:trash",
   taskRestore: "tasks:restore",
   taskPurge: "tasks:purge",
+  taskHistory: "tasks:history",
   taskUndo: "tasks:undo",
+  taskChooseAttachments: "tasks:choose-attachments",
+  taskOpenAttachment: "tasks:open-attachment",
+  taskDeleteAttachment: "tasks:delete-attachment",
+  taskPreviewAttachment: "tasks:preview-attachment",
+  projectList: "projects:list",
+  projectCreate: "projects:create",
+  projectUpdate: "projects:update",
+  projectDelete: "projects:delete",
+  listList: "lists:list",
+  listCreate: "lists:create",
+  listUpdate: "lists:update",
+  listDelete: "lists:delete",
   draftSave: "drafts:save",
   draftGet: "drafts:get",
   draftList: "drafts:list",
@@ -615,6 +704,9 @@ export const DESKTOP_CHANNELS = {
   credentialSet: "credentials:set",
   credentialDelete: "credentials:delete",
   shellGetInfo: "shell:get-info",
+  shellReadClipboard: "shell:read-clipboard",
+  shellReadActiveWindow: "shell:read-active-window",
+  shellReadSelectedText: "shell:read-selected-text",
   shellShowMain: "shell:show-main",
   shellShowQuick: "shell:show-quick",
   shellHideCurrent: "shell:hide-current",
@@ -665,12 +757,14 @@ export const DESKTOP_CHANNELS = {
   petWeatherGet: "pet:weather-get",
   petWeatherRefresh: "pet:weather-refresh",
   petDiaryGenerate: "pet:diary-generate",
+  petDiaryFromTask: "pet:diary-from-task",
   petDiaryUpdate: "pet:diary-update",
   petDiaryDelete: "pet:diary-delete",
   petMemoryAdd: "pet:memory-add",
   petMemoryUpdate: "pet:memory-update",
   petMemoryDelete: "pet:memory-delete",
   dataExport: "data:export",
+  dataMarkdownExport: "data:markdown-export",
   dataPreviewImport: "data:preview-import",
   dataCommitImport: "data:commit-import",
   dataCancelPreview: "data:cancel-preview",

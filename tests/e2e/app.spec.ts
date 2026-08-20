@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -48,7 +48,7 @@ async function windowFor(
 
 async function finishOnboarding(page: Page): Promise<void> {
   const skip = page.getByRole("button", { name: "跳过并使用本地任务" });
-  if (await skip.isVisible().catch(() => false)) await skip.click();
+  if (await skip.isVisible().catch(() => false)) await skip.click({ force: true });
 }
 
 async function expectSingleMainShell(page: Page): Promise<void> {
@@ -451,6 +451,45 @@ test.describe("Todo Agent desktop shell", () => {
     }
   });
 
+  test("exposes a local task reminder budget and ignore backoff in Settings", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.getByRole("button", { name: "设置", exact: true }).click();
+    const settingsNavigation = main.getByRole("navigation", { name: "设置导航" });
+    await settingsNavigation.getByRole("button", { name: "提醒", exact: true }).click();
+    await expect(main.getByRole("heading", { name: "提醒", exact: true })).toBeVisible();
+
+    const budget = main.getByLabel("每日任务提醒预算");
+    await expect(budget).toHaveValue("8");
+    await budget.fill("5");
+    await budget.press("Enter");
+    await expect(budget).toHaveValue("5");
+    await expect(main.getByText("同一任务连续关闭两次提醒后不再重复打扰", { exact: false })).toBeVisible();
+    const interval = main.getByLabel("同类任务提醒间隔");
+    await expect(interval).toHaveValue("120");
+    await interval.fill("60");
+    await interval.press("Enter");
+    await expect(interval).toHaveValue("60");
+    await main.getByLabel("本地任务提醒策略").selectOption("important-only");
+    const persisted = await main.evaluate(async () => window.desktopApi!.settings.get());
+    expect(persisted.notifications.dailyTaskReminderLimit).toBe(5);
+    expect(persisted.notifications.taskIgnoreBackoffEnabled).toBe(true);
+    expect(persisted.notifications.taskReminderMinIntervalMinutes).toBe(60);
+    expect(persisted.notifications.taskReminderSourceMode.local).toBe("important-only");
+
+    await settingsNavigation.getByRole("button", { name: "Todo Pet", exact: true }).click();
+    const companionBudget = main.getByLabel("每日主动陪伴预算");
+    await expect(companionBudget).toHaveValue("2");
+    await companionBudget.fill("3");
+    await companionBudget.press("Enter");
+    await expect(companionBudget).toHaveValue("3");
+    const petPersisted = await main.evaluate(async () => window.desktopApi!.settings.get());
+    expect(petPersisted.pet.proactiveDailyLimit).toBe(3);
+  });
+
   test("clears a stale task search when explicit navigation opens a task collection", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
@@ -516,6 +555,203 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(search).toHaveValue("");
     await expect(searchSummary).toHaveText("你的任务保持本地优先");
     await expect(main.locator(".task-row", { hasText: openTitle })).toBeVisible();
+  });
+
+  test("keeps task discussions local and supports add, edit, and remove", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const title = "验收-任务讨论-本地";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(title);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    const row = main.locator(".task-row", { hasText: title });
+    await expect(row).toBeVisible();
+    await row.locator(".task-body").click();
+
+    const inspector = main.getByRole("complementary", { name: "任务详情" });
+    const composer = inspector.getByLabel("新增任务讨论");
+    await composer.fill("先确认接口契约，再开始实现。\n这是本机上下文。");
+    await inspector.getByRole("button", { name: "添加讨论" }).click();
+    await expect(inspector.getByText("先确认接口契约，再开始实现。", { exact: false })).toBeVisible();
+    await expect(inspector.getByText("仅保存在本机；不会写回飞书", { exact: false })).toBeVisible();
+
+    const comment = inspector.locator(".task-comment").first();
+    await comment.getByRole("button", { name: "编辑" }).click();
+    const edit = comment.getByLabel("编辑讨论");
+    await edit.fill("已确认接口契约，继续实现。");
+    await comment.getByRole("button", { name: "保存" }).click();
+    await expect(comment.getByText("已确认接口契约，继续实现。", { exact: true })).toBeVisible();
+
+    await comment.getByRole("button", { name: "删除" }).click();
+    await expect(comment).toHaveCount(0);
+    await expect(inspector.getByText("给未来的自己留一句上下文", { exact: false })).toBeVisible();
+  });
+
+  test("captures a collapsible private research card with source and action items", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const title = "验收-研究卡-本机上下文";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(title);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    const row = main.locator(".task-row", { hasText: title });
+    await expect(row).toBeVisible();
+    await row.locator(".task-body").click();
+    const inspector = main.getByRole("complementary", { name: "任务详情" });
+    const researchTitle = inspector.getByLabel("研究卡标题");
+    await researchTitle.scrollIntoViewIfNeeded();
+    await researchTitle.fill("竞品定价摘要");
+    const researchUrl = inspector.getByLabel("研究卡来源链接");
+    await researchUrl.scrollIntoViewIfNeeded();
+    await researchUrl.fill("https://example.com/pricing");
+    const researchSummary = inspector.getByLabel("研究卡摘要");
+    await researchSummary.scrollIntoViewIfNeeded();
+    await researchSummary.fill("按团队规模分层收费，个人版强调快速上手。");
+    const researchActions = inspector.getByLabel("研究卡行动项");
+    await researchActions.scrollIntoViewIfNeeded();
+    await researchActions.fill("验证个人版限制\n整理对比表");
+    const addResearch = inspector.getByRole("button", { name: "添加研究卡", exact: true });
+    await addResearch.scrollIntoViewIfNeeded();
+    await addResearch.click();
+
+    const card = inspector.locator(".research-card", { hasText: "竞品定价摘要" });
+    await expect(card).toBeVisible();
+    await expect(inspector).toContainText("不会写回飞书");
+    await card.locator("summary").click();
+    await expect(card).toHaveAttribute("open", "");
+    await expect(card).toContainText("个人版限制");
+    await card.locator("summary").click();
+    await expect(card).not.toHaveAttribute("open", "");
+    await card.locator("summary").click();
+    await card.getByRole("button", { name: "移除研究卡竞品定价摘要" }).click();
+    await expect(card).toHaveCount(0);
+  });
+
+  test("previews an atomic batch action and undoes it from the task list", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const titles = ["验收-批量操作-一", "验收-批量操作-二"];
+    for (const title of titles) {
+      await main.getByRole("button", { name: "新建", exact: true }).click();
+      await main.locator("#new-title").fill(title);
+      await main.getByRole("button", { name: "保存到本地" }).click();
+      await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+    }
+
+    await main.getByRole("button", { name: "批量选择", exact: true }).click();
+    for (const title of titles) {
+      await main
+        .locator(".task-row", { hasText: title })
+        .locator(".bulk-select-checkbox")
+        .check();
+    }
+    await expect(main.getByText("已选择 2 项", { exact: true })).toBeVisible();
+    await main.getByRole("button", { name: "完成", exact: true }).click();
+    await expect(main.getByRole("dialog", { name: "批量操作预览" })).toContainText(
+      "将对 2 项任务执行“完成任务”",
+    );
+    await main.getByRole("button", { name: "确认执行", exact: true }).click();
+    await expect(
+      main.locator(".task-row.completed", { hasText: titles[0] }),
+    ).toBeVisible();
+    await expect(
+      main.locator(".task-row.completed", { hasText: titles[1] }),
+    ).toBeVisible();
+
+    await main.getByRole("button", { name: "撤销", exact: true }).last().click();
+    await expect(
+      main.locator(".task-row", { hasText: titles[0] }).locator(
+        `.task-checkbox[aria-label="完成${titles[0]}"]`,
+      ),
+    ).toBeVisible();
+    await expect(
+      main.locator(".task-row", { hasText: titles[1] }).locator(
+        `.task-checkbox[aria-label="完成${titles[1]}"]`,
+      ),
+    ).toBeVisible();
+  });
+
+  test("saves and reapplies tag and date-range task filters", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const yesterday = await main.evaluate(() => {
+      const date = new Date();
+      date.setDate(date.getDate() - 1);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    });
+    const highTitle = "验收-保存视图-高优先级";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(highTitle);
+    await main.locator("#new-tags").fill("研究");
+    await main.locator("#new-priority").selectOption("high");
+    await main.locator("#new-due").fill(`${yesterday}T08:00`);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    const title = "验收-保存视图-标签日期";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(title);
+    await main.locator("#new-tags").fill("研究, 发布");
+    await main.locator("#new-priority").selectOption("low");
+    await main.locator("#new-due").fill(`${yesterday}T09:00`);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    await main.getByRole("button", { name: /全部任务/u }).click();
+    await main.getByRole("button", { name: "筛选", exact: true }).click();
+    const filter = main.getByRole("dialog", { name: "任务筛选" });
+    await expect(filter.getByLabel("标签")).toHaveValue("all");
+    await filter.getByLabel("标签").selectOption("研究");
+    await filter.getByLabel("日期").selectOption("overdue");
+    await expect(filter.getByLabel("排序")).toHaveValue("manual");
+    await filter.getByLabel("排序").selectOption("priority");
+    await expect(main.locator(".task-list .task-row").first()).toContainText(highTitle);
+    await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+    await filter.locator("#smart-view-name").fill("逾期研究优先级");
+    await filter.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(main.locator(".saved-view-strip").getByRole("button", { name: "逾期研究优先级", exact: true })).toBeVisible();
+    await filter.getByRole("button", { name: "完成", exact: true }).click();
+    await main.locator(".saved-view-strip").getByRole("button", { name: "逾期研究优先级", exact: true }).click();
+    await expect(main.locator(".task-list .task-row").first()).toContainText(highTitle);
+    await main.getByRole("button", { name: "筛选", exact: true }).click();
+    const reopenedFilter = main.getByRole("dialog", { name: "任务筛选" });
+    await reopenedFilter.getByRole("button", { name: "清除", exact: true }).click();
+    await expect(reopenedFilter.getByLabel("排序")).toHaveValue("manual");
+    await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+  });
+
+  test("shows subtask progress without auto-completing the parent", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const parentTitle = "验收-子任务进度-父任务";
+    const childTitle = "验收-子任务进度-子任务";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(parentTitle);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    const row = main.locator(".task-row", { hasText: parentTitle });
+    await expect(row).toBeVisible();
+    await row.locator(".task-body").click();
+    const inspector = main.getByRole("complementary", { name: "任务详情" });
+    await expect(inspector.getByRole("textbox", { name: "任务标题", exact: true })).toHaveValue(parentTitle);
+    await inspector.getByLabel("新子任务标题").fill(childTitle);
+    await inspector.getByRole("button", { name: "添加子任务", exact: true }).click();
+    const childCheckbox = inspector.getByLabel(`完成${childTitle}`);
+    await expect(childCheckbox).toBeVisible();
+    await expect(inspector.getByRole("progressbar", { name: "子任务完成进度" })).toHaveAttribute("aria-valuenow", "0");
+    await childCheckbox.click();
+    await expect(inspector.getByRole("progressbar", { name: "子任务完成进度" })).toHaveAttribute("aria-valuenow", "1");
+    await expect(row).toContainText("子任务 1/1");
+    await expect(row.locator('.task-checkbox[aria-label="完成验收-子任务进度-父任务"]')).toBeVisible();
   });
 
   test("keeps search, task details, and direct navigation usable at every supported desktop size", async () => {
@@ -726,6 +962,25 @@ test.describe("Todo Agent desktop shell", () => {
       .poll(async () => (await floatingWindowState(app!)).position)
       .not.toEqual(beforeDrag);
 
+    const beforeBodyDrag = (await floatingWindowState(app)).position;
+    const petButton = floating.locator(".pet-avatar-button");
+    const petBounds = await petButton.boundingBox();
+    if (!petBounds) throw new Error("Pet body has no drag bounds");
+    await floating.mouse.move(
+      petBounds.x + petBounds.width / 2,
+      petBounds.y + petBounds.height / 2,
+    );
+    await floating.mouse.down();
+    await floating.mouse.move(
+      petBounds.x + petBounds.width / 2 + 52,
+      petBounds.y + petBounds.height / 2 - 34,
+      { steps: 6 },
+    );
+    await floating.mouse.up();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).position)
+      .not.toEqual(beforeBodyDrag);
+
     await floating
       .getByRole("button", { name: "展开 小序" })
       .click();
@@ -844,7 +1099,7 @@ test.describe("Todo Agent desktop shell", () => {
     await floating.getByRole("button", { name: "和小序互动" }).click();
     const wheel = floating.getByRole("menu", { name: "宠物互动轮盘" });
     await expect(wheel).toBeVisible();
-    await expect(wheel.getByRole("menuitem")).toHaveCount(8);
+    await expect(wheel.getByRole("menuitem")).toHaveCount(9);
     await expect(floating.locator(".floating-shell")).toHaveClass(/has-interaction-wheel/u);
     await expect(floating.locator(".pet-season-mark")).toHaveCount(0);
     await floating.screenshot({ path: testInfo.outputPath("pet-interaction-wheel.png") });
@@ -864,6 +1119,7 @@ test.describe("Todo Agent desktop shell", () => {
       { menu: "挠痒痒", action: "tickle", effect: ".pet-tickle-feather", animation: "pet-feather-tickle" },
       { menu: "击掌", action: "high-five", effect: ".pet-high-five-hand", animation: "pet-user-high-five" },
       { menu: "玩毛线球", action: "play", effect: ".pet-prop-ball", animation: "pet-ball-play" },
+      { menu: "喂零食", action: "snack", effect: ".pet-prop-snack", animation: "pet-snack-bite" },
       { menu: "轻戳肚子", action: "poke", effect: ".pet-poke-finger", animation: "pet-finger-poke" },
       { menu: "一起休息", action: "drink", effect: ".pet-prop-cup", animation: "pet-sip" },
     ] as const;
@@ -942,6 +1198,19 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.getByRole("heading", { name: "小序的小窝" })).toBeVisible();
     await expect(main.getByRole("button", { name: "成长" })).toHaveClass(/active/u);
     await expect(main.getByText(/亲密度 0/u)).toBeVisible();
+    await expect(main.getByRole("region", { name: "弹性习惯" })).toBeVisible();
+    await expect(main.getByRole("region", { name: /今日进展|今晚回顾/u })).toBeVisible();
+    await main.getByRole("region", { name: "弹性习惯" }).getByRole("button", { name: "完成一次" }).first().click();
+    await expect(main.getByRole("region", { name: "弹性习惯" }).getByRole("button", { name: "已记下" }).first()).toBeVisible();
+    const weeklyCheckin = main.getByRole("region", { name: "每周 Check-in" });
+    await expect(weeklyCheckin).toBeVisible();
+    await weeklyCheckin.getByRole("button", { name: "集中火力" }).click();
+    await weeklyCheckin.getByLabel("想留一句话吗（可选）").fill("这周先守住一个重要节奏");
+    await weeklyCheckin.getByRole("button", { name: "记下本周节奏" }).click();
+    await expect(weeklyCheckin).toContainText("本周已记下");
+    await expect(weeklyCheckin).toContainText("这周先守住一个重要节奏");
+    await expect(main.getByRole("region", { name: "宠物回顾" })).toBeVisible();
+    await expect(main.getByRole("region", { name: "宠物回顾" })).toContainText("暂时没有逾期");
 
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
@@ -1025,6 +1294,16 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(floating.locator(".floating-shell")).toHaveClass(/pet-reaction-collapsed/u);
     await floating.getByRole("button", { name: "展开宠物消息气泡" }).click();
     await expect(floating.getByText("嗯，再摸一下也可以。", { exact: true })).toBeVisible();
+    await avatar.evaluate((element) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData("text/plain", "https://example.com/research");
+      element.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer }));
+      element.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer }));
+      element.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
+    });
+    await expect(floating.getByRole("region", { name: "宠物收到的拖入内容" })).toBeVisible();
+    await floating.getByRole("button", { name: "带入聊聊" }).click();
+    await expect(floating.getByRole("button", { name: "聊聊", exact: true })).toHaveClass(/active/u);
     await floating.screenshot({
       path: testInfo.outputPath("pet-expanded-reaction-safe-area.png"),
     });
@@ -1655,6 +1934,106 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.getByRole("form", { name: "新建任务" })).toBeVisible();
   });
 
+  test("manages a local project entity without duplicating task data", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const navigation = main.getByRole("navigation", { name: "主导航" });
+    await navigation.getByRole("button", { name: "项目", exact: true }).click();
+    await expect(main.getByRole("main", { name: "项目总览" })).toBeVisible();
+
+    await main.getByLabel("新项目名称").fill("研究空间");
+    await main.getByRole("button", { name: "新建项目", exact: true }).click();
+    const card = main.locator(".project-card", { hasText: "研究空间" });
+    await expect(card).toBeVisible();
+
+    await card.getByRole("button", { name: "重命名研究空间" }).click();
+    await main.getByLabel("重命名项目").fill("研究空间 2");
+    await main.getByRole("button", { name: "保存项目名称" }).click();
+    await expect(card).toContainText("研究空间 2");
+
+    await card.getByRole("button", { name: "归档研究空间 2" }).click();
+    await expect(card).toContainText("已归档");
+    await card.getByRole("button", { name: "恢复研究空间 2" }).click();
+    await expect(card).not.toContainText("已归档");
+
+    await card.getByRole("button", { name: "删除研究空间 2" }).click();
+    await card.getByRole("button", { name: "确认删除研究空间 2" }).click();
+    await expect(card).toHaveCount(0);
+  });
+
+  test("manages a local list entity and associates a task", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const navigation = main.getByRole("navigation", { name: "主导航" });
+    await navigation.getByRole("button", { name: "清单", exact: true }).click();
+    await expect(main.getByRole("main", { name: "清单管理" })).toBeVisible();
+
+    await main.getByLabel("新清单名称").fill("周末安排");
+    await main.getByRole("button", { name: "新建清单", exact: true }).click();
+    const card = main.locator(".project-card", { hasText: "周末安排" });
+    await expect(card).toBeVisible();
+
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill("清单关联任务");
+    await main.locator("#new-list").fill("周末安排");
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    await expect(card).toContainText("清单关联任务");
+
+    await card.getByRole("button", { name: "重命名周末安排" }).click();
+    await main.getByLabel("重命名清单").fill("周末安排 2");
+    await main.getByRole("button", { name: "保存清单名称" }).click();
+    await expect(card).toContainText("周末安排 2");
+    await card.getByRole("button", { name: "删除周末安排 2" }).click();
+    await card.getByRole("button", { name: "确认删除周末安排 2" }).click();
+    await expect(card).toHaveCount(0);
+  });
+
+  test("previews a private local text attachment without opening a system window", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const userDataPath = await app.evaluate(({ app: electronApp }) => electronApp.getPath("userData"));
+    const attachmentId = "e2e-preview-text";
+    const attachmentPath = path.join(userDataPath, "attachments", `${attachmentId}-notes.md`);
+    await mkdir(path.dirname(attachmentPath), { recursive: true });
+    await writeFile(attachmentPath, "# 私人预览\n\n这段内容只在任务详情中显示。", "utf8");
+    const taskId = await main.evaluate(async ({ attachmentId: id, localPath }) => {
+      const api = window.desktopApi;
+      if (!api) throw new Error("Desktop API is unavailable");
+      const created = await api.tasks.create({ title: "附件预览验收", source: { type: "local" } });
+      await api.tasks.update({
+        id: created.task.id,
+        patch: {
+          attachments: [{ id, name: "notes.md", mimeType: "text/markdown", localPath }],
+        },
+      });
+      return created.task.id;
+    }, { attachmentId, localPath: attachmentPath });
+    const windowCountBeforePreview = app.windows().length;
+
+    await main.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: /全部任务/u }).click();
+    const row = main.locator(".task-row", { hasText: "附件预览验收" });
+    await expect(row).toBeVisible();
+    await main.getByLabel("搜索任务").fill("notes.md");
+    await expect(main.locator(".task-row", { hasText: "附件预览验收" })).toBeVisible();
+    await main.getByLabel("搜索任务").fill("");
+    await row.locator(".task-body").click();
+    await expect(main.getByLabel("预览附件notes.md")).toBeVisible();
+    await main.getByLabel("预览附件notes.md").click();
+    const preview = main.getByRole("dialog", { name: "notes.md" });
+    await expect(preview).toBeVisible();
+    await expect(preview.locator(".attachment-preview-text")).toContainText("私人预览");
+    await preview.getByRole("button", { name: "关闭附件预览" }).click();
+    await expect(preview).toBeHidden();
+    expect(app.windows().length).toBe(windowCountBeforePreview);
+    expect(taskId).toBeTruthy();
+  });
+
   test("completes the visible local task lifecycle without losing edits", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
@@ -1686,6 +2065,16 @@ test.describe("Todo Agent desktop shell", () => {
     await main.locator("#new-reminder").fill("2026-08-10T08:00");
     await main.getByRole("button", { name: "保存到本地" }).click();
 
+    const dependencyId = await main.evaluate(async () => {
+      const api = window.desktopApi;
+      if (!api) throw new Error("Desktop API is unavailable");
+      const result = await api.tasks.create({
+        title: "验收前置依赖",
+        source: { type: "local" },
+      });
+      return result.task.id;
+    });
+
     const row = main.locator(".task-row", { hasText: title });
     await expect(row).toBeVisible();
     await expect(
@@ -1702,10 +2091,64 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.locator("#local-reminder")).toHaveValue(
       "2026-08-10T08:00",
     );
+    await expect(
+      main.locator("#task-dependencies option", { hasText: "验收前置依赖" }),
+    ).toBeVisible();
+    await expect(main.getByText("创建任务", { exact: true })).toBeVisible();
+    await main.locator("#task-dependencies").selectOption(dependencyId);
+    await expect(main.locator("#task-dependencies")).toHaveValues([dependencyId]);
+    await expect(
+      main.getByText("还有 1 项前置任务未完成", { exact: true }),
+    ).toBeVisible();
+    await main.locator("#task-link-url").fill("file:///tmp/private.txt");
+    await main.getByRole("button", { name: "添加链接", exact: true }).click();
+    await expect(
+      main.getByText("链接只支持 http 或 https 地址", { exact: true }),
+    ).toBeVisible();
+    await main.locator("#task-link-url").fill("https://example.com/验收");
+    await main.locator("#task-link-label").fill("验收资料");
+    await main.getByRole("button", { name: "添加链接", exact: true }).click();
+    await expect(
+      main.locator(".task-link-open", { hasText: "验收资料" }),
+    ).toBeVisible();
+    await main.locator("#custom-field-key").fill("客户");
+    await main.locator("#custom-field-value").fill("Todo Agent");
+    await main.getByRole("button", { name: "添加字段", exact: true }).click();
+    await expect(
+      main.locator(".custom-field-row", { hasText: "客户" }),
+    ).toContainText("Todo Agent");
+    await main.getByRole("button", { name: "移除自定义字段客户", exact: true }).click();
+    await expect(main.locator(".custom-field-row", { hasText: "客户" })).toHaveCount(0);
+    await main.locator("#custom-field-key").fill("预计人数");
+    await main.locator("#custom-field-type").selectOption("number");
+    await main.locator("#custom-field-value").fill("3.5");
+    await main.getByRole("button", { name: "添加字段", exact: true }).click();
+    await expect(main.locator(".custom-field-row", { hasText: "预计人数" })).toContainText("3.5");
+    await main.getByRole("button", { name: "移除自定义字段预计人数", exact: true }).click();
+    await main.locator("#custom-field-key").fill("需要回访");
+    await main.locator("#custom-field-type").selectOption("checkbox");
+    await main.locator("#custom-field-value").selectOption("true");
+    await main.getByRole("button", { name: "添加字段", exact: true }).click();
+    await expect(main.locator(".custom-field-row", { hasText: "需要回访" })).toContainText("已勾选");
+    await main.getByRole("button", { name: "移除自定义字段需要回访", exact: true }).click();
+    await main.locator("#task-attachment-url").fill("file:///tmp/private.pdf");
+    await main.getByRole("button", { name: "添加附件", exact: true }).click();
+    await expect(
+      main.getByText("附件只支持 http 或 https 地址", { exact: true }),
+    ).toBeVisible();
+    await main.locator("#task-attachment-name").fill("验收文档");
+    await main.locator("#task-attachment-url").fill("https://example.com/验收.pdf");
+    await main.getByRole("button", { name: "添加附件", exact: true }).click();
+    await expect(
+      main.locator(".task-attachment-open", { hasText: "验收文档" }),
+    ).toBeVisible();
+    await main.getByRole("button", { name: "移除附件验收文档", exact: true }).click();
+    await expect(main.locator(".task-attachment-row", { hasText: "验收文档" })).toHaveCount(0);
 
     await main.getByLabel("任务标题", { exact: true }).fill(editedTitle);
     await main.getByLabel("任务标题", { exact: true }).press("Tab");
     await expect(main.locator(".task-row", { hasText: editedTitle })).toBeVisible();
+    await expect(main.getByText("标题", { exact: true })).toBeVisible();
     await main.getByLabel("任务备注", { exact: true }).fill("第二版备注");
     await main.getByLabel("任务备注", { exact: true }).press("Tab");
     await expect(main.getByLabel("任务备注", { exact: true })).toHaveValue("第二版备注");
@@ -1788,6 +2231,12 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(editedRow).toContainText(updatedDueLabel);
     await expect(editedRow).not.toContainText(previousDueLabel);
 
+    await navigation.getByRole("button", { name: "项目", exact: true }).click();
+    await expect(main.getByRole("heading", { name: "项目", exact: true })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "更新后的项目", exact: true })).toBeVisible();
+    await main.locator(".project-task-row", { hasText: editedTitle }).click();
+    await expect(main.getByLabel("任务标题", { exact: true })).toHaveValue(editedTitle);
+
     await main.getByLabel(`完成${editedTitle}`).click();
     await expect(
       navigation.getByRole("button", { name: /已完成.*1/u }),
@@ -1797,7 +2246,7 @@ test.describe("Todo Agent desktop shell", () => {
     await main.getByLabel(`恢复${editedTitle}`).click();
     await expect(main.getByText(editedTitle, { exact: true })).toHaveCount(0);
     await expect(
-      navigation.getByRole("button", { name: /全部任务.*1/u }),
+      navigation.getByRole("button", { name: /全部任务.*2/u }),
     ).toBeVisible();
 
     await navigation.getByRole("button", { name: /全部任务/u }).click();
@@ -1992,6 +2441,18 @@ test.describe("Todo Agent desktop shell", () => {
     const quick = await windowFor(app, "quick");
     await quick.waitForLoadState("domcontentloaded");
     const input = quick.getByLabel("快速录入");
+    await app.evaluate(({ clipboard }) => clipboard.writeText("来自剪贴板的上下文"));
+    await quick.getByRole("button", { name: "剪贴板", exact: true }).click();
+    await expect(quick.getByRole("region", { name: "剪贴板上下文预览" })).toBeVisible();
+    await quick.getByRole("button", { name: "带入输入框" }).click();
+    await expect(input).toHaveValue("来自剪贴板的上下文");
+    await quick.getByRole("button", { name: "关闭剪贴板预览" }).click();
+    await quick.getByRole("button", { name: "当前窗口", exact: true }).click();
+    await expect(quick.getByRole("region", { name: "当前窗口上下文预览" })).toBeVisible();
+    await quick.getByRole("button", { name: "关闭当前窗口预览" }).click();
+    await quick.getByRole("button", { name: "选中文本", exact: true }).click();
+    await expect(quick.getByRole("region", { name: "选中文本上下文预览" })).toBeVisible();
+    await quick.getByRole("button", { name: "关闭选中文本预览" }).click();
     const captureText = "今天23:59完成周报，提前1小时提醒 #工作";
     await input.fill(captureText);
     const parsed = await quick.evaluate(
@@ -2079,6 +2540,9 @@ test.describe("Todo Agent desktop shell", () => {
         floating: { ...settings.floating, privacyMode: false },
       });
     });
+    await expect.poll(async () => floating.locator(".floating-shell").evaluate((element) =>
+      element.classList.contains("privacy-mode"),
+    )).toBe(false);
     await chatTab.click();
     const agentPrompt = "请给我一个简短的下午规划";
     await floating.getByLabel("给 Agent 发消息").fill(agentPrompt);
@@ -2089,12 +2553,44 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(
       floating.getByText(/模型未启用。今天有/u).last(),
     ).toBeVisible();
+    // The isolated profile may restore the last main-app route from an earlier
+    // scenario; bring the shared task surface back to Today before asserting
+    // the cross-window fallback copy.
+    await main
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("button", { name: /^今天(?: \d+)?$/u })
+      .click();
     await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
     await expect(main.getByLabel("给 Agent 发消息")).toBeHidden();
 
     await main.screenshot({
       path: path.join(projectRoot, "test-results", "main-window.png"),
     });
+  });
+
+  test("previews and creates a built-in workflow template from quick capture", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.evaluate(() => window.desktopApi?.shell.showQuickCapture());
+    const quick = await windowFor(app, "quick");
+    await quick.waitForLoadState("domcontentloaded");
+    const input = quick.getByRole("textbox", { name: "快速录入" });
+    await input.fill("Todo Pet 发布说明");
+    await quick.getByLabel("工作流模板选择").selectOption("publish-article");
+    const preview = quick.getByRole("region", { name: "工作流模板预览" });
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText("发布文章");
+    await expect(preview).toContainText("确认后会创建 3 项任务");
+    await expect(preview).toContainText("列出提纲：Todo Pet 发布说明");
+    await quick.getByRole("button", { name: "保存到本地" }).click();
+
+    await main.evaluate(() => window.desktopApi?.shell.showMain("all"));
+    await expect(main.getByRole("button", { name: /^列出提纲：Todo Pet 发布说明/u })).toBeVisible();
+    await expect(main.getByRole("button", { name: /^完成初稿：Todo Pet 发布说明/u })).toBeVisible();
+    await expect(main.getByRole("button", { name: /^校对并发布：Todo Pet 发布说明/u })).toBeVisible();
   });
 
   test("uses the latest hover delay when settings change under the floating entry", async () => {
@@ -2115,7 +2611,7 @@ test.describe("Todo Agent desktop shell", () => {
     const expand = floating.getByRole("button", { name: "展开 小序" });
     await expect(expand).toHaveAttribute(
       "title",
-      "停留 0.3 秒或单击展开 · 双击打开主窗口",
+      expect.stringContaining("停留 0.3 秒或单击展开"),
     );
 
     await floating.locator(".pet-compact").hover();
@@ -2129,7 +2625,7 @@ test.describe("Todo Agent desktop shell", () => {
     });
     await expect(expand).toHaveAttribute(
       "title",
-      "停留 1.6 秒或单击展开 · 双击打开主窗口",
+      expect.stringContaining("停留 1.6 秒或单击展开"),
     );
 
     // The original 300ms timer would have opened by now. The panel remains
@@ -2220,6 +2716,10 @@ test.describe("Todo Agent desktop shell", () => {
 
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
+    // The previous test may leave the OS pointer over the same screen area
+    // where the new floating window appears. Move it to the transparent
+    // corner so this assertion exercises automatic rotation, not hover pause.
+    await main.mouse.move(1, 1);
     const carousel = floating.locator(".floating-carousel");
     const carouselTitle = carousel.locator(".floating-carousel-item");
     await expect(carousel).toHaveAttribute("data-carousel-mode", "rotating");

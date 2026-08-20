@@ -56,12 +56,47 @@ flowchart LR
 - 每次修改生成 operation ID、before/after 差异和撤销记录。
 - 飞书写入进入持久同步队列；任务本体立即显示 `pending`，队列跨重启恢复。
 - 模型 API Key、飞书专属 App Secret 和用户 Token 使用 Electron `safeStorage` 加密后保存；普通设置只保存凭据引用，无法使用系统安全存储时不允许持久保存明文。
+- 数据可迁移分为两条路径：`DataPortabilityService.exportJson` 生成可恢复的 JSON（仍按用户选择做脱敏），`exportMarkdown` 只投影任务、项目和清单为人类可读清单，默认 `private` 脱敏并明确不包含草稿、撤销操作、设置、权限审计、凭据、附件本地路径或文件内容；桌面控制器通过同目录临时文件 + 原子替换写入 `.md` / `.markdown`。
 
 ## 4. 窗口与系统入口
 
 - Main：Today、Agent、同步与设置。
+- 周视图项目健康由 src/renderer/project-health.ts 纯函数从任务快照投影生成：依赖、逾期、排程和容量只用于解释，不写回任务；本周容量小时和每周 Check-in 记录属于本地偏好/仪式数据，使用带周起始日校验的 localStorage，跨周不会误继承。
+- 工作周期由 src/renderer/work-cycles.ts 纯函数从同一任务快照投影生成：以 Monday-first 为边界支持 1 周 / 2 周，容量由本地每周可投入小时缩放；只统计已有 `plannedDate`、开始时间或时间块的开放任务作为已安排负载，并单独列出无日期/待排候选。该模块不新增 Task 字段、不创建 IPC、不进入 Feishu payload，前后周期与周期长度只保存在 renderer localStorage。
+- 晨间简报的“只剩 2 小时方案”直接调用 `src/shared/daily-planner.ts` 的 `suggestDailyPlan`，传入 120 分钟容量和最多 3 项上限；它只从当前开放任务快照生成候选与 `primaryReason`，不写入任务、不创建 operation。用户点击确认后才进入已有 `DailyPlanSheet` 的预览、原子应用和撤销流程。
+- 今日规划同样将 `DailyPlanConstraints`（本地可用起止时段、过渡 `bufferMinutes`、`minimumBlockMinutes`）传给 `suggestDailyPlan`；规划器返回 `effectiveCapacityMinutes`、`availableWindowMinutes` 和每项的 `belowMinimumBlock` / `short-block` 原因。它只改变建议排序与解释，不进入 `TaskService.applyTodayPlan` 的飞书 payload；用户仍可在 `DailyPlanSheet` 中手动加入短任务并一次确认。
+- `src/shared/daily-schedule.ts` 由 `DailyPlanSheet` 调用生成确认前的只读时间块预览：当天已有 `timeBlock` / 开始时间的任务固定在原位，其余任务按选中顺序填入可用时段并留出过渡缓冲；重叠、超出窗口和无空档项作为显式冲突返回。该纯函数不修改 Task、不创建 operation、不增加 IPC，也不进入 Feishu 写回 payload，用户确认后仍只应用 Today 私人计划字段。
+- `src/shared/multi-day-schedule.ts` 在当天排不下时生成未来 5 个工作日的只读顺延投影：保留固定时间块、跳过周末弹性容量、在截止日期后停止候选，并返回 `past-deadline` / `no-capacity` / `horizon` 原因。它只接受当前任务快照和规划约束，不写 `plannedDate` / `timeBlock`，不创建 IPC 或 operation，UI 也不把预览结果当成已保存事实。
+- 日终回顾的“安排明天”复用 `DailyPlanSheet`，由 renderer 传入目标日期与相对标签；规划数据仍读取同一 open/completed 快照，确认后调用现有 `tasks:apply-today-plan` 原子事务。TaskService 允许今天或未来本地日期、拒绝已经过去的日期；事务只改 `plannedDate`、`privateOrder` 和用户确认的 `estimatedMinutes`，operation 仍可整体撤销，Feishu adapter 不会收到这些私人字段。
+- `src/renderer/InboxTriageSheet.tsx` 是暂存的渐进式整理视图：队列由当前 controller 快照中“开放且没有 `plannedDate` / `projectId` / `listId`”的任务投影，并用本地 `processedIds` 管理本轮“稍后”与已处理项；今天/明天调用 `tasks.update` 的私人 `plannedDate`，完成调用 `toggleComplete`，打开详情只选择原任务，因而不会复制 Inbox 数据或绕过普通同步/权限路径。
+- Todo Pet 回顾由 src/renderer/pet-review.ts 纯函数生成逾期、依赖阻塞与待排时间三类去重队列；分类点击只调用现有导航，不新增任务副本或隐式写操作。
+- 任务依赖由 TaskService 在新增和编辑时做有向图循环校验；renderer 的任务详情使用原生多选维护前置任务，缺失的远端 ID 不被静默丢弃而继续作为 blocked 信号。依赖字段属于私人计划层，飞书任务的依赖编辑不会进入共享写回载荷。
+- 任务详情链接复用 Task.links 私人字段；渲染层添加前以 URL 构造器限制为 http/https，打开仍经过白名单 shell.openExternal，删除通过普通任务更新记录撤销操作，不进入飞书共享写回。
+- 任务详情自定义字段复用 Task.customFields 私人字段；renderer 仅接受不超过 40 字的键和 500 字的值，并将文本、数字、日期、http/https 链接和勾选转换为受限 JsonValue；按键覆盖或删除通过普通任务更新持久化，FeishuTaskAdapter 保持该字段本地，不进入共享写回载荷。
+- 任务详情历史复用 LocalAppState.operations：`tasks:history` 在主进程按 taskId 过滤最近操作，仅比较用户可识别字段并返回 operationId、类型、时间、撤销时间和字段名称；before/after 快照、私人正文、附件路径、同步内部字段不穿过 IPC。这样历史与 undo 共用同一事务日志，不引入第二份状态；同步拉取产生的远端变化仍由任务内容、版本和 FeishuStatus 呈现。
+- 任务讨论复用 `Task.comments` 私人字段，最多 100 条、每条正文最多 10000 字，并在 TaskService 事务中校验唯一 ID、作者枚举和时间戳。它通过普通 `tasks:update` 记录操作，因此可撤销；`patchHasRemoteImpact` 与 Feishu 共享字段 allow-list 都排除 comments，远端拉取也不会覆盖；导出完整包可保留讨论，private/strict 脱敏会清空，Agent 只有在 `modelDataScope.notes`（且飞书任务同时允许 `feishuContent`）时获得不含评论 ID 的正文摘要。
+- 研究卡复用 `Task.researchCards` 私人字段，每项包含标题、可选安全 http/https 来源、摘要、行动项和捕获时间，TaskService 限制每任务 20 张、每卡 20 条行动项并做唯一 ID、长度与 URL 校验。`FeishuTaskAdapter` 不读取该字段，普通更新仍可撤销但不会排队远端写入；完整导出保留卡片，private/strict 脱敏清空。Agent 通过独立的 `task_add_research_card` R1 工具添加卡片，读取仍受 `modelDataScope.notes` 与 `feishuContent` 约束。
+- Agent 任务拆分使用 `task_split` R2 工具：参数严格限制为 2–7 个唯一标题、每项最多 5,000 字备注、5–720 分钟估时和标准优先级；审批预览包含父任务、步骤、预计时长和 `remoteWrite=false`。执行时复用 TaskService 的普通创建事务，为每个子任务写入本地 `parentId`、项目/清单/私人计划继承关系和 `sync=local`，返回每项任务与 operation ID；父任务和 Feishu 队列不被修改，取消或部分失败会返回已处理索引。
+- 宠物日记的 `PetDiaryEntry.taskIds` 是可选的本地关系字段。生成日记时从当天已完成任务快照写入去重后的 ID，渲染层仅用当前任务快照解析标题并导航；旧日记没有该字段时按无关联兼容。它不复制任务、不进入 Agent 默认数据范围，也不参与 FeishuTaskAdapter 或任何远端 payload。
+- 任务详情的“写入宠物日记”调用 `pet:diary-from-task`，主进程重新读取任务后把标题、状态和当前专注事实交给 `PetService.createDiaryFromTask`；服务在宠物状态文件的一次原子事务内写入 `generation=user` 条目和单一 `taskIds` 关系，重复点击同一未编辑条目复用原 ID。任务备注、附件和同步字段不会被复制，日记仍是本地关系层。
+- 批量任务动作通过 `tasks:apply-bulk-action` 暴露为受限的判别联合（complete / reopen / move-to-today / trash / restore）。渲染层先收集精确任务 ID 和 `updatedAt` 基线，预览确认后主进程在一次 LocalStore 事务中先验证全部目标、角色、会签、回收站状态和基线，再写入一个 `bulk` operation；完成循环任务时生成的下一次任务也纳入同一 operation。普通任务和飞书任务沿用原有 `applyPatch` / `markSync` 边界，Today 安排只写私人计划字段；撤销复用快照冲突保护，不能把后续本地编辑或远端拉取覆盖掉。
+- 全局任务文本搜索只在主进程对已保存字段做确定性匹配，除标题/备注/来源外包含附件名称与 MIME、链接名称/地址、自定义字段键值、研究卡标题/摘要/行动项与来源；不会读取本地附件正文，也不会因搜索把私人上下文加入飞书写回或 Agent 数据范围。
+- 保存视图由 `src/renderer/smart-views.ts` 以版本兼容的本地 JSON 保存；除优先级、项目和来源外，v1.33 增加精确标签与日期范围（逾期、今天、未来 7 天、无日期），v1.41 增加手动情境条件。读取旧视图时补齐 `tag=all`、`context=all` 与 `dateFilter=any`，过滤只对当前任务快照做确定性投影，不修改任务、不增加同步载荷，也不把筛选条件发送给 Agent。
+- 任务 `contexts` 是最多 20 个、每项 1–40 字的本地字符串数组；TaskService 会折叠空白并按不区分大小写拒绝重复值，搜索与 `TaskFilter.contexts` 支持 any/all 匹配。渲染层在任务详情和新建任务中用逗号输入，并在行内显示有限数量的上下文胶囊。FeishuTaskAdapter 的共享字段白名单排除 contexts，因此新增、编辑、撤销、远端拉取都不会把它写回或覆盖；导入校验同样限制长度和重复值。
+- v1.35 为保存视图增加 `sort`（`manual` / `priority` / `due` / `title` / `created`）。`readSmartViews` 会把旧视图迁移为 `manual`；`sortSmartViewTasks` 使用稳定排序，不修改 controller 快照，Today 只有 `manual` 才暴露拖动排序。排序设置仅保存在 renderer 本地视图 JSON，不进入 TaskService、撤销日志或 Feishu 写回。
+- 子任务进度由 `src/renderer/subtask-progress.ts` 从当前任务快照按 `parentId/status/deletedAt` 纯函数投影，父任务行只显示完成数/总数，详情用原生 `progressbar` 暴露 `aria-valuenow`。它不新增持久化字段、不参与 FeishuTaskAdapter 共享写回；详情内完成子任务使用保留父任务选择的 mutation 选项，避免操作后跳出上下文，也明确不自动完成父任务。
+- 任务附件由两类私人上下文组成：renderer 可添加 http/https 外部引用，也可请求主进程系统文件选择器。主进程把选中文件复制到 `userData/attachments`（单文件 25 MiB、单批 100 MiB/20 个上限），使用不透明 ID、0600 文件权限，并在打开、预览、删除时再次校验目录边界、文件前缀和真实路径，拒绝路径穿越与逃逸符号链接。`tasks:preview-attachment` 只允许主进程读取本地副本，文本预览上限 512 KiB，PNG/JPEG/GIF/WebP 预览上限 4 MiB，PDF、Office、压缩包和外部 URL 不自动读取并回退系统打开；响应只返回脱离路径的文本或 data URL。附件元数据不进入 FeishuTaskAdapter 共享写回，数据导出会剥离 `localPath`，本地文件内容不会上传或导出。
+- 项目看板由 src/renderer/project-board.ts 纯函数从同一任务快照投影三列；项目筛选只读取 `projectId`，完成/重开通过现有 TaskService 更新并保留撤销，blocked 列由 `dependencyIds` 和前置状态计算，不能被 UI 直接写成假阻塞。
+- 项目总览由 `src/renderer/ProjectPage.tsx` 从 open + completed 两个既有任务快照按 `projectId` 投影；逾期使用任务截止事实，阻塞跨项目查找同一依赖 ID，点击任务沿用现有导航与 inspector。项目定义持久化在 `LocalAppState.projects`，由 `TaskService` 统一做名称、颜色、归档和删除校验；删除项目与解除任务关联在同一 LocalStore 事务内完成，关联字段仍是私人上下文，不进入 FeishuTaskAdapter 的共享写回。
+- 项目实体通过 `projects:list/create/update/delete` 类型化 IPC 暴露给渲染层。旧状态文件缺少 `projects` 时由 LocalStore 在内存中迁移为空对象；数据导出/导入包含项目元数据，复制策略为冲突项目生成新 ID 并同时重映射任务及撤销快照中的 `projectId`，避免复制后任务指向原项目。
+- 清单实体通过 `lists:list/create/update/delete` 类型化 IPC 暴露给渲染层。旧状态文件缺少 `lists` 时由 LocalStore 在内存中迁移为空对象；数据导出/导入包含清单元数据，复制策略为冲突清单生成新 ID 并同时重映射任务及撤销快照中的 `listId`，避免复制后任务指向原清单。删除清单与解除任务关联在同一 LocalStore 事务内完成，且不产生可恢复的任务操作。
 - Quick Capture：无边框、快捷键呼出、失焦可恢复草稿。
 - Todo Pet：唯一桌面悬浮窗口；透明不规则命中区、可拖动、置顶、多显示器，并支持紧凑、悬停预览、展开、专注和安静状态。
+- Todo Pet 动作包：渲染进程只接受版本化 JSON 声明，经过字段白名单、动作白名单、长度和唯一性校验后写入本地设置；动作包只能引用内置 `PetIdleAction`，不执行脚本、网络请求、文件读写或动态代码。
+- 工作流模板：渲染进程只保存版本化模板 JSON；模板步骤仅允许任务标题、备注、标签、优先级、预计时长和有限的相对日期，变量只支持 `title/date/now`。快速捕获先生成确定性预览，再逐项写入本地或飞书；不会执行模板脚本、后台定时器或隐式外部调用。Quick Capture 解析 `@情境` 与 `情境：情境` 为本地 contexts，并把解析结果作为可编辑 chip 展示；同时把 `预计 45 分钟`、`用时 1 小时`、`30m/1h` 标准化为 5–720 分钟的本地 `estimatedMinutes`，把 `每天`、`每个工作日`、`每周一/三/五`、`每月15日` 和 `每隔 2 周` 转成受限的本地 `RecurrenceRule`，均在保存前显示 chip。解析不触发定位或后台监听；模板批量创建仍使用各步骤自己的估时定义，快速捕获循环只写入非模板本地任务。
+- 可执行下一步建议由 `src/renderer/pet-companion.ts` 的 `recommendNextTask` 纯函数生成：只读取当前任务快照，跳过完成、删除和未满足前置依赖的任务，按逾期、今天计划/截止、优先级、私有顺序和稳定 ID 排序，返回 `taskId`、标题与简短原因。主动气泡的“开始专注 / 查看任务”只调用既有入口，不写任务字段、不创建 operation、不进入 Feishu payload；`privacyMode` 会在生成文案前移除任务引用。
+- 提醒防疲劳：`NotificationSettings.dailyTaskReminderLimit` 控制普通任务通知的本地日预算（`0` 为不限，默认 `8`）；`taskIgnoreBackoffEnabled` 开启后，同一任务提醒被关闭两次会被降频；`taskReminderMinIntervalMinutes` 控制不同任务之间的最小间隔；`taskReminderSourceMode` 可独立限制本地 / 飞书来源，`taskReminderProjectMode` 对已有 `projectId` 提供最多 100 个项目例外，项目策略优先。调度器把实际任务横幅记录在提醒运行状态中，跨重启继续计数；晨报、同步风险和 Agent 审批不消耗普通任务预算，安静时段和临时静音仍优先。Todo Pet 的主动消息由 `PetService` 按 `pet.proactiveDailyLimit` 在主进程做最终预算校验，渲染层只做提前隐藏的体验优化。
+- 上下文捕获：剪贴板、当前窗口和选中文本都走显式 Preload 白名单方法；选中文本只在用户动作后向前台应用发送一次复制指令，读取有上限的纯文本，尽量恢复原剪贴板格式，失败时降级为不可用，不建立后台监听。
 - Tray/Menu bar：显示同步、Agent、全权限和停止入口。
 - 单实例锁保证只有一个写入进程；第二次启动聚焦已有窗口。
 
@@ -74,6 +109,7 @@ flowchart LR
 `personal-direct` 创建时使用 `createOnly: true`，并显式预填用户权限 `task:task:read`、`task:task:write`、`offline_access`；飞书最小基座实际附带能力仍以真实确认页为准。已有专属凭据时重新授权直接复用应用。`existing-direct` 接受已有应用的 App ID 与安全凭据引用，跳过注册并进入同一 Device OAuth 运行时，不启动回调服务器；Secret 仅由主进程从系统安全存储取用。`relay` 保留为已有 HTTPS Relay/集中治理的兼容模式，`local-development` 只保留传统本机回调调试路径；它们都不是默认零服务器流程的依赖。详细流程与真实账号门禁见 [FEISHU_CONNECTION.md](./FEISHU_CONNECTION.md)。
 
 - 本地任务 ID 永久稳定，飞书 ID 只是外部映射。
+- 全量拉取先读取“我负责”任务，再枚举 `task:tasklist:read` 授权范围内的清单并去重补齐；缺少该权限时安全降级并在同步状态中提示，不将列表缺失当作远端删除。
 - 远端版本参与三方冲突判定并在写入前重新拉取；当前飞书 Task v2 更新接口没有可依赖的条件版本参数，因此真实租户发布门禁还需验证写后确认与并发窗口，不能宣称数据库级 CAS。
 - 私人计划、私人排序、时间块和专注状态永不出现在远端写入 payload。
 - 网络、限流和临时错误指数退避；认证错误暂停队列并要求重新授权。
@@ -82,6 +118,8 @@ flowchart LR
 ## 6. Agent 与权限
 
 Agent 使用 OpenAI-compatible Chat Completions 工具协议。模型只产生类型化提案，不能直接写数据。
+
+模型连接由主进程按设置创建：主模型、本地备用模型和 local-only 三种路由共享同一权限与审计链。备用切换只接受网络、408、429 和 5xx 这类可重试错误，并且要求尚未发出流式文本；一旦已有内容或出现参数/权限错误，原错误直接返回，避免重复工具执行。两套连接的凭据引用独立保存，模型数据范围不因切换而扩大。
 
 ```text
 用户请求 → 本地确定性检索 → 模型工具提案 → Schema 校验

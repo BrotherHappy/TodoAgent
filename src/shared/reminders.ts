@@ -1,3 +1,5 @@
+import type { TaskPriority } from './models';
+
 export type ReminderKind = 'task' | 'morning-brief' | 'sync-risk' | 'agent-approval';
 
 export interface ReminderCandidate {
@@ -8,6 +10,8 @@ export interface ReminderCandidate {
   body: string;
   scheduledAt: string;
   source?: 'local' | 'feishu';
+  projectId?: string;
+  priority?: TaskPriority;
   completed?: boolean;
 }
 
@@ -86,6 +90,8 @@ export interface ReminderRuntimeState {
   delivered: Record<string, string>;
   dismissed: Record<string, number>;
   snoozedUntil: Record<string, string>;
+  /** Delivery timestamps used for the local-day task notification budget. */
+  taskNotificationLog: Record<string, string>;
   lastMorningBriefDate?: string;
   lastRiskNoticeDate?: string;
 }
@@ -94,4 +100,5 @@ export const emptyReminderRuntimeState = (): ReminderRuntimeState => ({
   delivered: {},
   dismissed: {},
   snoozedUntil: {},
+  taskNotificationLog: {},
 });

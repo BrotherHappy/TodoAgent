@@ -67,6 +67,7 @@ describe("task Agent tools", () => {
         dueAt: null,
         priority: null,
         tags: null,
+        contexts: null,
         clearFields: [],
       },
       { runId: "run", signal },
@@ -81,6 +82,7 @@ describe("task Agent tools", () => {
         dueAt: null,
         priority: null,
         tags: null,
+        contexts: null,
         clearFields: [],
       },
       { runId: "run", signal },
@@ -124,6 +126,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: [],
     };
 
@@ -206,6 +209,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: [] as Array<
         "notes" | "privateNotes" | "plannedDate" | "dueAt" | "tags"
       >,
@@ -300,6 +304,7 @@ describe("task Agent tools", () => {
       dueAt: "2026-08-10T10:00:00+08:00",
       priority: "high" as const,
       tags: ["agent"],
+      contexts: null,
     };
     expect(create.argumentsSchema.safeParse(createArgs).success).toBe(true);
     const created = await create.execute(
@@ -330,6 +335,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: [],
     };
     expect(update.argumentsSchema.safeParse(changeArgs).success).toBe(true);
@@ -352,6 +358,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: ["projectId", "listId", "startAt"] as Array<
         "projectId" | "listId" | "startAt"
       >,
@@ -373,6 +380,112 @@ describe("task Agent tools", () => {
         projectId: "project-agent",
       }).success,
     ).toBe(false);
+  });
+
+  it("lets Agent attach a private research card without a Feishu write", async () => {
+    const task = (await tasks.createTask({ title: "Agent 研究上下文" })).task;
+    const tool = createTaskTools({
+      tasks,
+      getModelDataScope: () => ({
+        ...defaultSettings.modelDataScope,
+        notes: true,
+      }),
+    }).find((candidate) => candidate.name === "task_add_research_card")!;
+    const args = {
+      id: task.id,
+      title: "官方定价页",
+      url: "https://example.com/pricing",
+      summary: "提炼免费版和团队版的差异",
+      actionItems: ["补充席位数对比"],
+    };
+    expect(tool.argumentsSchema.safeParse(args).success).toBe(true);
+    const analysis = await tool.analyze(args, {
+      runId: "run",
+      signal: new AbortController().signal,
+    });
+    expect(analysis).toMatchObject({
+      risk: "R1",
+      network: [],
+      externalEffects: [],
+      preview: { remoteWrite: false },
+    });
+    const result = await tool.execute(args, executionContext("task_add_research_card"));
+    expect(result.data).toMatchObject({
+      task: {
+        researchCards: [{
+          title: "官方定价页",
+          summary: "提炼免费版和团队版的差异",
+          actionItems: ["补充席位数对比"],
+        }],
+      },
+    });
+    expect((await tasks.getTask(task.id))?.sync.status).toBe("local");
+  });
+
+  it("splits a task into reviewed local subtasks without writing the Feishu parent", async () => {
+    let changedEvents = 0;
+    const parent = (
+      await tasks.createTask({
+        title: "准备发布",
+        source: {
+          type: "feishu",
+          accountId: "primary",
+          externalId: "remote-parent",
+        },
+        projectId: "发布项目",
+        plannedDate: "2026-08-20",
+        priority: "high",
+        sync: { status: "synced" },
+      })
+    ).task;
+    const tool = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+      onTasksChanged: () => {
+        changedEvents += 1;
+      },
+    }).find((candidate) => candidate.name === "task_split")!;
+    const args = {
+      id: parent.id,
+      subtasks: [
+        { title: "整理素材", notes: "", priority: "high", estimatedMinutes: 30 },
+        { title: "撰写说明", notes: "", priority: "medium", estimatedMinutes: 45 },
+        { title: "发布检查", notes: "", priority: "low", estimatedMinutes: null },
+      ],
+    };
+    expect(tool.argumentsSchema.safeParse(args).success).toBe(true);
+    expect(tool.argumentsSchema.safeParse({
+      ...args,
+      subtasks: [args.subtasks[0], args.subtasks[0]],
+    }).success).toBe(false);
+    await expect(tool.analyze(args, {
+      runId: "split",
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({
+      risk: "R2",
+      network: [],
+      externalEffects: [],
+      preview: { action: "split-task", count: 3, remoteWrite: false },
+    });
+
+    const result = await tool.execute(args, executionContext("task_split"));
+    expect(result.status).toBe("ok");
+    expect(result.data).toMatchObject({
+      parentTaskId: parent.id,
+      createdCount: 3,
+      failedCount: 0,
+    });
+    const children = await tasks.listTasks({ includeDeleted: false });
+    const createdChildren = children.filter((task) => task.parentId === parent.id);
+    expect(createdChildren).toHaveLength(3);
+    expect(createdChildren.every((task) => task.source.type === "local")).toBe(true);
+    expect(createdChildren.map((task) => task.plannedDate)).toEqual([
+      "2026-08-20",
+      "2026-08-20",
+      "2026-08-20",
+    ]);
+    expect((await tasks.getTask(parent.id))?.sync.status).toBe("synced");
+    expect(changedEvents).toBe(1);
   });
 
   it("treats a Feishu start-time update as a reviewed remote mutation", async () => {
@@ -433,6 +546,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: "none",
       tags: [],
+      contexts: null,
     };
     expect(() =>
       definition.analyze(args, {
@@ -655,6 +769,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: [],
     };
     const prepared = await registry.prepare("stale-run", {
@@ -764,6 +879,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: "none",
       tags: [],
+      contexts: null,
     };
     expect(
       bulkCreate.argumentsSchema.safeParse({

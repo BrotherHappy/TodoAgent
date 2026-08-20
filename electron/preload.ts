@@ -69,15 +69,54 @@ const desktopApi: DesktopApi = {
     resetFocus: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskResetFocus, id),
     reorderToday: (taskIds) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskReorderToday, taskIds),
+    applyTodayPlan: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskApplyTodayPlan, request),
+    applyBulkTaskAction: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskApplyBulkAction, request),
     moveToTrash: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskTrash, id),
     restore: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskRestore, id),
     purge: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskPurge, id),
+    history: (id, limit) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskHistory, { id, limit }),
     undo: (operationId) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskUndo, operationId),
     saveDraft: (input) => ipcRenderer.invoke(DESKTOP_CHANNELS.draftSave, input),
     getDraft: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.draftGet, id),
     listDrafts: () => ipcRenderer.invoke(DESKTOP_CHANNELS.draftList),
     deleteDraft: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.draftDelete, id),
+    chooseAttachments: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskChooseAttachments),
+    openAttachment: (attachment) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskOpenAttachment, {
+        id: attachment.id,
+        localPath: attachment.localPath,
+      }),
+    previewAttachment: (attachment) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskPreviewAttachment, {
+        id: attachment.id,
+        localPath: attachment.localPath,
+      }),
+    deleteAttachment: (attachment) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskDeleteAttachment, {
+        id: attachment.id,
+        localPath: attachment.localPath,
+      }),
+    listProjects: (includeArchived) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.projectList, includeArchived),
+    createProject: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.projectCreate, input),
+    updateProject: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.projectUpdate, request),
+    deleteProject: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.projectDelete, id),
+    listLists: (includeArchived) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.listList, includeArchived),
+    createList: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.listCreate, input),
+    updateList: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.listUpdate, request),
+    deleteList: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.listDelete, id),
   },
   settings: {
     get: () => ipcRenderer.invoke(DESKTOP_CHANNELS.settingsGet),
@@ -91,6 +130,9 @@ const desktopApi: DesktopApi = {
   },
   shell: {
     getInfo: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellGetInfo),
+    readClipboard: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellReadClipboard),
+    readActiveWindow: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellReadActiveWindow),
+    readSelectedText: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellReadSelectedText),
     showMain: (route) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellShowMain, route),
     showQuickCapture: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellShowQuick),
@@ -198,6 +240,8 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.petWeatherRefresh, force),
     generateDiary: (userNote) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryGenerate, userNote),
+    createDiaryFromTask: (taskId, userNote) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryFromTask, { taskId, userNote }),
     updateDiary: (id, patch) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryUpdate, { id, patch }),
     deleteDiary: (id) =>
@@ -212,6 +256,8 @@ const desktopApi: DesktopApi = {
   data: {
     exportToFile: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.dataExport, request),
+    exportMarkdownToFile: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.dataMarkdownExport, request),
     previewImport: () => ipcRenderer.invoke(DESKTOP_CHANNELS.dataPreviewImport),
     commitImport: (previewToken, strategy) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.dataCommitImport, {

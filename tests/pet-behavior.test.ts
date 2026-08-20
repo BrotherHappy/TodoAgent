@@ -57,6 +57,7 @@ describe("Todo Pet behavior state machine", () => {
   it("returns warm, time-boxed responses for direct interactions", () => {
     expect(interactionResponse("pet", "小序")).toMatchObject({ action: "pet" });
     expect(interactionResponse("play", "小序")).toMatchObject({ action: "play" });
+    expect(interactionResponse("treat", "小序")).toMatchObject({ action: "snack" });
     expect(interactionResponse("rest", "小序").message).toContain("喝口水");
     expect(interactionResponse("greet", "团团").message).toContain("团团");
   });
@@ -91,5 +92,7 @@ describe("Todo Pet behavior state machine", () => {
     expect(canInterruptPetAction("approve", "wave")).toBe(false);
     expect(canInterruptPetAction("work", "idle")).toBe(false);
     expect(canInterruptPetAction("idle", "pet")).toBe(true);
+    expect(canInterruptPetAction("focus", "drag")).toBe(true);
+    expect(canInterruptPetAction("approve", "drag")).toBe(false);
   });
 });

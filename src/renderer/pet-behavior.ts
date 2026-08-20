@@ -1,3 +1,5 @@
+import { taskThemeAction, type TaskThemeId } from "./task-theme-action-packs";
+
 export type PetIdleAction =
   | "idle"
   | "wave"
@@ -26,6 +28,7 @@ export type PetAction =
   | "poke"
   | "tickle"
   | "high-five"
+  | "snack"
   | "jump-rope-ready"
   | "jump-rope"
   | "drag"
@@ -65,6 +68,7 @@ export type PetInteractionKind =
   | "belly-poke"
   | "high-five"
   | "tickle"
+  | "treat"
   | "play"
   | "rest"
   | "morning"
@@ -87,6 +91,8 @@ export interface PetBehaviorContext {
   overdueCount: number;
   openTaskCount: number;
   taskDropActive?: boolean;
+  /** Inferred companion posture for the task currently being shown. */
+  taskTheme?: TaskThemeId;
 }
 
 export interface PetInteractionResponse {
@@ -206,6 +212,7 @@ export const petActionLabels: Record<PetAction, string> = {
   poke: "肚子被轻轻戳了一下",
   tickle: "被逗得发痒",
   "high-five": "和你击掌",
+  snack: "接过零食开心地吃掉",
   "jump-rope-ready": "握好绳子等你",
   "jump-rope": "和你一起跳绳",
   drag: "跟着你的鼠标移动",
@@ -264,9 +271,12 @@ export const petActionDefinitions: Record<PetAction, PetActionDefinition> = {
   poke: { priority: 35, durationMs: 2_100, interruptible: true, emotion: "curious" },
   tickle: { priority: 35, durationMs: 2_800, interruptible: true, emotion: "excited" },
   "high-five": { priority: 35, durationMs: 2_600, interruptible: true, emotion: "proud" },
+  snack: { priority: 35, durationMs: 2_700, interruptible: true, emotion: "happy" },
   "jump-rope-ready": { priority: 48, durationMs: 0, interruptible: false, emotion: "focused" },
   "jump-rope": { priority: 50, durationMs: 820, interruptible: false, emotion: "excited" },
-  drag: { priority: 45, durationMs: 1_200, interruptible: true, emotion: "excited" },
+  // A direct drag should visibly lift the pet above focus/sync postures, but
+  // it must never cover an approval or hard Agent failure state.
+  drag: { priority: 96, durationMs: 1_200, interruptible: true, emotion: "excited" },
   celebrate: { priority: 60, durationMs: 3_500, interruptible: true, emotion: "proud" },
   "task-carry": { priority: 65, durationMs: 3_600, interruptible: true, emotion: "focused" },
   "task-drop": { priority: 68, durationMs: 3_200, interruptible: true, emotion: "excited" },
@@ -305,6 +315,8 @@ export function resolvePetAction(context: PetBehaviorContext): PetAction {
   }
   if (context.focus?.status === "awaiting-completion") return "celebrate";
   if (context.focus?.status === "paused") return "focus-paused";
+  const themedAction = taskThemeAction(context.taskTheme);
+  if (themedAction) return themedAction;
   if (context.overdueCount > 0) return "alert";
   if (context.openTaskCount === 0) return "task-clear";
   return "idle";
@@ -317,10 +329,11 @@ export function emotionForPetAction(action: PetAction): PetEmotion {
 export function pickIdlePetAction(
   seed: number,
   hour: number,
-  pack: PetActionPack = "balanced",
+  pack: PetActionPack | readonly PetIdleAction[] = "balanced",
 ): PetIdleAction {
-  const actions =
-    hour >= 22 || hour < 7
+  const actions = Array.isArray(pack)
+    ? pack
+    : hour >= 22 || hour < 7
       ? quietIdleActions
       : pack === "calm"
         ? calmIdleActions
@@ -368,6 +381,14 @@ export function interactionResponse(
       emotion: "excited",
       message: "哈哈，先停一下！",
       durationMs: petActionDefinitions.tickle.durationMs,
+    };
+  }
+  if (kind === "treat") {
+    return {
+      action: "snack",
+      emotion: "happy",
+      message: "咔嚓，谢谢你。下一件小事我们也一起做。",
+      durationMs: petActionDefinitions.snack.durationMs,
     };
   }
   if (kind === "play") {

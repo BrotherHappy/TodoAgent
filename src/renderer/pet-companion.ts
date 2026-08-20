@@ -1,6 +1,6 @@
 import type { Task } from "../shared/models";
 import type { AppSettings } from "../shared/settings";
-import type { WeatherSnapshot } from "../shared/pet-types";
+import type { ProactiveMessageRecord, WeatherSnapshot } from "../shared/pet-types";
 
 export interface PetCompanionContext {
   settings: AppSettings;
@@ -13,6 +13,14 @@ export interface PetProactiveSuggestion {
   kind: "companion" | "planning" | "deadline" | "wellbeing" | "weather" | "sync" | "morning" | "evening";
   action: "wave" | "alert" | "drink" | "think" | "celebrate";
   message: string;
+  /** A real task the user can open or start immediately from the bubble. */
+  nextTask?: PetNextTask;
+}
+
+export interface PetNextTask {
+  taskId: string;
+  taskTitle: string;
+  reason: string;
 }
 
 function minutesOfDay(value: string): number | undefined {
@@ -47,12 +55,86 @@ export function shouldSuppressPetProactive(
   return Boolean(mutedUntil && new Date(mutedUntil).getTime() > now.getTime());
 }
 
+const nextTaskPriority: Record<Task["priority"], number> = {
+  urgent: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  none: 4,
+};
+
+function taskDatePart(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return /^\d{4}-\d{2}-\d{2}$/u.test(value) ? value : value.slice(0, 10);
+}
+
+function taskReason(task: Task, date: string): string {
+  const dueDate = taskDatePart(task.dueAt);
+  if (dueDate !== undefined && dueDate < date) return "已经逾期，先把它往前推进一点";
+  if (dueDate === date) return "今天截止，适合先处理";
+  if (task.plannedDate === date) return "已经安排在今天";
+  if (task.priority === "urgent" || task.priority === "high") return "优先级较高";
+  return "这是当前最容易开始的一项";
+}
+
+/**
+ * Selects one deterministic, actionable task for the pet's “what next?” card.
+ * It never changes task state and deliberately skips unresolved dependencies.
+ */
+export function recommendNextTask(
+  tasks: readonly Task[],
+  date: string,
+): PetNextTask | undefined {
+  const visible = tasks.filter(
+    (task) => task.status === "open" && !task.deletedAt,
+  );
+  const byId = new Map(
+    tasks
+      .filter((task) => !task.deletedAt)
+      .map((task) => [task.id, task]),
+  );
+  const actionable = visible.filter((task) =>
+    task.dependencyIds.every((dependencyId) => {
+      const dependency = byId.get(dependencyId);
+      return dependency !== undefined && dependency.status === "completed";
+    }),
+  );
+  // A task without dependencies is actionable; the every() check above would
+  // otherwise return false for it only if the source contains invalid data.
+  const candidates = actionable.length
+    ? actionable
+    : visible.filter((task) => task.dependencyIds.length === 0);
+  const sorted = [...candidates].sort((left, right) => {
+    const urgency = (task: Task): number => {
+      const due = taskDatePart(task.dueAt);
+      if (due !== undefined && due < date) return 0;
+      if (due === date || task.plannedDate === date) return 1;
+      return 2;
+    };
+    const leftDue = taskDatePart(left.dueAt) ?? "9999-12-31";
+    const rightDue = taskDatePart(right.dueAt) ?? "9999-12-31";
+    return (
+      urgency(left) - urgency(right) ||
+      nextTaskPriority[left.priority] - nextTaskPriority[right.priority] ||
+      leftDue.localeCompare(rightDue) ||
+      left.privateOrder - right.privateOrder ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id)
+    );
+  });
+  const task = sorted[0];
+  return task
+    ? { taskId: task.id, taskTitle: task.title, reason: taskReason(task, date) }
+    : undefined;
+}
+
 export function buildPetProactiveSuggestion(input: {
   now: Date;
   tasks: readonly Task[];
   weather?: WeatherSnapshot;
   petName: string;
   syncProblem?: boolean;
+  privacyMode?: boolean;
 }): PetProactiveSuggestion {
   const open = input.tasks.filter(
     (task) => task.status === "open" && !task.deletedAt,
@@ -65,6 +147,9 @@ export function buildPetProactiveSuggestion(input: {
     (task) =>
       task.plannedDate === date || task.dueAt?.slice(0, 10) === date,
   );
+  const nextTask = input.privacyMode
+    ? undefined
+    : recommendNextTask(input.tasks, date);
   const hour = input.now.getHours();
   if (input.syncProblem) {
     return {
@@ -84,9 +169,12 @@ export function buildPetProactiveSuggestion(input: {
     return {
       kind: "morning",
       action: "wave",
-      message: dueToday.length
-        ? `早呀！今天有 ${dueToday.length} 件事，先挑一件最值得完成的？`
+      message: nextTask
+        ? `早呀！先从「${nextTask.taskTitle}」开始？${nextTask.reason}。`
+        : dueToday.length
+          ? `早呀！今天有 ${dueToday.length} 件事，先挑一件最值得完成的？`
         : "早呀！今天的任务还很轻，给自己留一点舒服的开始吧。",
+      nextTask,
     };
   }
   if (hour >= 18) {
@@ -102,20 +190,29 @@ export function buildPetProactiveSuggestion(input: {
     return {
       kind: "deadline",
       action: "alert",
-      message: `有 ${overdue.length} 件事过了计划时间。要不要只重新安排，不责怪自己？`,
+      message: nextTask
+        ? `有 ${overdue.length} 件事过了计划时间。先处理「${nextTask.taskTitle}」？${nextTask.reason}。`
+        : `有 ${overdue.length} 件事过了计划时间。要不要只重新安排，不责怪自己？`,
+      nextTask,
     };
   }
   if (open.length >= 7) {
     return {
       kind: "planning",
       action: "think",
-      message: `清单里有 ${open.length} 件事。我们可以把今天缩成三件最重要的。`,
+      message: nextTask
+        ? `清单里有 ${open.length} 件事。先从「${nextTask.taskTitle}」开始，再把今天缩成三件。`
+        : `清单里有 ${open.length} 件事。我们可以把今天缩成三件最重要的。`,
+      nextTask,
     };
   }
   return {
     kind: "wellbeing",
     action: "drink",
-    message: `${input.petName}来提醒你：喝口水，转转肩膀，再继续也不迟。`,
+    message: nextTask
+      ? `${input.petName}来提醒你：喝口水，转转肩膀；准备好后可以从「${nextTask.taskTitle}」开始。`
+      : `${input.petName}来提醒你：喝口水，转转肩膀，再继续也不迟。`,
+    nextTask,
   };
 }
 
@@ -124,4 +221,23 @@ export function localDate(now = new Date()): string {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+/** Counts companion messages shown on the device's local calendar day. */
+export function proactiveMessagesForDate(
+  messages: readonly Pick<ProactiveMessageRecord, "shownAt">[],
+  now = new Date(),
+): number {
+  const date = localDate(now);
+  return messages.filter((message) => message.shownAt.slice(0, 10) === date).length;
+}
+
+/** Renderer-side advisory check; the main process remains authoritative. */
+export function proactiveBudgetAvailable(
+  messages: readonly Pick<ProactiveMessageRecord, "shownAt">[],
+  dailyLimit: number,
+  now = new Date(),
+): boolean {
+  if (!Number.isFinite(dailyLimit) || dailyLimit <= 0) return true;
+  return proactiveMessagesForDate(messages, now) < Math.floor(dailyLimit);
 }

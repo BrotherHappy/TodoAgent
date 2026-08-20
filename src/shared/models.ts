@@ -5,6 +5,69 @@ export type IsoDateTime = string;
 export type LocalDate = string;
 export type TaskId = string;
 
+/** A local project context. Feishu tasklists remain provider-owned and are
+ * represented by the task's source.tasklist binding; this entity is private
+ * to Todo Agent and is safe to use for both local and Feishu tasks. */
+export type TaskProjectColor = 'violet' | 'blue' | 'green' | 'amber' | 'rose' | 'slate';
+
+export interface TaskProject {
+  id: string;
+  name: string;
+  color: TaskProjectColor;
+  archived: boolean;
+  privateOrder: number;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  color?: TaskProjectColor;
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  color?: TaskProjectColor;
+  archived?: boolean;
+  privateOrder?: number;
+}
+
+export interface DeleteProjectResult {
+  projectId: string;
+  clearedTaskIds: TaskId[];
+}
+
+/** A private Todo Agent list. Unlike a Feishu tasklist binding, this is a
+ * local grouping that can be used without changing provider-owned fields. */
+export type TaskListColor = TaskProjectColor;
+
+export interface TaskList {
+  id: string;
+  name: string;
+  color: TaskListColor;
+  archived: boolean;
+  privateOrder: number;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface CreateListInput {
+  name: string;
+  color?: TaskListColor;
+}
+
+export interface UpdateListInput {
+  name?: string;
+  color?: TaskListColor;
+  archived?: boolean;
+  privateOrder?: number;
+}
+
+export interface DeleteListResult {
+  listId: string;
+  clearedTaskIds: TaskId[];
+}
+
 export type TaskStatus = 'open' | 'completed' | 'cancelled';
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent';
 export type TaskSourceType = 'local' | 'feishu';
@@ -27,6 +90,11 @@ export interface TaskSource {
   type: TaskSourceType;
   accountId?: string;
   tenantId?: string;
+  /**
+   * Opaque local binding to one authorized provider identity. It prevents an
+   * editable account label from moving a task into another user's sync queue.
+   */
+  syncIdentityId?: string;
   externalId?: string;
   remoteVersion?: string;
   /** Present only after an explicit Task v2 tasklist mapping is known. */
@@ -85,10 +153,63 @@ export interface TaskAttachment {
   url?: string;
 }
 
+/** A deliberately bounded, renderer-safe local attachment preview. Paths and
+ * file handles never cross the IPC boundary. */
+export type TaskAttachmentPreview =
+  | {
+      kind: "text";
+      name: string;
+      mimeType: string;
+      content: string;
+      bytes: number;
+    }
+  | {
+      kind: "image";
+      name: string;
+      mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+      dataUrl: string;
+      bytes: number;
+    }
+  | {
+      kind: "unsupported";
+      name: string;
+      mimeType?: string;
+      reason: "binary" | "too-large" | "unsupported";
+      bytes?: number;
+    };
+
 export interface TaskLink {
   id: string;
   url: string;
   label?: string;
+}
+
+/** A private discussion entry attached to one task. Comments are intentionally
+ * local-only: they provide a lightweight journal for the user and Agent
+ * without pretending to be a Feishu comment or changing provider data. */
+export type TaskCommentAuthor = "user" | "agent";
+
+export interface TaskComment {
+  id: string;
+  body: string;
+  author: TaskCommentAuthor;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+/**
+ * A compact, local-only research capture attached to a task.  It is designed
+ * for Agent research and human notes without pretending to be a Feishu field:
+ * the source URL, summary and action items stay in Todo Agent's private
+ * context and are never sent through the Feishu adapter.
+ */
+export interface TaskResearchCard {
+  id: string;
+  title: string;
+  url?: string;
+  summary: string;
+  actionItems: string[];
+  capturedAt: IsoDateTime;
 }
 
 export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly';
@@ -121,6 +242,8 @@ export interface Task {
   listId?: string;
   sectionId?: string;
   tags: string[];
+  /** User-defined, local-only contexts such as office, home or errands. */
+  contexts?: string[];
   parentId?: TaskId;
   dependencyIds: TaskId[];
   assigneeIds: string[];
@@ -128,6 +251,11 @@ export interface Task {
   attachments: TaskAttachment[];
   links: TaskLink[];
   customFields: Record<string, JsonValue>;
+  /** Optional for compatibility with tasks written before local comments
+   * existed. TaskService normalizes missing values to an empty array. */
+  comments?: TaskComment[];
+  /** Optional for compatibility with tasks written before research cards. */
+  researchCards?: TaskResearchCard[];
   plannedDate?: LocalDate;
   startAt?: IsoDateTime;
   /**
@@ -174,6 +302,7 @@ export interface CreateTaskInput {
   listId?: string;
   sectionId?: string;
   tags?: string[];
+  contexts?: string[];
   parentId?: TaskId;
   dependencyIds?: TaskId[];
   assigneeIds?: string[];
@@ -181,6 +310,8 @@ export interface CreateTaskInput {
   attachments?: TaskAttachment[];
   links?: TaskLink[];
   customFields?: Record<string, JsonValue>;
+  comments?: TaskComment[];
+  researchCards?: TaskResearchCard[];
   plannedDate?: LocalDate;
   startAt?: IsoDateTime;
   startAtIsAllDay?: boolean;
@@ -237,6 +368,8 @@ export interface TaskFilter {
   listIds?: string[];
   tags?: string[];
   tagMode?: 'any' | 'all';
+  contexts?: string[];
+  contextMode?: 'any' | 'all';
   priorities?: TaskPriority[];
   statuses?: TaskStatus[];
   plannedFrom?: LocalDate;
@@ -263,6 +396,33 @@ export interface TaskViewSection {
   tasks: Task[];
 }
 
+export interface TodayPlanItem {
+  id: TaskId;
+  /**
+   * A private effort estimate used by Todo Agent's daily plan. This never
+   * changes a provider-owned due date or other shared Feishu field.
+   */
+  estimatedMinutes?: number;
+}
+
+export interface TodayPlanBaseline {
+  id: TaskId;
+  plannedDate?: LocalDate;
+  privateOrder: number;
+  estimatedMinutes?: number;
+}
+
+export interface ApplyTodayPlanRequest {
+  /** Defaults to, and when supplied must still equal, the service's local today. */
+  date?: LocalDate;
+  /** Selected Today tasks in the exact order the user approved. */
+  items: TodayPlanItem[];
+  /** Tasks the user explicitly removed from a previous private Today plan. */
+  clearTaskIds: TaskId[];
+  /** Private planning fields as shown when the user reviewed this plan. */
+  baselines: TodayPlanBaseline[];
+}
+
 export interface TaskDraft {
   id: string;
   kind: 'quick-capture' | 'task-editor' | 'agent';
@@ -286,9 +446,11 @@ export type TaskOperationKind =
   | 'update'
   | 'complete'
   | 'reopen'
+  | 'bulk'
   | 'move-to-today'
   | 'focus'
   | 'reorder-today'
+  | 'plan-today'
   | 'trash'
   | 'restore'
   | 'purge';
@@ -307,10 +469,25 @@ export interface TaskOperation {
   undoneAt?: IsoDateTime;
 }
 
+/** A renderer-safe, task-scoped view of the local mutation log.  History
+ * intentionally exposes changed field names rather than before/after task
+ * snapshots, so private notes, provider metadata and attachment paths never
+ * need to cross the IPC boundary just to render an audit timeline. */
+export interface TaskHistoryEntry {
+  taskId: TaskId;
+  operationId: string;
+  kind: TaskOperationKind;
+  createdAt: IsoDateTime;
+  undoneAt?: IsoDateTime;
+  changedFields: string[];
+}
+
 export interface LocalAppState {
   schemaVersion: 1;
   revision: number;
   tasks: Record<TaskId, Task>;
+  projects: Record<string, TaskProject>;
+  lists: Record<string, TaskList>;
   drafts: Record<string, TaskDraft>;
   operations: TaskOperation[];
 }
@@ -319,6 +496,30 @@ export interface TaskMutationResult {
   task: Task;
   operationId: string;
   generatedTask?: Task;
+}
+
+/** A reviewed, atomic action over a set of already identified tasks.  The
+ * renderer must show the target list before sending this request; the main
+ * process re-checks every target in one transaction so a half-applied batch
+ * cannot be mistaken for success. */
+export type BulkTaskAction =
+  | { kind: "complete"; completedAt?: IsoDateTime }
+  | { kind: "reopen" }
+  | { kind: "move-to-today"; date?: LocalDate }
+  | { kind: "trash" }
+  | { kind: "restore" };
+
+export interface BulkTaskBaseline {
+  id: TaskId;
+  updatedAt: IsoDateTime;
+}
+
+export interface BulkTaskRequest {
+  ids: TaskId[];
+  action: BulkTaskAction;
+  /** Optional for trusted callers; the desktop UI always sends it to detect
+   * a background sync or edit between preview and confirmation. */
+  baselines?: BulkTaskBaseline[];
 }
 
 export interface UndoResult {
@@ -331,6 +532,8 @@ export const createEmptyLocalAppState = (): LocalAppState => ({
   schemaVersion: 1,
   revision: 0,
   tasks: {},
+  projects: {},
+  lists: {},
   drafts: {},
   operations: [],
 });

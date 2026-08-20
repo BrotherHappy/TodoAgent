@@ -196,6 +196,7 @@ describe('Electron notification production runtime', () => {
       { type: 'button', text: '10 分钟后' },
       { type: 'button', text: '明天提醒' },
       { type: 'button', text: '打开' },
+      { type: 'button', text: '今天不再提醒' },
     ]);
     expect(native.badges.at(-1)).toBe('1');
     expect(inAppEvents).toEqual([]);

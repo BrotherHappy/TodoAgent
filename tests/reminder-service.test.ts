@@ -4,7 +4,11 @@ import { ReminderScheduler } from '../electron/services/reminder-service';
 import { emptyReminderRuntimeState, type ReminderDelivery, type ReminderRuntimeState } from '../src/shared/reminders';
 import { defaultSettings } from '../src/shared/settings';
 
-const createHarness = (now: Date) => {
+const createHarness = (
+  now: Date,
+  settingsPatch: Partial<typeof defaultSettings.notifications> = {},
+) => {
+  let clock = new Date(now);
   let state: ReminderRuntimeState = emptyReminderRuntimeState();
   const shown: ReminderDelivery[] = [];
   const onAction = vi.fn();
@@ -17,11 +21,11 @@ const createHarness = (now: Date) => {
       show: async (delivery) => { shown.push(delivery); },
       cancel: vi.fn(),
     },
-    settings: () => structuredClone(defaultSettings.notifications),
+    settings: () => structuredClone({ ...defaultSettings.notifications, ...settingsPatch }),
     onAction,
-    now: () => now,
+    now: () => new Date(clock),
   });
-  return { scheduler, shown, onAction, state: () => state };
+  return { scheduler, shown, onAction, state: () => state, setNow: (value: Date) => { clock = new Date(value); } };
 };
 
 describe('ReminderScheduler', () => {
@@ -51,6 +55,116 @@ describe('ReminderScheduler', () => {
     await scheduler.tick();
     expect(shown).toHaveLength(1);
     expect(shown[0].kind).toBe('missed-summary');
+  });
+
+  it('enforces the daily task reminder budget without blocking important notices', async () => {
+    const now = new Date('2026-08-09T09:00:00.000Z');
+    const { scheduler, shown, state } = createHarness(now, { dailyTaskReminderLimit: 2 });
+    await scheduler.load();
+    await scheduler.replaceCandidates([
+      ...Array.from({ length: 3 }, (_, index) => ({
+        id: `budget-${index}`,
+        taskId: `task-${index}`,
+        kind: 'task' as const,
+        title: `预算任务 ${index}`,
+        body: '',
+        scheduledAt: now.toISOString(),
+      })),
+      {
+        id: 'sync-risk-1',
+        kind: 'sync-risk',
+        title: '同步需要注意',
+        body: '飞书连接需要查看',
+        scheduledAt: now.toISOString(),
+      },
+    ]);
+    await scheduler.tick();
+    expect(shown.filter((delivery) => delivery.kind === 'task')).toHaveLength(2);
+    expect(shown.some((delivery) => delivery.kind === 'sync-risk')).toBe(true);
+    expect(Object.keys(state().taskNotificationLog)).toHaveLength(2);
+  });
+
+  it('stops resurfacing one task after two ignored reminders', async () => {
+    let now = new Date('2026-08-09T09:00:00.000Z');
+    const candidate = {
+      id: 'ignore-me',
+      taskId: 'task-ignore-me',
+      kind: 'task' as const,
+      title: '连续忽略',
+      body: '',
+      scheduledAt: now.toISOString(),
+    };
+    const { scheduler, shown, state, setNow } = createHarness(now);
+    await scheduler.load();
+    await scheduler.replaceCandidates([candidate]);
+    await scheduler.tick();
+    await scheduler.handleAction({ reminderId: candidate.id, action: 'dismiss' });
+    await scheduler.handleAction({ reminderId: candidate.id, action: 'snooze-10m' });
+
+    now = new Date('2026-08-09T09:10:00.000Z');
+    setNow(now);
+    await scheduler.tick();
+    await scheduler.handleAction({ reminderId: candidate.id, action: 'dismiss' });
+    await scheduler.handleAction({ reminderId: candidate.id, action: 'snooze-10m' });
+
+    now = new Date('2026-08-09T09:20:00.000Z');
+    setNow(now);
+    await scheduler.tick();
+    expect(shown).toHaveLength(2);
+    expect(state().dismissed[candidate.id]).toBe(2);
+    expect(state().delivered[`${candidate.id}:${candidate.scheduledAt}`]).toBeDefined();
+  });
+
+  it('applies source policies without consuming the task reminder budget', async () => {
+    const now = new Date('2026-08-09T09:00:00.000Z');
+    const { scheduler, shown, state } = createHarness(now, {
+      taskReminderMinIntervalMinutes: 0,
+      taskReminderSourceMode: { local: 'important-only', feishu: 'off' },
+      taskReminderProjectMode: { 'project-a': 'normal' },
+    });
+    await scheduler.load();
+    await scheduler.replaceCandidates([
+      {
+        id: 'local-low', taskId: 'local-low', kind: 'task', title: '低优先级本地', body: '',
+        scheduledAt: now.toISOString(), source: 'local', priority: 'low',
+      },
+      {
+        id: 'local-high', taskId: 'local-high', kind: 'task', title: '高优先级本地', body: '',
+        scheduledAt: now.toISOString(), source: 'local', priority: 'high',
+      },
+      {
+        id: 'feishu-urgent', taskId: 'feishu-urgent', kind: 'task', title: '飞书紧急', body: '',
+        scheduledAt: now.toISOString(), source: 'feishu', projectId: 'project-a', priority: 'urgent',
+      },
+    ]);
+    await scheduler.tick();
+    expect(shown.map((delivery) => delivery.id)).toEqual(['local-high', 'feishu-urgent']);
+    expect(Object.keys(state().taskNotificationLog)).toHaveLength(2);
+  });
+
+  it('spaces different task reminders while allowing the same snoozed reminder through', async () => {
+    const now = new Date('2026-08-09T09:00:00.000Z');
+    const { scheduler, shown, setNow } = createHarness(now, {
+      taskReminderMinIntervalMinutes: 120,
+    });
+    const first = {
+      id: 'interval-first', taskId: 'interval-first', kind: 'task' as const, title: '第一项', body: '',
+      scheduledAt: now.toISOString(), source: 'local' as const, priority: 'medium' as const,
+    };
+    const second = {
+      id: 'interval-second', taskId: 'interval-second', kind: 'task' as const, title: '第二项', body: '',
+      scheduledAt: now.toISOString(), source: 'local' as const, priority: 'medium' as const,
+    };
+    await scheduler.load();
+    await scheduler.replaceCandidates([first]);
+    await scheduler.tick();
+    await scheduler.replaceCandidates([first, second]);
+    setNow(new Date('2026-08-09T10:00:00.000Z'));
+    await scheduler.tick();
+    expect(shown.map((delivery) => delivery.id)).toEqual(['interval-first']);
+    setNow(new Date('2026-08-09T11:00:00.000Z'));
+    await scheduler.tick();
+    expect(shown.map((delivery) => delivery.id)).toEqual(['interval-first', 'interval-second']);
   });
 
   it('respects quiet hours and snooze', async () => {

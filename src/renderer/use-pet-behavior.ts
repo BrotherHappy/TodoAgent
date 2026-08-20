@@ -13,6 +13,7 @@ import {
   type PetActionPack,
   type PetBehaviorContext,
   type PetEmotion,
+  type PetIdleAction,
   type PetInteractionKind,
 } from "./pet-behavior";
 
@@ -43,6 +44,7 @@ export function usePetBehavior(
   name: string,
   enabled: boolean,
   actionPack: PetActionPack = "balanced",
+  customIdleActions?: readonly PetIdleAction[],
 ): PetBehaviorController {
   const [transient, setTransient] = useState<TransientPetBehavior>();
   const clearTimerRef = useRef<number | undefined>(undefined);
@@ -63,6 +65,7 @@ export function usePetBehavior(
       context.syncJustCompleted,
       context.syncing,
       context.taskDropActive,
+      context.taskTheme,
     ],
   );
 
@@ -119,7 +122,11 @@ export function usePetBehavior(
     }
     const seed = Date.now() + Math.floor(Math.random() * 10_000);
     idleTimerRef.current = window.setTimeout(() => {
-      const action = pickIdlePetAction(seed, new Date().getHours(), actionPack);
+      const action = pickIdlePetAction(
+        seed,
+        new Date().getHours(),
+        customIdleActions ?? actionPack,
+      );
       showTransient(action, idleActionDurationMs(action));
     }, idleActionDelayMs(seed));
     return () => {
@@ -128,7 +135,7 @@ export function usePetBehavior(
         idleTimerRef.current = undefined;
       }
     };
-  }, [actionPack, context.reducedMotion, enabled, showTransient, systemAction, transient]);
+  }, [actionPack, context.reducedMotion, customIdleActions, enabled, showTransient, systemAction, transient]);
 
   useEffect(
     () => () => {
@@ -189,7 +196,14 @@ export function usePetBehavior(
     systemAction === "idle" ||
     systemAction === "task-clear" ||
     systemAction === "alert";
-  const action = transient && ambientSystem ? transient.action : systemAction;
+  const transientWins = Boolean(
+    transient &&
+      (ambientSystem ||
+        (canInterruptPetAction(systemAction, transient.action) &&
+          petActionDefinitions[transient.action].priority >=
+            petActionDefinitions[systemAction].priority)),
+  );
+  const action = transientWins && transient ? transient.action : systemAction;
   const emotion = transient && transient.action === action
     ? transient.emotion
     : emotionForPetAction(action);

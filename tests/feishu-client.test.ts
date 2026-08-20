@@ -121,6 +121,66 @@ describe("FeishuClient Task v2 transport", () => {
     );
   });
 
+  it("unions my tasks with every readable tasklist and hydrates list-only tasks", async () => {
+    const requested: string[] = [];
+    const client = new FeishuClient({
+      auth: developmentAuth,
+      tokenStore: new MemoryTokenStore(),
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        requested.push(url.pathname);
+        if (url.pathname === "/open-apis/task/v2/tasks") {
+          return jsonResponse({
+            code: 0,
+            data: { items: [{ guid: "mine", summary: "我负责", status: "open" }] },
+          });
+        }
+        if (url.pathname === "/open-apis/task/v2/tasklists") {
+          return jsonResponse({
+            code: 0,
+            data: { items: [{ guid: "list-1", name: "项目清单" }] },
+          });
+        }
+        if (url.pathname === "/open-apis/task/v2/tasklists/list-1/tasks") {
+          return jsonResponse({
+            code: 0,
+            data: {
+              items: [
+                { guid: "mine", summary: "我负责" },
+                { guid: "list-only", summary: "清单任务", completed_at: "0" },
+              ],
+            },
+          });
+        }
+        if (url.pathname === "/open-apis/task/v2/tasks/list-only") {
+          return jsonResponse({
+            code: 0,
+            data: {
+              task: {
+                guid: "list-only",
+                summary: "清单任务详情",
+                status: "open",
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected Feishu path: ${url.pathname}`);
+      },
+      now: () => NOW,
+    });
+
+    await expect(client.listAllAccessibleTasks?.()).resolves.toEqual([
+      { guid: "mine", summary: "我负责", status: "open", tasklists: [{ tasklist_guid: "list-1" }] },
+      { guid: "list-only", summary: "清单任务详情", status: "open", tasklists: [{ tasklist_guid: "list-1" }] },
+    ]);
+    expect(requested).toEqual([
+      "/open-apis/task/v2/tasks",
+      "/open-apis/task/v2/tasklists",
+      "/open-apis/task/v2/tasklists/list-1/tasks",
+      "/open-apis/task/v2/tasks/list-only",
+    ]);
+  });
+
   it("requires and forwards a stable client_token on create", async () => {
     let requestBody: Record<string, unknown> | undefined;
     const fetchMock: FeishuFetch = vi.fn(async (_input, init) => {

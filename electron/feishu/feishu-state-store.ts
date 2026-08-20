@@ -301,6 +301,14 @@ export function sanitizeFeishuSyncState(value: unknown): FeishuApplicationSyncSt
   return {
     schemaVersion: 1,
     accountId: requiredString(value.accountId, 'accountId'),
+    ...(value.syncIdentityId === undefined
+      ? {}
+      : {
+          syncIdentityId: optionalString(
+            value.syncIdentityId,
+            'syncIdentityId',
+          ),
+        }),
     mappingsByLocalId,
     localIdByGuid,
     queue: value.queue.map((item, index) => queueItem(item, `queue[${index}]`)),

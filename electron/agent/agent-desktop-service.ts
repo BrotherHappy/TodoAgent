@@ -126,6 +126,7 @@ export interface AgentDesktopServiceOptions {
     credentialId?: string;
     timeoutMs: number;
     retries: number;
+    provider?: "primary" | "fallback";
   }) => ModelGatewayLike;
   now?: () => Date;
   /** Resolves the device's current IANA timezone for each Agent turn. */
@@ -133,6 +134,34 @@ export interface AgentDesktopServiceOptions {
   clockMs?: () => number;
   idFactory?: () => string;
 }
+
+type ProviderRole = "primary" | "fallback";
+type ProviderConfig = ReturnType<SettingsService["get"]>["ai"] | ReturnType<SettingsService["get"]>["ai"]["fallback"];
+
+const providerFor = (
+  settings: ReturnType<SettingsService["get"]>,
+  role: ProviderRole,
+): ProviderConfig => role === "primary" ? settings.ai : settings.ai.fallback;
+
+const providerHasCredentials = (
+  provider: ProviderConfig,
+  readCredential: (id: string) => string | undefined,
+): boolean => provider.authMode === "none" || Boolean(
+  provider.credentialId && readCredential(provider.credentialId),
+);
+
+const providerIsConfigured = (
+  provider: ProviderConfig,
+  readCredential: (id: string) => string | undefined,
+): boolean => Boolean(provider.model.trim() && providerHasCredentials(provider, readCredential));
+
+const isFallbackEligible = (error: unknown): boolean =>
+  error instanceof ModelGatewayError &&
+  (error.code === "NETWORK_ERROR" ||
+    (error.code === "HTTP_ERROR" &&
+      (error.status === 408 ||
+        error.status === 429 ||
+        (error.status !== undefined && error.status >= 500 && error.status <= 599))));
 
 /**
  * Providers are allowed to return `null`, an empty string, or whitespace for
@@ -487,9 +516,12 @@ export class AgentDesktopService {
 
   status(): AgentStatus {
     const settings = this.options.settings.get();
+    const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
     const configured = Boolean(
-      settings.ai.model.trim() &&
-        this.#modelAuthenticationAvailable(settings),
+      providerIsConfigured(
+        providerFor(settings, activeProvider),
+        (credentialId) => this.#readCredential(credentialId),
+      ),
     );
     if (
       this.#fullAccessLease &&
@@ -542,11 +574,13 @@ export class AgentDesktopService {
     const startedAt = this.#clockMs();
     const checkedAt = this.#now().toISOString();
     const settings = this.options.settings.get();
-    const endpointOrigin = this.#endpointOrigin(settings.ai.endpoint);
+    const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
+    const provider = providerFor(settings, activeProvider);
+    const endpointOrigin = this.#endpointOrigin(provider.endpoint);
     let reportedTotalTokens: number | undefined;
 
     try {
-      if (!settings.ai.model.trim())
+      if (!provider.model.trim())
         throw serviceError("AI_MODEL_NOT_CONFIGURED");
       this.#assertModelAuthenticationAvailable(settings);
       await this.options.usageBudget.assertCanStart(
@@ -574,7 +608,7 @@ export class AgentDesktopService {
             : "Connection succeeded and provider token usage was recorded.",
         retryable: false,
         endpointOrigin,
-        model: settings.ai.model,
+        model: provider.model,
         reportedTotalTokens,
         usage,
       };
@@ -594,7 +628,7 @@ export class AgentDesktopService {
             error.status === 429 ||
             (error.status !== undefined && error.status >= 500)),
         endpointOrigin,
-        model: settings.ai.model || undefined,
+        model: provider.model || undefined,
         reportedTotalTokens,
         usage: await this.modelUsage(),
       };
@@ -604,7 +638,8 @@ export class AgentDesktopService {
   async send(request: AgentSendRequest): Promise<AgentSendResult> {
     const settings = this.options.settings.get();
     if (!settings.ai.enabled) throw serviceError("AI_DISABLED");
-    if (!settings.ai.model.trim())
+    const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
+    if (!providerFor(settings, activeProvider).model.trim())
       throw serviceError("AI_MODEL_NOT_CONFIGURED");
     this.#assertModelAuthenticationAvailable(settings);
     if (!request.message.trim() || request.message.length > 50_000) {
@@ -768,9 +803,11 @@ export class AgentDesktopService {
       return fallback("MORNING_BRIEF_DISABLED");
     }
     if (!settings.ai.enabled) return fallback("AI_DISABLED");
+    const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
+    const provider = providerFor(settings, activeProvider);
     if (
-      !settings.ai.model.trim() ||
-      !this.#modelAuthenticationAvailable(settings)
+      !provider.model.trim() ||
+        !this.#modelAuthenticationAvailable(settings)
     ) {
       return fallback("AI_NOT_CONFIGURED");
     }
@@ -928,21 +965,23 @@ export class AgentDesktopService {
   #modelAuthenticationAvailable(
     settings: ReturnType<SettingsService["get"]>,
   ): boolean {
-    if (settings.ai.authMode === "none") return true;
-    return Boolean(
-      settings.ai.credentialId &&
-        this.#credentialAvailable(settings.ai.credentialId),
+    const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
+    return providerHasCredentials(
+      providerFor(settings, activeProvider),
+      (credentialId) => this.#readCredential(credentialId),
     );
   }
 
   #assertModelAuthenticationAvailable(
     settings: ReturnType<SettingsService["get"]>,
   ): void {
-    if (settings.ai.authMode === "none") return;
-    if (!settings.ai.credentialId) {
+    const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
+    const provider = providerFor(settings, activeProvider);
+    if (provider.authMode === "none") return;
+    if (!provider.credentialId) {
       throw serviceError("AI_CREDENTIAL_NOT_CONFIGURED");
     }
-    if (!this.#credentialAvailable(settings.ai.credentialId)) {
+    if (!this.#credentialAvailable(provider.credentialId)) {
       throw serviceError("AI_CREDENTIAL_UNAVAILABLE");
     }
   }
@@ -950,26 +989,27 @@ export class AgentDesktopService {
   #createGateway(
     settings: ReturnType<SettingsService["get"]>,
   ): ModelGatewayLike {
-    const credentialId = settings.ai.credentialId;
     this.#assertModelAuthenticationAvailable(settings);
-    const delegate =
-      this.options.gatewayFactory?.({
-        endpoint: settings.ai.endpoint,
-        model: settings.ai.model,
-        authMode: settings.ai.authMode,
+    const createDelegate = (role: ProviderRole): ModelGatewayLike => {
+      const provider = providerFor(settings, role);
+      const credentialId = provider.credentialId;
+      const delegate = this.options.gatewayFactory?.({
+        endpoint: provider.endpoint,
+        model: provider.model,
+        authMode: provider.authMode,
         credentialId,
         timeoutMs: settings.ai.timeoutMs,
         retries: settings.ai.retries,
-      }) ??
-      new OpenAIChatCompletionsGateway({
-        baseUrl: settings.ai.endpoint,
-        model: settings.ai.model,
-        authentication: settings.ai.authMode,
+        provider: role,
+      }) ?? new OpenAIChatCompletionsGateway({
+        baseUrl: provider.endpoint,
+        model: provider.model,
+        authentication: provider.authMode,
         credentialRef: credentialId,
         timeoutMs: settings.ai.timeoutMs,
         retries: settings.ai.retries,
         secretResolver:
-          settings.ai.authMode === "none"
+          provider.authMode === "none"
             ? undefined
             : {
                 resolve: async (requestedCredentialId) => {
@@ -979,6 +1019,42 @@ export class AgentDesktopService {
                 },
               },
       });
+      return this.#withUsageAccounting(delegate);
+    };
+
+    const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
+    const primary = createDelegate(activeProvider);
+    const fallbackProvider = settings.ai.fallback;
+    const canUseFallback =
+      settings.ai.routing === "fallback-on-error" &&
+      fallbackProvider.enabled &&
+      providerIsConfigured(fallbackProvider, (credentialId) => this.#readCredential(credentialId));
+    if (!canUseFallback) return primary;
+
+    const fallback = createDelegate("fallback");
+    return {
+      complete: async (request, signal, onTextDelta) => {
+        let emittedText = false;
+        try {
+          const relay = onTextDelta
+            ? (delta: string) => {
+                emittedText = true;
+                onTextDelta(delta);
+              }
+            : undefined;
+          return await primary.complete(request, signal, relay);
+        } catch (error) {
+          // Never replay a request after a partial stream or a non-transient
+          // provider error. Tool calls are only executed after a complete
+          // response, so switching here cannot duplicate an external effect.
+          if (!isFallbackEligible(error) || emittedText) throw error;
+          return fallback.complete(request, signal, onTextDelta);
+        }
+      },
+    };
+  }
+
+  #withUsageAccounting(delegate: ModelGatewayLike): ModelGatewayLike {
     return {
       complete: async (request, signal, onTextDelta) => {
         const completion = await delegate.complete(
@@ -1036,9 +1112,11 @@ export class AgentDesktopService {
       // Revoking a data scope must take effect before content leaves the app.
       const settings = this.options.settings.get();
       if (!settings.ai.enabled) return fallback("AI_DISABLED");
+      const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
+      const provider = providerFor(settings, activeProvider);
       if (
-        !settings.ai.model.trim() ||
-        !this.#modelAuthenticationAvailable(settings)
+        !provider.model.trim() ||
+          !this.#modelAuthenticationAvailable(settings)
       ) {
         return fallback("AI_NOT_CONFIGURED");
       }

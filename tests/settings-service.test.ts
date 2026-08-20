@@ -110,6 +110,47 @@ describe('SettingsService', () => {
     expect(reloaded.get().floating.hoverExpandDelayMs).toBe(5_000);
   });
 
+  it('migrates and clamps the notification fatigue controls', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-notification-budget-'));
+    const service = new SettingsService(root, encryption);
+    await service.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const raw = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      notifications: Record<string, unknown>;
+    };
+    delete raw.notifications.dailyTaskReminderLimit;
+    delete raw.notifications.taskIgnoreBackoffEnabled;
+    delete raw.notifications.taskReminderMinIntervalMinutes;
+    delete raw.notifications.taskReminderSourceMode;
+    delete raw.notifications.taskReminderProjectMode;
+    await writeFile(settingsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().notifications.dailyTaskReminderLimit).toBe(8);
+    expect(migrated.get().notifications.taskIgnoreBackoffEnabled).toBe(true);
+    expect(migrated.get().notifications.taskReminderMinIntervalMinutes).toBe(120);
+    expect(migrated.get().notifications.taskReminderSourceMode).toEqual({ local: 'normal', feishu: 'normal' });
+    expect(migrated.get().notifications.taskReminderProjectMode).toEqual({});
+
+    await migrated.update({
+      notifications: {
+        ...migrated.get().notifications,
+        dailyTaskReminderLimit: 999,
+        taskReminderMinIntervalMinutes: 99_999,
+        taskReminderProjectMode: { planning: 'off', malformed: 'not-valid' as never },
+      },
+    });
+    expect(migrated.get().notifications.dailyTaskReminderLimit).toBe(50);
+    expect(migrated.get().notifications.taskReminderMinIntervalMinutes).toBe(1_440);
+    expect(migrated.get().notifications.taskReminderProjectMode).toEqual({ planning: 'off' });
+
+    await migrated.update({
+      pet: { ...migrated.get().pet, proactiveDailyLimit: 99 },
+    });
+    expect(migrated.get().pet.proactiveDailyLimit).toBe(20);
+  });
+
   it('migrates missing Todo Pet domains and normalizes malformed focus and weather values', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-pet-settings-'));
     const service = new SettingsService(root, encryption);

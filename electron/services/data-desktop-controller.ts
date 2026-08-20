@@ -6,6 +6,7 @@ import {
   DataImportValidationError,
   DataPortabilityService,
   type DataExportOptions,
+  type DataMarkdownExportOptions,
   type DataImportPreview,
   type DataImportResult,
   type DataPortabilityRepository,
@@ -117,7 +118,7 @@ export interface DataDesktopControllerOptions {
   clock?: DataDesktopClock;
   createToken?: () => string;
   createCopyId?: (
-    kind: 'task' | 'draft' | 'operation',
+    kind: 'task' | 'project' | 'list' | 'draft' | 'operation',
     originalId: string,
     attempt: number,
   ) => string;
@@ -259,6 +260,50 @@ export class DataDesktopController {
     return { status: 'exported', filePath: targetPath, bytes };
   }
 
+  async exportMarkdownToFile(
+    options: DataMarkdownExportOptions = {},
+    selectedPath?: string,
+  ): Promise<ExportToFileResult> {
+    let chosenPath = selectedPath;
+    if (chosenPath === undefined) {
+      try {
+        chosenPath = await this.#dialogs.chooseExportPath({
+          defaultFileName: this.#defaultMarkdownExportName(),
+          allowedExtensions: ['.md', '.markdown'],
+        });
+      } catch (error) {
+        throw this.#error('DIALOG_FAILED', 'Unable to open the Markdown export dialog.', error);
+      }
+      if (chosenPath === undefined) return { status: 'cancelled' };
+    }
+    const targetPath = this.#normalizeExportPathFor(chosenPath, ['.md', '.markdown'], '.md');
+
+    let markdown: string;
+    try {
+      markdown = await this.#portability.exportMarkdown(options);
+    } catch (error) {
+      throw this.#mapError(error, 'export');
+    }
+    const bytes = Buffer.byteLength(markdown, 'utf8');
+    if (bytes > this.#maxExportBytes) {
+      throw this.#error('FILE_TOO_LARGE', 'The Markdown export exceeds the configured size limit.');
+    }
+
+    const temporaryPath = this.#temporaryPath(targetPath);
+    let temporaryCreated = false;
+    try {
+      await this.#files.writeTextDurable(temporaryPath, markdown);
+      temporaryCreated = true;
+      await this.#files.replaceFile(temporaryPath, targetPath);
+    } catch (error) {
+      if (temporaryCreated) {
+        await this.#files.removeFile(temporaryPath).catch(() => undefined);
+      }
+      throw this.#mapFileError(error, 'EXPORT_WRITE_FAILED', 'Unable to write the Markdown export file.');
+    }
+    return { status: 'exported', filePath: targetPath, bytes };
+  }
+
   async previewImport(filePath?: string): Promise<PreviewImportResult> {
     let selectedPath = filePath;
     if (selectedPath === undefined) {
@@ -385,9 +430,17 @@ export class DataDesktopController {
   }
 
   #normalizeExportPath(input: string): string {
+    return this.#normalizeExportPathFor(input, this.#allowedExtensions, this.#defaultExtension);
+  }
+
+  #normalizeExportPathFor(
+    input: string,
+    allowedExtensions: readonly string[],
+    defaultExtension: string,
+  ): string {
     const normalized = this.#normalizePath(input);
-    if (this.#hasAllowedExtension(normalized)) return normalized;
-    if (path.extname(normalized).length === 0) return `${normalized}${this.#defaultExtension}`;
+    if (this.#hasAllowedExtension(normalized, allowedExtensions)) return normalized;
+    if (path.extname(normalized).length === 0) return `${normalized}${defaultExtension}`;
     throw this.#error('INVALID_EXTENSION', 'The export file extension is not allowed.');
   }
 
@@ -415,9 +468,12 @@ export class DataDesktopController {
     return normalized;
   }
 
-  #hasAllowedExtension(filePath: string): boolean {
+  #hasAllowedExtension(
+    filePath: string,
+    allowedExtensions: readonly string[] = this.#allowedExtensions,
+  ): boolean {
     const lower = filePath.toLocaleLowerCase();
-    return this.#allowedExtensions.some((extension) => lower.endsWith(extension));
+    return allowedExtensions.some((extension) => lower.endsWith(extension));
   }
 
   #temporaryPath(targetPath: string): string {
@@ -432,6 +488,11 @@ export class DataDesktopController {
   #defaultExportName(): string {
     const date = this.#clock.now().toISOString().slice(0, 10);
     return `todo-agent-backup-${date}${this.#defaultExtension}`;
+  }
+
+  #defaultMarkdownExportName(): string {
+    const date = this.#clock.now().toISOString().slice(0, 10);
+    return `todo-agent-tasks-${date}.md`;
   }
 
   #newToken(): string {

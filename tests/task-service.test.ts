@@ -5,12 +5,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalStore } from "../electron/services/local-store";
 import { getNextOccurrence } from "../electron/services/recurrence";
 import {
+  TaskNotFoundError,
   TaskService,
   TaskStateError,
   TaskValidationError,
+  UndoConflictError,
 } from "../electron/services/task-service";
+import type { Task, TodayPlanBaseline } from "../src/shared/models";
 
 const testDirectories: string[] = [];
+
+const planBaselines = (...tasks: Task[]): TodayPlanBaseline[] =>
+  tasks.map((task) => ({
+    id: task.id,
+    plannedDate: task.plannedDate,
+    privateOrder: task.privateOrder,
+    estimatedMinutes: task.estimatedMinutes,
+  }));
 
 const createFixture = async () => {
   const directory = await mkdtemp(
@@ -48,6 +59,61 @@ afterEach(async () => {
 });
 
 describe("TaskService views and task data", () => {
+  it("creates, orders, archives, and renames local projects", async () => {
+    const { service } = await createFixture();
+    const first = await service.createProject({ name: "研究", color: "blue" });
+    const second = await service.createProject({ name: "发布", color: "amber" });
+    expect((await service.listProjects()).map((project) => project.name)).toEqual(["研究", "发布"]);
+    await expect(service.createProject({ name: "  研究 " })).rejects.toBeInstanceOf(TaskValidationError);
+    const renamed = await service.updateProject(second.id, { name: "上线", archived: true });
+    expect(renamed).toMatchObject({ name: "上线", archived: true, color: "amber" });
+    expect((await service.listProjects()).map((project) => project.id)).toEqual([first.id]);
+    expect((await service.listProjects(true)).map((project) => project.name)).toEqual(["研究", "上线"]);
+  });
+
+  it("deletes a project and clears task associations without queuing Feishu changes", async () => {
+    const { service } = await createFixture();
+    const project = await service.createProject({ name: "迁移" });
+    const local = await service.createTask({ title: "本地任务", projectId: project.id });
+    const remote = await service.createTask({
+      title: "飞书任务",
+      projectId: project.id,
+      source: { type: "feishu", accountId: "primary", externalId: "remote-1" },
+      sync: { status: "synced" },
+    });
+    const deleted = await service.deleteProject(project.id);
+    expect(deleted.clearedTaskIds).toEqual([local.task.id, remote.task.id]);
+    expect(await service.listProjects(true)).toEqual([]);
+    expect((await service.getTask(local.task.id))?.projectId).toBeUndefined();
+    expect((await service.getTask(remote.task.id))?.sync.status).toBe("synced");
+    // Project metadata is not a task operation; deletion is deliberately not
+    // undoable, so global task undo can never restore a dangling project ID.
+    expect((await service.getOperations(1))[0]?.kind).toBe("create");
+  });
+
+  it("creates, archives, renames, and deletes local lists atomically", async () => {
+    const { service } = await createFixture();
+    const list = await service.createList({ name: "学习", color: "blue" });
+    const second = await service.createList({ name: "生活", color: "green" });
+    expect((await service.listLists()).map((item) => item.name)).toEqual(["学习", "生活"]);
+    await expect(service.createList({ name: " 学习 " })).rejects.toBeInstanceOf(TaskValidationError);
+    const renamed = await service.updateList(second.id, { name: "健康", archived: true });
+    expect(renamed).toMatchObject({ name: "健康", archived: true, color: "green" });
+    expect((await service.listLists()).map((item) => item.id)).toEqual([list.id]);
+    const local = await service.createTask({ title: "本地清单任务", listId: list.id });
+    const remote = await service.createTask({
+      title: "飞书清单任务",
+      listId: list.id,
+      source: { type: "feishu", accountId: "primary", externalId: "remote-list-1" },
+      sync: { status: "synced" },
+    });
+    const deleted = await service.deleteList(list.id);
+    expect(deleted.clearedTaskIds).toEqual([local.task.id, remote.task.id]);
+    expect(await service.listLists(true)).toEqual([renamed]);
+    expect((await service.getTask(local.task.id))?.listId).toBeUndefined();
+    expect((await service.getTask(remote.task.id))?.sync.status).toBe("synced");
+  });
+
   it("stores the complete task shape and normalizes user-entered values", async () => {
     const { service } = await createFixture();
 
@@ -60,6 +126,7 @@ describe("TaskService views and task data", () => {
       listId: "launch",
       sectionId: "ready",
       tags: [" release ", "release", "desktop"],
+      contexts: [" 办公室 ", "出门"],
       parentId: "parent-task",
       dependencyIds: ["dependency", "dependency"],
       assigneeIds: ["user-1"],
@@ -93,6 +160,7 @@ describe("TaskService views and task data", () => {
       source: { type: "local" },
       sync: { status: "local" },
       tags: ["release", "desktop"],
+      contexts: ["办公室", "出门"],
       dependencyIds: ["dependency"],
       focusElapsedSeconds: 0,
       focusSessions: [],
@@ -179,7 +247,7 @@ describe("TaskService views and task data", () => {
     ]);
   });
 
-  it("supports text search plus source, project, tag, priority, status, and date filters", async () => {
+  it("supports text search plus source, project, tag, context, priority, status, and date filters", async () => {
     const { service } = await createFixture();
     const match = await service.createTask({
       title: "Prepare quarterly review",
@@ -194,6 +262,7 @@ describe("TaskService views and task data", () => {
       projectId: "product",
       listId: "planning",
       tags: ["review", "desktop"],
+      contexts: ["办公室", "深度工作"],
       priority: "high",
       plannedDate: "2026-08-11",
       dueAt: "2026-08-12T12:00:00.000Z",
@@ -208,6 +277,8 @@ describe("TaskService views and task data", () => {
       listIds: ["planning"],
       tags: ["review", "desktop"],
       tagMode: "all",
+      contexts: ["办公室", "深度工作"],
+      contextMode: "all",
       priorities: ["high"],
       statuses: ["open"],
       plannedFrom: "2026-08-10",
@@ -223,6 +294,179 @@ describe("TaskService views and task data", () => {
     expect(
       (await service.listTasks({ view: "upcoming" })).map((task) => task.id),
     ).toEqual([match.task.id]);
+  });
+
+  it("keeps manual contexts local and filters them case-insensitively", async () => {
+    const { service } = await createFixture();
+    const local = await service.createTask({
+      title: "出门采购",
+      contexts: ["出门", "家"],
+    });
+    const feishu = await service.createTask({
+      title: "飞书会议",
+      contexts: ["办公室"],
+      source: {
+        type: "feishu",
+        accountId: "primary",
+        externalId: "remote-context",
+      },
+      sync: { status: "synced" },
+    });
+    expect((await service.listTasks({ contexts: ["家"] })).map((task) => task.id)).toEqual([local.task.id]);
+    expect((await service.listTasks({ contexts: ["办公室"], contextMode: "all" })).map((task) => task.id)).toEqual([feishu.task.id]);
+    const updated = await service.updateTask(feishu.task.id, {
+      contexts: ["家", "办公室"],
+    });
+    expect(updated.task.contexts).toEqual(["家", "办公室"]);
+    expect(updated.task.sync.status).toBe("synced");
+    expect((await service.listTasks({ text: "办公室" })).map((task) => task.id)).toContain(feishu.task.id);
+  });
+
+  it("searches private attachment, link, and custom-field metadata without reading files", async () => {
+    const { service } = await createFixture();
+    const match = await service.createTask({
+      title: "研究任务",
+      attachments: [
+        {
+          id: "attachment-1",
+          name: "reconfigurable-computing.md",
+          mimeType: "text/markdown",
+        },
+      ],
+      links: [
+        {
+          id: "link-1",
+          label: "论文来源",
+          url: "https://example.com/reconfigurable",
+        },
+      ],
+      customFields: { venue: "FPGA" },
+    });
+    await service.createTask({ title: "无关任务" });
+
+    await expect(
+      service.listTasks({ text: "reconfigurable-computing.md" }),
+    ).resolves.toEqual([expect.objectContaining({ id: match.task.id })]);
+    await expect(
+      service.listTasks({ text: "论文来源" }),
+    ).resolves.toEqual([expect.objectContaining({ id: match.task.id })]);
+    await expect(
+      service.listTasks({ text: "FPGA" }),
+    ).resolves.toEqual([expect.objectContaining({ id: match.task.id })]);
+  });
+
+  it("stores local task discussions, searches their text, and never marks Feishu tasks pending", async () => {
+    const { service } = await createFixture();
+    const created = await service.createTask({
+      title: "带上下文的任务",
+      comments: [
+        {
+          id: "comment-1",
+          body: "  记得先确认接口契约  ",
+          author: "user",
+          createdAt: "2026-08-09T10:00:00.000Z",
+          updatedAt: "2026-08-09T10:00:00.000Z",
+        },
+      ],
+    });
+    expect(created.task.comments).toEqual([
+      expect.objectContaining({
+        id: "comment-1",
+        body: "记得先确认接口契约",
+        author: "user",
+      }),
+    ]);
+    await expect(service.listTasks({ text: "接口契约" })).resolves.toEqual([
+      expect.objectContaining({ id: created.task.id }),
+    ]);
+
+    const feishu = await service.createTask({
+      title: "飞书本地讨论",
+      source: { type: "feishu", accountId: "primary", externalId: "remote-comment" },
+      sync: { status: "synced" },
+    });
+    const updated = await service.updateTask(feishu.task.id, {
+      comments: [
+        {
+          id: "comment-remote-local",
+          body: "只在 Todo Agent 里保留",
+          author: "agent",
+          createdAt: "2026-08-09T10:00:00.000Z",
+          updatedAt: "2026-08-09T10:00:00.000Z",
+        },
+      ],
+    });
+    expect(updated.task.sync.status).toBe("synced");
+    expect(updated.task.comments?.[0]?.author).toBe("agent");
+
+    await expect(
+      service.updateTask(created.task.id, {
+        comments: [
+          {
+            id: "duplicate",
+            body: "one",
+            author: "user",
+            createdAt: "2026-08-09T10:00:00.000Z",
+            updatedAt: "2026-08-09T10:00:00.000Z",
+          },
+          {
+            id: "duplicate",
+            body: "two",
+            author: "user",
+            createdAt: "2026-08-09T10:00:00.000Z",
+            updatedAt: "2026-08-09T10:00:00.000Z",
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(TaskValidationError);
+  });
+
+  it("stores private research cards, searches their context, and keeps Feishu synced", async () => {
+    const { service } = await createFixture();
+    const feishu = await service.createTask({
+      title: "竞品研究",
+      source: { type: "feishu", accountId: "primary", externalId: "remote-research" },
+      sync: { status: "synced" },
+      researchCards: [
+        {
+          id: "research-1",
+          title: "定价页摘要",
+          url: "https://example.com/pricing",
+          summary: "按团队规模分层收费",
+          actionItems: ["验证个人版限制"],
+          capturedAt: "2026-08-09T10:00:00.000Z",
+        },
+      ],
+    });
+    expect(feishu.task.researchCards?.[0]).toMatchObject({
+      title: "定价页摘要",
+      actionItems: ["验证个人版限制"],
+    });
+    expect(feishu.task.sync.status).toBe("synced");
+    await expect(service.listTasks({ text: "个人版限制" })).resolves.toEqual([
+      expect.objectContaining({ id: feishu.task.id }),
+    ]);
+
+    const updated = await service.updateTask(feishu.task.id, {
+      researchCards: [],
+    });
+    expect(updated.task.researchCards).toEqual([]);
+    expect(updated.task.sync.status).toBe("synced");
+    await expect(
+      service.createTask({
+        title: "不安全研究卡",
+        researchCards: [
+          {
+            id: "bad-url",
+            title: "不安全",
+            url: "javascript:alert(1)",
+            summary: "",
+            actionItems: [],
+            capturedAt: "2026-08-09T10:00:00.000Z",
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(TaskValidationError);
   });
 
   it("validates calendar dates and time blocks", async () => {
@@ -248,9 +492,524 @@ describe("TaskService views and task data", () => {
       }),
     ).rejects.toBeInstanceOf(TaskValidationError);
   });
+
+  it("prevents dependency cycles while preserving missing imported blockers", async () => {
+    const { service } = await createFixture();
+    const first = await service.createTask({ title: "先做 A" });
+    const second = await service.createTask({ title: "再做 B" });
+
+    await service.updateTask(first.task.id, {
+      dependencyIds: [second.task.id, "remote-missing"],
+    });
+    await expect(
+      service.updateTask(second.task.id, { dependencyIds: [first.task.id] }),
+    ).rejects.toBeInstanceOf(TaskValidationError);
+
+    const savedFirst = await service.getTask(first.task.id, true);
+    const savedSecond = await service.getTask(second.task.id, true);
+    expect(savedFirst?.dependencyIds).toEqual([second.task.id, "remote-missing"]);
+    expect(savedSecond?.dependencyIds).toEqual([]);
+  });
 });
 
 describe("TaskService mutations, recovery, and recurrence", () => {
+  it("returns a compact task history without exposing task snapshots", async () => {
+    const { service } = await createFixture();
+    const created = await service.createTask({
+      title: "可追溯任务",
+      notes: "不要把正文放进历史响应",
+      priority: "medium",
+    });
+    const updated = await service.updateTask(created.task.id, {
+      title: "已改标题",
+      priority: "high",
+    });
+    const completed = await service.completeTask(created.task.id);
+    await service.undo(completed.operationId);
+
+    const history = await service.getTaskHistory(created.task.id);
+    expect(history.map((entry) => entry.kind)).toEqual([
+      "complete",
+      "update",
+      "create",
+    ]);
+    expect(history[0]).toMatchObject({
+      taskId: created.task.id,
+      operationId: completed.operationId,
+      undoneAt: expect.any(String),
+      changedFields: expect.arrayContaining(["status", "completedAt"]),
+    });
+    expect(history[1]).toMatchObject({
+      operationId: updated.operationId,
+      changedFields: expect.arrayContaining(["title", "priority"]),
+    });
+    expect(history[2]?.changedFields).toEqual(["task"]);
+    expect(JSON.stringify(history)).not.toContain("不要把正文放进历史响应");
+    await expect(service.getTaskHistory(created.task.id, 0)).rejects.toBeInstanceOf(
+      TaskValidationError,
+    );
+  });
+
+  it("applies a reviewed batch atomically and undoes it as one operation", async () => {
+    const { service } = await createFixture();
+    const first = await service.createTask({ title: "批量一", plannedDate: "2026-08-08" });
+    const second = await service.createTask({ title: "批量二", plannedDate: "2026-08-08" });
+    const operation = await service.applyBulkTaskAction({
+      ids: [first.task.id, second.task.id],
+      action: { kind: "move-to-today", date: "2026-08-09" },
+      baselines: [
+        { id: first.task.id, updatedAt: first.task.updatedAt },
+        { id: second.task.id, updatedAt: second.task.updatedAt },
+      ],
+    });
+    expect(operation.kind).toBe("bulk");
+    expect(operation.changes).toHaveLength(2);
+    expect((await service.getTask(first.task.id))?.plannedDate).toBe("2026-08-09");
+    expect((await service.getTask(second.task.id))?.plannedDate).toBe("2026-08-09");
+    await service.undo(operation.id);
+    expect((await service.getTask(first.task.id))?.plannedDate).toBe("2026-08-08");
+    expect((await service.getTask(second.task.id))?.plannedDate).toBe("2026-08-08");
+  });
+
+  it("rejects a stale batch before changing any selected task", async () => {
+    const { service, setNow } = await createFixture();
+    const first = await service.createTask({ title: "仍应保持打开" });
+    const second = await service.createTask({ title: "先被单独完成" });
+    setNow("2026-08-09T10:01:00.000Z");
+    await service.completeTask(second.task.id);
+    const operationsBefore = await service.getOperations();
+    await expect(
+      service.applyBulkTaskAction({
+        ids: [first.task.id, second.task.id],
+        action: { kind: "complete" },
+        baselines: [
+          { id: first.task.id, updatedAt: first.task.updatedAt },
+          { id: second.task.id, updatedAt: second.task.updatedAt },
+        ],
+      }),
+    ).rejects.toThrow("已发生变化");
+    expect((await service.getTask(first.task.id))?.status).toBe("open");
+    expect((await service.getOperations()).length).toBe(operationsBefore.length);
+  });
+
+  it("keeps Feishu shared fields intact when batching private Today placement", async () => {
+    const { service } = await createFixture();
+    const remote = await service.createTask({
+      title: "飞书批量任务",
+      notes: "共享备注",
+      dueAt: "2026-08-11T12:00:00.000Z",
+      source: { type: "feishu", accountId: "primary", externalId: "remote-bulk" },
+      sync: { status: "synced" },
+      plannedDate: "2026-08-08",
+    });
+    const operation = await service.applyBulkTaskAction({
+      ids: [remote.task.id],
+      action: { kind: "move-to-today", date: "2026-08-09" },
+      baselines: [{ id: remote.task.id, updatedAt: remote.task.updatedAt }],
+    });
+    const saved = await service.getTask(remote.task.id);
+    expect(saved).toMatchObject({
+      title: "飞书批量任务",
+      notes: "共享备注",
+      dueAt: "2026-08-11T12:00:00.000Z",
+      plannedDate: "2026-08-09",
+      sync: { status: "synced" },
+    });
+    expect(operation.changes[0]?.after?.sync).toEqual(operation.changes[0]?.before?.sync);
+  });
+
+  it("applies one ordered Today plan atomically with estimates and rolls older private plans forward", async () => {
+    const { service } = await createFixture();
+    const future = await service.createTask({
+      title: "Future candidate",
+      plannedDate: "2026-08-12",
+      estimatedMinutes: 15,
+      privateOrder: 90,
+    });
+    const rollover = await service.createTask({
+      title: "Rollover candidate",
+      plannedDate: "2026-08-08",
+      privateOrder: 91,
+    });
+    const unplanned = await service.createTask({
+      title: "Unplanned candidate",
+      privateOrder: 92,
+    });
+
+    const operation = await service.applyTodayPlan({
+      date: "2026-08-09",
+      items: [
+        { id: future.task.id, estimatedMinutes: 50 },
+        { id: rollover.task.id, estimatedMinutes: 35 },
+        { id: unplanned.task.id, estimatedMinutes: 20 },
+      ],
+      clearTaskIds: [],
+      baselines: planBaselines(future.task, rollover.task, unplanned.task),
+    });
+
+    expect(operation).toMatchObject({
+      kind: "plan-today",
+      changes: [
+        { taskId: future.task.id },
+        { taskId: rollover.task.id },
+        { taskId: unplanned.task.id },
+      ],
+    });
+    expect(await service.getTask(future.task.id)).toMatchObject({
+      plannedDate: "2026-08-09",
+      estimatedMinutes: 50,
+      privateOrder: 0,
+    });
+    expect(await service.getTask(rollover.task.id)).toMatchObject({
+      plannedDate: "2026-08-09",
+      estimatedMinutes: 35,
+      privateOrder: 1,
+    });
+    expect(await service.getTask(unplanned.task.id)).toMatchObject({
+      plannedDate: "2026-08-09",
+      estimatedMinutes: 20,
+      privateOrder: 2,
+    });
+    expect(
+      (await service.getViewSections({ view: "today" }))
+        .find((section) => section.id === "planned-today")
+        ?.tasks.map((task) => task.id),
+    ).toEqual([future.task.id, rollover.task.id, unplanned.task.id]);
+    expect(
+      (await service.getOperations()).filter(
+        (candidate) => candidate.kind === "plan-today",
+      ),
+    ).toEqual([expect.objectContaining({ id: operation.id })]);
+  });
+
+  it("accepts a future private plan from the evening review while rejecting past dates", async () => {
+    const { service } = await createFixture();
+    const task = await service.createTask({
+      title: "Tomorrow candidate",
+      estimatedMinutes: 30,
+      privateOrder: 4,
+    });
+
+    const operation = await service.applyTodayPlan({
+      date: "2026-08-10",
+      items: [{ id: task.task.id }],
+      clearTaskIds: [],
+      baselines: planBaselines(task.task),
+    });
+    expect(operation.kind).toBe("plan-today");
+    expect((await service.getTask(task.task.id))?.plannedDate).toBe(
+      "2026-08-10",
+    );
+
+    await expect(
+      service.applyTodayPlan({
+        date: "2026-08-08",
+        items: [{ id: task.task.id }],
+        clearTaskIds: [],
+        baselines: planBaselines((await service.getTask(task.task.id))!),
+      }),
+    ).rejects.toBeInstanceOf(TaskStateError);
+  });
+
+  it("undoes an entire Today planning session in one operation", async () => {
+    const { service } = await createFixture();
+    const selected = await service.createTask({
+      title: "Select for Today",
+      plannedDate: "2026-08-12",
+      estimatedMinutes: 10,
+      privateOrder: 41,
+    });
+    const cleared = await service.createTask({
+      title: "Remove from private Today plan",
+      plannedDate: "2026-08-08",
+      estimatedMinutes: 25,
+      privateOrder: 42,
+    });
+    const selectedBefore = await service.getTask(selected.task.id);
+    const clearedBefore = await service.getTask(cleared.task.id);
+
+    const operation = await service.applyTodayPlan({
+      date: "2026-08-09",
+      items: [{ id: selected.task.id, estimatedMinutes: 55 }],
+      clearTaskIds: [cleared.task.id],
+      baselines: planBaselines(selected.task, cleared.task),
+    });
+    expect(await service.getTask(selected.task.id)).toMatchObject({
+      plannedDate: "2026-08-09",
+      estimatedMinutes: 55,
+      privateOrder: 0,
+    });
+    expect(
+      (await service.getTask(cleared.task.id))?.plannedDate,
+    ).toBeUndefined();
+
+    const undone = await service.undo(operation.id);
+
+    expect(undone.operationId).toBe(operation.id);
+    expect(undone.restoredTasks.map((task) => task.id).sort()).toEqual(
+      [selected.task.id, cleared.task.id].sort(),
+    );
+    expect(await service.getTask(selected.task.id)).toEqual(selectedBefore);
+    expect(await service.getTask(cleared.task.id)).toEqual(clearedBefore);
+    expect(
+      (await service.getOperations()).find(
+        (candidate) => candidate.id === operation.id,
+      )?.undoneAt,
+    ).toBeDefined();
+  });
+
+  it("keeps confirmed start-only work as a private carry-over on the next day", async () => {
+    const { service, setNow } = await createFixture();
+    const task = await service.createTask({
+      title: "Starts today and may continue",
+      startAt: "2026-08-09T11:00:00.000Z",
+      plannedDate: "2026-08-12",
+      privateOrder: 7,
+    });
+
+    await service.applyTodayPlan({
+      date: "2026-08-09",
+      items: [{ id: task.task.id }],
+      clearTaskIds: [],
+      baselines: planBaselines(task.task),
+    });
+    expect((await service.getTask(task.task.id))?.plannedDate).toBe(
+      "2026-08-09",
+    );
+
+    setNow("2026-08-10T10:00:00.000Z");
+    expect(
+      (await service.listTasks({ view: "today" })).map((item) => item.id),
+    ).toContain(task.task.id);
+  });
+
+  it("undoes only plan fields after focus changes and rejects a later plan edit", async () => {
+    const { service, setNow } = await createFixture();
+    const task = await service.createTask({
+      title: "Plan fields stay isolated",
+      plannedDate: "2026-08-12",
+      estimatedMinutes: 20,
+      privateOrder: 8,
+    });
+    const operation = await service.applyTodayPlan({
+      date: "2026-08-09",
+      items: [{ id: task.task.id, estimatedMinutes: 45 }],
+      clearTaskIds: [],
+      baselines: planBaselines(task.task),
+    });
+
+    setNow("2026-08-09T10:05:00.000Z");
+    await service.startFocus(task.task.id);
+    await service.undo(operation.id);
+    expect(await service.getTask(task.task.id)).toMatchObject({
+      plannedDate: "2026-08-12",
+      estimatedMinutes: 20,
+      privateOrder: 8,
+      focusStartedAt: "2026-08-09T10:05:00.000Z",
+    });
+
+    const secondTask = await service.createTask({
+      title: "Conflicting plan edit",
+      estimatedMinutes: 30,
+      privateOrder: 9,
+    });
+    const secondOperation = await service.applyTodayPlan({
+      date: "2026-08-09",
+      items: [{ id: secondTask.task.id, estimatedMinutes: 50 }],
+      clearTaskIds: [],
+      baselines: planBaselines(secondTask.task),
+    });
+    await service.updateTask(secondTask.task.id, { estimatedMinutes: 60 });
+    await expect(service.undo(secondOperation.id)).rejects.toBeInstanceOf(
+      UndoConflictError,
+    );
+  });
+
+  it("rejects stale private planning snapshots and dates", async () => {
+    const { service, setNow } = await createFixture();
+    const task = await service.createTask({
+      title: "Changed while planner is open",
+      plannedDate: "2026-08-12",
+      estimatedMinutes: 20,
+      privateOrder: 10,
+    });
+    const staleBaseline = planBaselines(task.task);
+    await service.updateTask(task.task.id, { estimatedMinutes: 25 });
+
+    await expect(
+      service.applyTodayPlan({
+        date: "2026-08-09",
+        items: [{ id: task.task.id, estimatedMinutes: 40 }],
+        clearTaskIds: [],
+        baselines: staleBaseline,
+      }),
+    ).rejects.toBeInstanceOf(TaskStateError);
+    expect((await service.getTask(task.task.id))?.plannedDate).toBe(
+      "2026-08-12",
+    );
+
+    const current = (await service.getTask(task.task.id))!;
+    setNow("2026-08-10T00:00:00.000Z");
+    await expect(
+      service.applyTodayPlan({
+        date: "2026-08-09",
+        items: [{ id: current.id }],
+        clearTaskIds: [],
+        baselines: planBaselines(current),
+      }),
+    ).rejects.toBeInstanceOf(TaskStateError);
+  });
+
+  it("rejects invalid Today plans without leaving any partial task or operation changes", async () => {
+    const { service } = await createFixture();
+    const valid = await service.createTask({
+      title: "Must remain unchanged",
+      plannedDate: "2026-08-12",
+      estimatedMinutes: 15,
+      privateOrder: 73,
+    });
+    const completed = await service.createTask({
+      title: "Completed cannot be planned",
+      status: "completed",
+      completedAt: "2026-08-09T09:00:00.000Z",
+    });
+    const validBefore = await service.getTask(valid.task.id);
+    const operationCountBefore = (await service.getOperations()).length;
+
+    await expect(
+      service.applyTodayPlan({
+        date: "2026-08-09",
+        items: [{ id: valid.task.id }, { id: valid.task.id }],
+        clearTaskIds: [],
+        baselines: planBaselines(valid.task),
+      }),
+    ).rejects.toBeInstanceOf(TaskValidationError);
+    await expect(
+      service.applyTodayPlan({
+        date: "2026-08-09",
+        items: [],
+        clearTaskIds: [valid.task.id, valid.task.id],
+        baselines: planBaselines(valid.task),
+      }),
+    ).rejects.toBeInstanceOf(TaskValidationError);
+    await expect(
+      service.applyTodayPlan({
+        date: "2026-08-09",
+        items: [{ id: valid.task.id }],
+        clearTaskIds: [valid.task.id],
+        baselines: planBaselines(valid.task),
+      }),
+    ).rejects.toBeInstanceOf(TaskValidationError);
+
+    // The valid task is deliberately processed first. The later completed
+    // task must abort and roll back the earlier private planning mutation.
+    await expect(
+      service.applyTodayPlan({
+        date: "2026-08-09",
+        items: [{ id: valid.task.id }, { id: completed.task.id }],
+        clearTaskIds: [],
+        baselines: planBaselines(valid.task, completed.task),
+      }),
+    ).rejects.toBeInstanceOf(TaskStateError);
+    expect(await service.getTask(valid.task.id)).toEqual(validBefore);
+
+    // A missing cleared task is checked after selected items have been
+    // mutated inside the transaction, so this also proves full rollback.
+    await expect(
+      service.applyTodayPlan({
+        date: "2026-08-09",
+        items: [{ id: valid.task.id, estimatedMinutes: 60 }],
+        clearTaskIds: ["task-missing"],
+        baselines: [
+          ...planBaselines(valid.task),
+          { id: "task-missing", privateOrder: 0 },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(TaskNotFoundError);
+
+    expect(await service.getTask(valid.task.id)).toEqual(validBefore);
+    expect((await service.getOperations()).length).toBe(operationCountBefore);
+    expect(
+      (await service.getOperations()).some(
+        (candidate) => candidate.kind === "plan-today",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps Feishu sync metadata and provider-owned fields unchanged while planning privately", async () => {
+    const { service } = await createFixture();
+    const selected = await service.createTask({
+      title: "Remote selected task",
+      notes: "Shared description",
+      source: {
+        type: "feishu",
+        accountId: "account-plan",
+        externalId: "remote-plan-selected",
+      },
+      dueAt: "2026-08-12T18:00:00.000Z",
+      plannedDate: "2026-08-12",
+      estimatedMinutes: 20,
+      privateOrder: 81,
+      sync: {
+        status: "synced",
+        lastSyncedAt: "2026-08-09T08:00:00.000Z",
+      },
+    });
+    const cleared = await service.createTask({
+      title: "Remote cleared task",
+      source: {
+        type: "feishu",
+        accountId: "account-plan",
+        externalId: "remote-plan-cleared",
+      },
+      dueAt: "2026-08-09T17:00:00.000Z",
+      plannedDate: "2026-08-09",
+      privateOrder: 82,
+      sync: {
+        status: "synced",
+        lastSyncedAt: "2026-08-09T08:05:00.000Z",
+      },
+    });
+    const selectedBefore = await service.getTask(selected.task.id);
+    const clearedBefore = await service.getTask(cleared.task.id);
+
+    const operation = await service.applyTodayPlan({
+      date: "2026-08-09",
+      items: [{ id: selected.task.id, estimatedMinutes: 65 }],
+      clearTaskIds: [cleared.task.id],
+      baselines: planBaselines(selected.task, cleared.task),
+    });
+    const selectedAfter = await service.getTask(selected.task.id);
+    const clearedAfter = await service.getTask(cleared.task.id);
+
+    expect(operation.kind).toBe("plan-today");
+    expect(selectedAfter).toMatchObject({
+      title: selectedBefore!.title,
+      notes: selectedBefore!.notes,
+      source: selectedBefore!.source,
+      dueAt: selectedBefore!.dueAt,
+      plannedDate: "2026-08-09",
+      estimatedMinutes: 65,
+      privateOrder: 0,
+      sync: selectedBefore!.sync,
+    });
+    expect(clearedAfter).toMatchObject({
+      title: clearedBefore!.title,
+      source: clearedBefore!.source,
+      dueAt: clearedBefore!.dueAt,
+      sync: clearedBefore!.sync,
+    });
+    expect(clearedAfter?.plannedDate).toBeUndefined();
+    expect(operation.changes).toHaveLength(2);
+    operation.changes.forEach((change) => {
+      expect(change.after?.sync).toEqual(change.before?.sync);
+      expect(change.after?.source).toEqual(change.before?.source);
+      expect(change.after?.dueAt).toBe(change.before?.dueAt);
+      expect(change.after?.title).toBe(change.before?.title);
+      expect(change.after?.notes).toBe(change.before?.notes);
+    });
+  });
+
   it("moves tasks through trash, restores them, and safely undoes both actions", async () => {
     const { service } = await createFixture();
     const created = await service.createTask({ title: "Recoverable" });

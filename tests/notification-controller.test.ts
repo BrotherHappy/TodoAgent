@@ -193,7 +193,11 @@ describe('mapNotificationInteraction', () => {
       type: 'action',
       actionId: 'delete-everything',
     })).toBeUndefined();
-    expect(mapNotificationInteraction(delivery, { type: 'close' })).toBeUndefined();
+    expect(mapNotificationInteraction(delivery, { type: 'close' })).toEqual({
+      reminderId: 'reminder-1',
+      action: 'dismiss',
+    });
+    expect(mapNotificationInteraction({ ...delivery, kind: 'sync-risk' }, { type: 'close' })).toBeUndefined();
   });
 });
 
@@ -232,7 +236,7 @@ describe('NotificationController lifecycle', () => {
   });
 
   it('refreshes immediately for system wake and task-change events', async () => {
-    const harness = createHarness();
+    const harness = createHarness({ settings: { taskReminderMinIntervalMinutes: 0 } });
     await harness.controller.start();
     harness.setNow('2026-08-09T10:00:00.000Z');
     harness.setTasks([

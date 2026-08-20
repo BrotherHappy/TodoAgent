@@ -10,6 +10,7 @@ import {
 import { AuditLog, InMemoryAuditStore } from "../electron/agent/audit-log";
 import { FileAuditStore } from "../electron/agent/file-audit-store";
 import { ModelUsageBudgetService } from "../electron/agent/model-usage-budget";
+import { ModelGatewayError } from "../electron/agent/model-gateway";
 import type { ModelGatewayLike } from "../electron/agent/agent-runtime";
 import { createTaskTools } from "../electron/agent/task-tools";
 import { ToolRegistry } from "../electron/agent/tool-registry";
@@ -462,6 +463,116 @@ describe("AgentDesktopService", () => {
       authMode: "none",
       credentialId: undefined,
     });
+  });
+
+  it("switches to an enabled local fallback only for retryable primary failures", async () => {
+    const primary = new ScriptedGateway([
+      () => {
+        throw new ModelGatewayError("NETWORK_ERROR", "primary offline");
+      },
+    ]);
+    const fallback = new ScriptedGateway([finalCompletion("本地模型已接管")]);
+    const providers: string[] = [];
+    const harness = await createHarness({
+      gatewayFactory: (input) => {
+        providers.push(`${input.provider ?? "primary"}:${input.endpoint}`);
+        return input.provider === "fallback" ? fallback : primary;
+      },
+    });
+    await configureAi(harness.settings);
+    const current = harness.settings.get();
+    await harness.settings.replace({
+      ...current,
+      ai: {
+        ...current.ai,
+        routing: "fallback-on-error",
+        fallback: {
+          ...current.ai.fallback,
+          enabled: true,
+          endpoint: "http://127.0.0.1:11434/v1",
+          model: "llama3.2",
+          authMode: "none",
+        },
+      },
+    });
+
+    await expect(harness.service.send({ message: "用备用模型回复我" })).resolves.toMatchObject({
+      state: "completed",
+      assistantText: "本地模型已接管",
+    });
+    expect(providers).toEqual([
+      "primary:https://model.test/v1",
+      "fallback:http://127.0.0.1:11434/v1",
+    ]);
+  });
+
+  it("supports local-only mode without a primary model or credential", async () => {
+    const local = new ScriptedGateway([finalCompletion("只在本机完成")]);
+    let provider: string | undefined;
+    const harness = await createHarness({
+      gatewayFactory: (input) => {
+        provider = input.provider;
+        return local;
+      },
+    });
+    const current = harness.settings.get();
+    await harness.settings.replace({
+      ...current,
+      ai: {
+        ...current.ai,
+        enabled: true,
+        model: "",
+        credentialId: undefined,
+        routing: "local-only",
+        fallback: {
+          ...current.ai.fallback,
+          enabled: true,
+          model: "qwen2.5:7b",
+          authMode: "none",
+        },
+      },
+    });
+
+    expect(harness.service.status()).toMatchObject({ enabled: true, configured: true });
+    await expect(harness.service.send({ message: "本地优先" })).resolves.toMatchObject({
+      state: "completed",
+      assistantText: "只在本机完成",
+    });
+    expect(provider).toBe("fallback");
+  });
+
+  it("does not switch after a primary stream has already emitted text", async () => {
+    const primary: ModelGatewayLike = {
+      complete: async (_request, _signal, onTextDelta) => {
+        onTextDelta?.("已经输出一部分");
+        throw new ModelGatewayError("NETWORK_ERROR", "stream interrupted");
+      },
+    };
+    const fallback = new ScriptedGateway([finalCompletion("不应重复回答")]);
+    const providers: string[] = [];
+    const harness = await createHarness({
+      gatewayFactory: (input) => {
+        providers.push(input.provider ?? "primary");
+        return input.provider === "fallback" ? fallback : primary;
+      },
+    });
+    await configureAi(harness.settings);
+    const current = harness.settings.get();
+    await harness.settings.replace({
+      ...current,
+      ai: {
+        ...current.ai,
+        routing: "fallback-on-error",
+        fallback: { ...current.ai.fallback, enabled: true },
+      },
+    });
+
+    await expect(harness.service.send({ message: "不要重复执行" })).resolves.toMatchObject({
+      state: "failed",
+      errorCode: "NETWORK_ERROR",
+    });
+    expect(providers).toEqual(["primary", "fallback"]);
+    expect(fallback.requests).toHaveLength(0);
   });
 
   it("passes the persisted timeout and retry settings to every model gateway", async () => {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -31,6 +31,8 @@ describe('LocalStore', () => {
       schemaVersion: 1,
       revision: 0,
       tasks: {},
+      projects: {},
+      lists: {},
       drafts: {},
       operations: [],
     });
@@ -61,6 +63,18 @@ describe('LocalStore', () => {
     const state = await store.load();
     expect(state.revision).toBe(20);
     expect(Object.keys(state.drafts)).toHaveLength(20);
+  });
+
+  it('migrates a legacy state file without project entities', async () => {
+    const directory = await createTestDirectory();
+    const store = new LocalStore(directory);
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      store.filePath,
+      JSON.stringify({ schemaVersion: 1, revision: 4, tasks: {}, drafts: {}, operations: [] }),
+      'utf8',
+    );
+    await expect(store.load()).resolves.toMatchObject({ revision: 4, projects: {} });
   });
 
   it('does not commit mutations when a transaction throws', async () => {

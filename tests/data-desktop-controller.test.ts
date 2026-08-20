@@ -261,6 +261,29 @@ const readyPreview = async (
 };
 
 describe('DataDesktopController export files', () => {
+  it('writes a readable Markdown export with a Markdown extension', async () => {
+    const harness = createHarness({
+      initial: snapshot([makeTask('task-md', '可读导出')]),
+    });
+    const selectedPath = '/tmp/todo-agent-backups/tasks';
+
+    const result = await harness.controller.exportMarkdownToFile(
+      { redaction: 'private' },
+      selectedPath,
+    );
+
+    expect(result).toMatchObject({
+      status: 'exported',
+      filePath: `${selectedPath}.md`,
+    });
+    if (result.status !== 'exported') throw new Error('Expected an exported result.');
+    const markdown = harness.files.contents(result.filePath);
+    expect(markdown).toContain('# Todo Agent 任务导出');
+    expect(markdown).toContain('**可读导出**');
+    expect(result.bytes).toBe(Buffer.byteLength(markdown ?? '', 'utf8'));
+    expect(harness.files.operations.filter((operation) => operation.startsWith('write:'))).toHaveLength(1);
+  });
+
   it('adds the default extension and publishes through a same-directory atomic replacement', async () => {
     const harness = createHarness({
       initial: snapshot([makeTask('task-1', 'Export me')]),

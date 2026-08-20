@@ -145,6 +145,7 @@ describe("PetService", () => {
       weatherSummary: "上海 晴 29℃",
     });
     expect(diary.content).toContain("完成了 1 件事");
+    expect(diary.taskIds).toEqual(["write"]);
     const edited = await service.updateDiary(diary.id, {
       title: "我的一天",
       content: "这是我确认后的内容。",
@@ -159,6 +160,48 @@ describe("PetService", () => {
     expect(service.snapshot().memories[0]?.enabled).toBe(false);
     expect(await service.deleteDiary(diary.id)).toBe(true);
     expect(await service.deleteMemory(memory.id)).toBe(true);
+  });
+
+  it("turns an individual task into an idempotent diary entry without copying its private notes", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-task-diary-"));
+    const service = new PetService({ userDataPath: root, initialName: "团团" });
+    await service.initialize();
+    const task = completedTask("task-diary");
+    task.privateNotes = "不要写出";
+
+    const first = await service.createDiaryFromTask({
+      localDate: "2026-08-15",
+      task: { id: task.id, title: task.title, status: task.status },
+    });
+    expect(first.generation).toBe("user");
+    expect(first.taskIds).toEqual([task.id]);
+    expect(first.content).toContain(`完成了“${task.title}”`);
+    expect(first.content).not.toContain(task.privateNotes);
+
+    const second = await service.createDiaryFromTask({
+      localDate: "2026-08-15",
+      task: { id: task.id, title: task.title, status: task.status },
+    });
+    expect(second.id).toBe(first.id);
+    expect(service.snapshot().diary).toHaveLength(1);
+  });
+
+  it("keeps diary task links local, unique and current when facts are regenerated", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-journal-links-"));
+    const service = new PetService({ userDataPath: root });
+    await service.initialize();
+    const first = await service.generateDiary({
+      localDate: "2026-08-16",
+      completedTasks: [completedTask("a"), completedTask("a"), completedTask("b")],
+    });
+    expect(first.taskIds).toEqual(["a", "b"]);
+    const next = await service.generateDiary({
+      localDate: "2026-08-16",
+      completedTasks: [completedTask("b"), completedTask("c")],
+    });
+    expect(next.id).toBe(first.id);
+    expect(next.taskIds).toEqual(["b", "c"]);
+    expect(service.snapshot().diary).toHaveLength(1);
   });
 
   it("persists appearance changes with safe bounded decorations", async () => {
@@ -213,5 +256,20 @@ describe("PetService", () => {
     expect(service.snapshot().rewards.filter((reward) => reward.source === "game")).toHaveLength(3);
     expect(service.snapshot().inventory.some((item) => item.id === "outfit-starlight")).toBe(true);
     expect(service.snapshot().inventory.some((item) => item.id === "action-dance")).toBe(true);
+  });
+
+  it("enforces the proactive companion daily budget in the main-process service", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-proactive-budget-"));
+    let now = Date.parse("2026-08-15T08:00:00.000Z");
+    const service = new PetService({ userDataPath: root, now: () => now });
+    await service.initialize();
+    const input = { kind: "wellbeing" as const, reason: "喝口水", dismissed: false };
+    await service.recordProactiveMessage(input, { dailyLimit: 2, localDate: "2026-08-15" });
+    await service.recordProactiveMessage(input, { dailyLimit: 2, localDate: "2026-08-15" });
+    await service.recordProactiveMessage(input, { dailyLimit: 2, localDate: "2026-08-15" });
+    expect(service.snapshot().proactiveMessages).toHaveLength(2);
+    now += 24 * 60 * 60_000;
+    await service.recordProactiveMessage(input, { dailyLimit: 2, localDate: "2026-08-16" });
+    expect(service.snapshot().proactiveMessages).toHaveLength(3);
   });
 });

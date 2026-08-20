@@ -161,6 +161,12 @@ export interface PetDiaryEntry {
   localDate: string;
   title: string;
   content: string;
+  /**
+   * Local links back to the task records that shaped this entry. The links
+   * are intentionally private to Todo Agent: they are navigation metadata,
+   * never provider-owned fields written to Feishu.
+   */
+  taskIds?: TaskId[];
   generation: "local-template" | "model" | "user";
   completedTaskCount: number;
   focusRounds: number;

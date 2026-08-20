@@ -3,6 +3,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { AuditRecord } from '../../src/shared/agent-types';
 import type {
   LocalAppState,
+  TaskProject,
+  TaskProjectColor,
+  TaskList,
+  TaskListColor,
   Task,
   TaskDraft,
   TaskOperation,
@@ -38,6 +42,8 @@ export interface DataPortabilityRepository {
 
 export interface PortableDataSelection {
   tasks: boolean;
+  projects: boolean;
+  lists: boolean;
   drafts: boolean;
   operations: boolean;
   settings: boolean;
@@ -46,6 +52,8 @@ export interface PortableDataSelection {
 
 export interface PortableDataPayload {
   tasks?: Task[];
+  projects?: TaskProject[];
+  lists?: TaskList[];
   drafts?: TaskDraft[];
   operations?: TaskOperation[];
   settings?: AppSettings;
@@ -66,6 +74,15 @@ export interface DataExportOptions {
   pretty?: boolean;
 }
 
+/** Options for the human-readable Markdown export.  Markdown intentionally
+ * has a smaller surface than the lossless JSON bundle: it contains tasks and
+ * their project/list context, but never drafts, undo history, settings or
+ * permission-audit records. */
+export interface DataMarkdownExportOptions {
+  include?: Pick<Partial<PortableDataSelection>, 'tasks' | 'projects' | 'lists'>;
+  redaction?: ExportRedaction;
+}
+
 export interface ImportCategoryPlan {
   incoming: number;
   conflicts: string[];
@@ -81,6 +98,8 @@ export interface DataImportPreview {
   exportedAt: string;
   redaction: ExportRedaction;
   tasks: ImportCategoryPlan;
+  projects: ImportCategoryPlan;
+  lists: ImportCategoryPlan;
   drafts: ImportCategoryPlan;
   operations: ImportCategoryPlan;
   settings: {
@@ -106,6 +125,8 @@ export interface DataImportResult {
   digest: string;
   strategy: ImportConflictStrategy;
   tasks: Omit<ImportCategoryPlan, 'conflicts'>;
+  projects: Omit<ImportCategoryPlan, 'conflicts'>;
+  lists: Omit<ImportCategoryPlan, 'conflicts'>;
   drafts: Omit<ImportCategoryPlan, 'conflicts'>;
   operations: Omit<ImportCategoryPlan, 'conflicts'>;
   settings: 'none' | 'overwritten' | 'skipped';
@@ -118,7 +139,7 @@ export interface DataPortabilityServiceOptions {
   now?: () => Date;
   maxImportBytes?: number;
   createCopyId?: (
-    kind: 'task' | 'draft' | 'operation',
+    kind: 'task' | 'project' | 'list' | 'draft' | 'operation',
     originalId: string,
     attempt: number,
   ) => string;
@@ -143,6 +164,8 @@ export class DataImportPreviewMismatchError extends Error {
 
 const DEFAULT_SELECTION: PortableDataSelection = {
   tasks: true,
+  projects: true,
+  lists: true,
   drafts: true,
   operations: true,
   settings: true,
@@ -395,12 +418,40 @@ const assertJsonValue = (value: unknown, path: string): void => {
   throw new DataImportValidationError('Expected JSON-compatible data', path);
 };
 
+const validateProject = (value: unknown, path: string): TaskProject => {
+  const project = expectRecord(value, path);
+  assertOnlyKeys(project, ['id', 'name', 'color', 'archived', 'privateOrder', 'createdAt', 'updatedAt'], path);
+  expectId(project.id, `${path}.id`);
+  const name = expectString(project.name, `${path}.name`, false).trim();
+  if (name.length > 80) throw new DataImportValidationError('Project name is too long', `${path}.name`);
+  expectEnum(project.color, ['violet', 'blue', 'green', 'amber', 'rose', 'slate'] as const satisfies readonly TaskProjectColor[], `${path}.color`);
+  expectBoolean(project.archived, `${path}.archived`);
+  expectNumber(project.privateOrder, `${path}.privateOrder`, { minimum: 0 });
+  expectIsoDateTime(project.createdAt, `${path}.createdAt`);
+  expectIsoDateTime(project.updatedAt, `${path}.updatedAt`);
+  return clone({ ...project, name }) as unknown as TaskProject;
+};
+
+const validateList = (value: unknown, path: string): TaskList => {
+  const list = expectRecord(value, path);
+  assertOnlyKeys(list, ['id', 'name', 'color', 'archived', 'privateOrder', 'createdAt', 'updatedAt'], path);
+  expectId(list.id, `${path}.id`);
+  const name = expectString(list.name, `${path}.name`, false).trim();
+  if (name.length > 80) throw new DataImportValidationError('List name is too long', `${path}.name`);
+  expectEnum(list.color, ['violet', 'blue', 'green', 'amber', 'rose', 'slate'] as const satisfies readonly TaskListColor[], `${path}.color`);
+  expectBoolean(list.archived, `${path}.archived`);
+  expectNumber(list.privateOrder, `${path}.privateOrder`, { minimum: 0 });
+  expectIsoDateTime(list.createdAt, `${path}.createdAt`);
+  expectIsoDateTime(list.updatedAt, `${path}.updatedAt`);
+  return clone({ ...list, name }) as unknown as TaskList;
+};
+
 const validateTask = (value: unknown, path: string): Task => {
   const task = expectRecord(value, path);
   assertOnlyKeys(task, [
     'id', 'source', 'title', 'notes', 'privateNotes', 'status', 'priority',
-    'projectId', 'listId', 'sectionId', 'tags', 'parentId', 'dependencyIds',
-    'assigneeIds', 'followerIds', 'attachments', 'links', 'customFields',
+    'projectId', 'listId', 'sectionId', 'tags', 'contexts', 'parentId', 'dependencyIds',
+    'assigneeIds', 'followerIds', 'attachments', 'links', 'customFields', 'comments', 'researchCards',
     'plannedDate', 'startAt', 'startAtIsAllDay', 'dueAt', 'dueAtIsAllDay',
     'timeBlock', 'reminders', 'completedAt',
     'recurrence', 'recurrenceSeriesId', 'recurrenceIndex', 'estimatedMinutes',
@@ -410,6 +461,8 @@ const validateTask = (value: unknown, path: string): Task => {
   ], path);
   expectId(task.id, `${path}.id`);
   const source = expectRecord(task.source, `${path}.source`);
+  // syncIdentityId is deliberately not portable. Accepting a caller-supplied
+  // owner digest would let an imported task enter an existing provider queue.
   assertOnlyKeys(source, ['type', 'accountId', 'tenantId', 'externalId', 'remoteVersion', 'tasklist'], `${path}.source`);
   expectEnum(source.type, ['local', 'feishu'] as const, `${path}.source.type`);
   ['accountId', 'tenantId', 'externalId', 'remoteVersion'].forEach((key) =>
@@ -436,6 +489,21 @@ const validateTask = (value: unknown, path: string): Task => {
     expectOptional(task, key, path, expectId),
   );
   expectStringArray(task.tags, `${path}.tags`);
+  expectOptional(task, 'contexts', path, (value, valuePath) => {
+    const contexts = expectStringArray(value, valuePath);
+    if (contexts.length > 20) {
+      throw new DataImportValidationError('Too many contexts', valuePath);
+    }
+    const normalized = contexts.map((entry) => entry.trim().toLocaleLowerCase());
+    if (new Set(normalized).size !== normalized.length) {
+      throw new DataImportValidationError('Duplicate contexts', valuePath);
+    }
+    contexts.forEach((entry, index) => {
+      if (entry.trim().length === 0 || entry.trim().length > 40) {
+        throw new DataImportValidationError('Context must be 1-40 characters', `${valuePath}[${index}]`);
+      }
+    });
+  });
   expectStringArray(task.dependencyIds, `${path}.dependencyIds`);
   expectStringArray(task.assigneeIds, `${path}.assigneeIds`);
   expectStringArray(task.followerIds, `${path}.followerIds`);
@@ -466,6 +534,80 @@ const validateTask = (value: unknown, path: string): Task => {
 
   const customFields = expectRecord(task.customFields, `${path}.customFields`);
   assertJsonValue(customFields, `${path}.customFields`);
+  if (task.comments !== undefined) {
+    if (!Array.isArray(task.comments)) {
+      throw new DataImportValidationError('Expected an array', `${path}.comments`);
+    }
+    if (task.comments.length > 100) {
+      throw new DataImportValidationError('Too many comments', `${path}.comments`);
+    }
+    const commentIds = new Set<string>();
+    task.comments.forEach((entry, index) => {
+      const commentPath = `${path}.comments[${index}]`;
+      const comment = expectRecord(entry, commentPath);
+      assertOnlyKeys(comment, ['id', 'body', 'author', 'createdAt', 'updatedAt'], commentPath);
+      const id = expectId(comment.id, `${commentPath}.id`);
+      if (commentIds.has(id)) {
+        throw new DataImportValidationError('Duplicate comment id', `${commentPath}.id`);
+      }
+      commentIds.add(id);
+      const body = expectString(comment.body, `${commentPath}.body`, false).trim();
+      if (body.length > 10_000) {
+        throw new DataImportValidationError('Comment body is too long', `${commentPath}.body`);
+      }
+      expectEnum(comment.author, ['user', 'agent'] as const, `${commentPath}.author`);
+      const createdAt = expectIsoDateTime(comment.createdAt, `${commentPath}.createdAt`);
+      const updatedAt = expectIsoDateTime(comment.updatedAt, `${commentPath}.updatedAt`);
+      if (Date.parse(updatedAt) < Date.parse(createdAt)) {
+        throw new DataImportValidationError('Comment updatedAt is before createdAt', commentPath);
+      }
+      comment.body = body;
+    });
+  }
+  if (task.researchCards !== undefined) {
+    if (!Array.isArray(task.researchCards)) {
+      throw new DataImportValidationError('Expected an array', `${path}.researchCards`);
+    }
+    if (task.researchCards.length > 20) {
+      throw new DataImportValidationError('Too many research cards', `${path}.researchCards`);
+    }
+    const cardIds = new Set<string>();
+    task.researchCards.forEach((entry, index) => {
+      const cardPath = `${path}.researchCards[${index}]`;
+      const card = expectRecord(entry, cardPath);
+      assertOnlyKeys(card, ['id', 'title', 'url', 'summary', 'actionItems', 'capturedAt'], cardPath);
+      const id = expectId(card.id, `${cardPath}.id`);
+      if (cardIds.has(id)) {
+        throw new DataImportValidationError('Duplicate research card id', `${cardPath}.id`);
+      }
+      cardIds.add(id);
+      const title = expectString(card.title, `${cardPath}.title`, false).trim();
+      if (title.length > 200) {
+        throw new DataImportValidationError('Research card title is too long', `${cardPath}.title`);
+      }
+      expectOptional(card, 'url', cardPath, expectSafeWebUrl);
+      const summary = expectString(card.summary, `${cardPath}.summary`).trim();
+      if (summary.length > 5_000) {
+        throw new DataImportValidationError('Research card summary is too long', `${cardPath}.summary`);
+      }
+      if (!Array.isArray(card.actionItems)) {
+        throw new DataImportValidationError('Expected an array', `${cardPath}.actionItems`);
+      }
+      if (card.actionItems.length > 20) {
+        throw new DataImportValidationError('Too many research card action items', `${cardPath}.actionItems`);
+      }
+      card.actionItems = card.actionItems.map((item, actionIndex) => {
+        const text = expectString(item, `${cardPath}.actionItems[${actionIndex}]`, false).trim();
+        if (text.length > 500) {
+          throw new DataImportValidationError('Research card action item is too long', `${cardPath}.actionItems[${actionIndex}]`);
+        }
+        return text;
+      });
+      expectIsoDateTime(card.capturedAt, `${cardPath}.capturedAt`);
+      card.title = title;
+      card.summary = summary;
+    });
+  }
   expectOptional(task, 'plannedDate', path, expectLocalDate);
   expectOptional(task, 'startAtIsAllDay', path, expectBoolean);
   expectOptional(task, 'dueAtIsAllDay', path, expectBoolean);
@@ -629,19 +771,27 @@ const validateOperation = (value: unknown, path: string): TaskOperation => {
   assertOnlyKeys(operation, ['id', 'kind', 'createdAt', 'changes', 'undoneAt'], path);
   expectId(operation.id, `${path}.id`);
   expectEnum(operation.kind, [
-    'create', 'update', 'complete', 'reopen', 'move-to-today', 'focus',
-    'reorder-today', 'trash', 'restore', 'purge',
+    'create', 'update', 'complete', 'reopen', 'bulk', 'move-to-today', 'focus',
+    'reorder-today', 'plan-today', 'trash', 'restore', 'purge',
   ] as const, `${path}.kind`);
   expectIsoDateTime(operation.createdAt, `${path}.createdAt`);
   expectOptional(operation, 'undoneAt', path, expectIsoDateTime);
   if (!Array.isArray(operation.changes)) {
     throw new DataImportValidationError('Expected an array', `${path}.changes`);
   }
+  const changedTaskIds = new Set<string>();
   operation.changes.forEach((entry, index) => {
     const changePath = `${path}.changes[${index}]`;
     const change = expectRecord(entry, changePath);
     assertOnlyKeys(change, ['taskId', 'before', 'after'], changePath);
     const taskId = expectId(change.taskId, `${changePath}.taskId`);
+    if (changedTaskIds.has(taskId)) {
+      throw new DataImportValidationError(
+        'Operation contains duplicate task changes',
+        `${changePath}.taskId`,
+      );
+    }
+    changedTaskIds.add(taskId);
     if (change.before !== null) {
       const before = validateTask(change.before, `${changePath}.before`);
       if (before.id !== taskId) throw new DataImportValidationError('Snapshot task id mismatch', `${changePath}.before.id`);
@@ -652,6 +802,30 @@ const validateOperation = (value: unknown, path: string): TaskOperation => {
     }
     if (change.before === null && change.after === null) {
       throw new DataImportValidationError('Operation change has no snapshot', changePath);
+    }
+    if (operation.kind === 'plan-today') {
+      if (change.before === null || change.after === null) {
+        throw new DataImportValidationError(
+          'Today plan changes require both snapshots',
+          changePath,
+        );
+      }
+      const allowedFields = new Set([
+        'plannedDate',
+        'privateOrder',
+        'estimatedMinutes',
+        'updatedAt',
+      ]);
+      const before = change.before as Record<string, unknown>;
+      const after = change.after as Record<string, unknown>;
+      for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (!allowedFields.has(field) && !same(before[field], after[field])) {
+          throw new DataImportValidationError(
+            `Today plan operation changes shared field: ${field}`,
+            changePath,
+          );
+        }
+      }
     }
   });
   return clone(operation) as unknown as TaskOperation;
@@ -672,7 +846,9 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   const notifications = expectRecord(settings.notifications, `${path}.notifications`);
   assertOnlyKeys(notifications, [
     'enabled', 'sound', 'banners', 'badge', 'morningBrief', 'morningBriefTime',
-    'quietHoursEnabled', 'quietHoursStart', 'quietHoursEnd', 'mutedUntil',
+    'quietHoursEnabled', 'quietHoursStart', 'quietHoursEnd',
+    'dailyTaskReminderLimit', 'taskIgnoreBackoffEnabled',
+    'taskReminderMinIntervalMinutes', 'taskReminderSourceMode', 'taskReminderProjectMode', 'mutedUntil',
   ], `${path}.notifications`);
   ['enabled', 'sound', 'banners', 'badge', 'morningBrief', 'quietHoursEnabled'].forEach((key) =>
     expectBoolean(notifications[key], `${path}.notifications.${key}`),
@@ -680,6 +856,31 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   ['morningBriefTime', 'quietHoursStart', 'quietHoursEnd'].forEach((key) => {
     const time = expectString(notifications[key], `${path}.notifications.${key}`);
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new DataImportValidationError('Expected HH:mm', `${path}.notifications.${key}`);
+  });
+  expectOptional(notifications, 'dailyTaskReminderLimit', `${path}.notifications`, (entry, entryPath) =>
+    expectNumber(entry, entryPath, { integer: true, minimum: 0, maximum: 50 }),
+  );
+  expectOptional(notifications, 'taskIgnoreBackoffEnabled', `${path}.notifications`, expectBoolean);
+  expectOptional(notifications, 'taskReminderMinIntervalMinutes', `${path}.notifications`, (entry, entryPath) =>
+    expectNumber(entry, entryPath, { integer: true, minimum: 0, maximum: 1_440 }),
+  );
+  expectOptional(notifications, 'taskReminderSourceMode', `${path}.notifications`, (entry, entryPath) => {
+    const modes = expectRecord(entry, entryPath);
+    assertOnlyKeys(modes, ['local', 'feishu'], entryPath);
+    expectEnum(modes.local, ['normal', 'important-only', 'off'] as const, `${entryPath}.local`);
+    expectEnum(modes.feishu, ['normal', 'important-only', 'off'] as const, `${entryPath}.feishu`);
+  });
+  expectOptional(notifications, 'taskReminderProjectMode', `${path}.notifications`, (entry, entryPath) => {
+    const modes = expectRecord(entry, entryPath);
+    if (Object.keys(modes).length > 100) {
+      throw new DataImportValidationError('最多配置 100 个项目提醒策略', entryPath);
+    }
+    Object.entries(modes).forEach(([projectId, mode]) => {
+      if (!projectId.trim() || projectId.length > 512) {
+        throw new DataImportValidationError('项目 ID 长度无效', `${entryPath}.${projectId}`);
+      }
+      expectEnum(mode, ['normal', 'important-only', 'off'] as const, `${entryPath}.${projectId}`);
+    });
   });
   expectOptional(notifications, 'mutedUntil', `${path}.notifications`, expectIsoDateTime);
 
@@ -755,7 +956,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   assertOnlyKeys(importedPet, [
     'interactionsEnabled', 'proactiveMessages', 'wellbeingReminders',
     'autoDiary', 'relationshipMemory', 'actionPack', 'animationIntensity',
-    'proactiveIntervalMinutes', 'meetingMode', 'seasonalEvents',
+    'proactiveIntervalMinutes', 'proactiveDailyLimit', 'meetingMode', 'seasonalEvents',
   ], `${path}.pet`);
   const pet = {
     ...clone(defaultSettings.pet),
@@ -782,11 +983,16 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     `${path}.pet.proactiveIntervalMinutes`,
     { integer: true, minimum: 15, maximum: 240 },
   );
+  expectNumber(
+    pet.proactiveDailyLimit,
+    `${path}.pet.proactiveDailyLimit`,
+    { integer: true, minimum: 0, maximum: 20 },
+  );
 
   const ai = expectRecord(settings.ai, `${path}.ai`);
   assertOnlyKeys(ai, [
-    'enabled', 'endpoint', 'model', 'authMode', 'timeoutMs', 'retries',
-    'dailyTokenLimit', 'dailyCostLimit',
+    'enabled', 'endpoint', 'model', 'authMode', 'routing', 'fallback',
+    'timeoutMs', 'retries', 'dailyTokenLimit', 'dailyCostLimit',
   ], `${path}.ai`);
   expectBoolean(ai.enabled, `${path}.ai.enabled`);
   expectSafeWebUrl(ai.endpoint, `${path}.ai.endpoint`);
@@ -796,6 +1002,31 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   // value that is present is still an explicit, closed enum.
   if (ai.authMode !== undefined) {
     expectEnum(ai.authMode, ['bearer', 'none'] as const, `${path}.ai.authMode`);
+  }
+  if (ai.routing !== undefined) {
+    expectEnum(
+      ai.routing,
+      ['primary-only', 'fallback-on-error', 'local-only'] as const,
+      `${path}.ai.routing`,
+    );
+  }
+  if (ai.fallback !== undefined) {
+    const fallback = expectRecord(ai.fallback, `${path}.ai.fallback`);
+    assertOnlyKeys(
+      fallback,
+      ['enabled', 'endpoint', 'model', 'authMode'],
+      `${path}.ai.fallback`,
+    );
+    expectBoolean(fallback.enabled, `${path}.ai.fallback.enabled`);
+    expectSafeWebUrl(fallback.endpoint, `${path}.ai.fallback.endpoint`);
+    expectString(fallback.model, `${path}.ai.fallback.model`);
+    if (fallback.authMode !== undefined) {
+      expectEnum(
+        fallback.authMode,
+        ['bearer', 'none'] as const,
+        `${path}.ai.fallback.authMode`,
+      );
+    }
   }
   ['timeoutMs', 'retries', 'dailyTokenLimit', 'dailyCostLimit'].forEach((key) =>
     expectNumber(ai[key], `${path}.ai.${key}`, { minimum: 0 }),
@@ -846,6 +1077,10 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectEnum(settings.permissionMode, ['read-only', 'standard', 'full-access'] as const, `${path}.permissionMode`);
   expectBoolean(settings.onboardingComplete, `${path}.onboardingComplete`);
   const validated = clone(settings) as unknown as AppSettings;
+  validated.notifications = {
+    ...clone(defaultSettings.notifications),
+    ...clone(notifications),
+  } as AppSettings['notifications'];
   const { shape: _legacyShape, ...portableFloating } = floating;
   validated.floating = {
     ...clone(defaultSettings.floating),
@@ -951,7 +1186,7 @@ const parseBundle = (json: string, maxBytes: number): PortableDataBundle => {
   expectIsoDateTime(bundle.exportedAt, '$.exportedAt');
   expectEnum(bundle.redaction, ['none', 'private', 'strict'] as const, '$.redaction');
   const data = expectRecord(bundle.data, '$.data');
-  assertOnlyKeys(data, ['tasks', 'drafts', 'operations', 'settings', 'permissionAudit'], '$.data');
+  assertOnlyKeys(data, ['tasks', 'projects', 'lists', 'drafts', 'operations', 'settings', 'permissionAudit'], '$.data');
   const result: PortableDataBundle = {
     format: PORTABLE_DATA_FORMAT,
     schemaVersion: 1,
@@ -959,6 +1194,28 @@ const parseBundle = (json: string, maxBytes: number): PortableDataBundle => {
     redaction: bundle.redaction as ExportRedaction,
     data: {},
   };
+  if (data.projects !== undefined) {
+    if (!Array.isArray(data.projects)) throw new DataImportValidationError('Expected an array', '$.data.projects');
+    result.data.projects = data.projects.map((project, index) => validateProject(project, `$.data.projects[${index}]`));
+    assertUniqueIds(result.data.projects, '$.data.projects');
+    const names = new Set<string>();
+    result.data.projects.forEach((project, index) => {
+      const normalized = project.name.toLocaleLowerCase();
+      if (names.has(normalized)) throw new DataImportValidationError('Duplicate project name in import', `$.data.projects[${index}].name`);
+      names.add(normalized);
+    });
+  }
+  if (data.lists !== undefined) {
+    if (!Array.isArray(data.lists)) throw new DataImportValidationError('Expected an array', '$.data.lists');
+    result.data.lists = data.lists.map((list, index) => validateList(list, `$.data.lists[${index}]`));
+    assertUniqueIds(result.data.lists, '$.data.lists');
+    const names = new Set<string>();
+    result.data.lists.forEach((list, index) => {
+      const normalized = list.name.toLocaleLowerCase();
+      if (names.has(normalized)) throw new DataImportValidationError('Duplicate list name in import', `$.data.lists[${index}].name`);
+      names.add(normalized);
+    });
+  }
   if (data.tasks !== undefined) {
     if (!Array.isArray(data.tasks)) throw new DataImportValidationError('Expected an array', '$.data.tasks');
     result.data.tasks = data.tasks.map((task, index) => validateTask(task, `$.data.tasks[${index}]`));
@@ -996,6 +1253,9 @@ const assertUniqueIds = (
 
 const redactTask = (task: Task, redaction: ExportRedaction): Task => {
   const result = clone(task);
+  // Provider identity bindings are device-local security metadata. Imports
+  // must be claimed deliberately by the currently authorized identity.
+  delete result.source.syncIdentityId;
   result.attachments = result.attachments.map(({ localPath: _localPath, ...attachment }) => {
     if (attachment.url !== undefined) {
       try {
@@ -1027,6 +1287,8 @@ const redactTask = (task: Task, redaction: ExportRedaction): Task => {
     result.customFields = {};
     result.attachments = [];
     result.links = [];
+    result.comments = [];
+    result.researchCards = [];
   }
   if (redaction === 'strict') {
     result.title = REDACTED;
@@ -1034,6 +1296,7 @@ const redactTask = (task: Task, redaction: ExportRedaction): Task => {
     delete result.listId;
     delete result.sectionId;
     result.tags = [];
+    result.contexts = [];
     delete result.parentId;
     result.dependencyIds = [];
     result.assigneeIds = [];
@@ -1041,6 +1304,20 @@ const redactTask = (task: Task, redaction: ExportRedaction): Task => {
     result.source = { type: result.source.type };
     result.reminders = [];
   }
+  return result;
+};
+
+const redactProject = (project: TaskProject, redaction: ExportRedaction): TaskProject => {
+  const result = clone(project);
+  // Keep strict exports collision-free when several projects are redacted;
+  // the opaque id is not user content and is needed to preserve task links.
+  if (redaction === 'strict') result.name = `${REDACTED} ${project.id}`;
+  return result;
+};
+
+const redactList = (list: TaskList, redaction: ExportRedaction): TaskList => {
+  const result = clone(list);
+  if (redaction === 'strict') result.name = `${REDACTED} ${list.id}`;
   return result;
 };
 
@@ -1067,6 +1344,7 @@ const redactOperation = (operation: TaskOperation, redaction: ExportRedaction): 
 const redactSettings = (settings: AppSettings, redaction: ExportRedaction): AppSettings => {
   const result = clone(settings);
   delete result.ai.credentialId;
+  delete result.ai.fallback.credentialId;
   delete result.feishu.tokenCredentialId;
   delete result.feishu.appSecretCredentialId;
   try {
@@ -1079,6 +1357,16 @@ const redactSettings = (settings: AppSettings, redaction: ExportRedaction): AppS
   } catch {
     // Strict import validation below fails closed for malformed endpoints.
   }
+  try {
+    const endpoint = new URL(result.ai.fallback.endpoint);
+    if (endpoint.username || endpoint.password) {
+      endpoint.username = '';
+      endpoint.password = '';
+      result.ai.fallback.endpoint = endpoint.toString();
+    }
+  } catch {
+    // Strict import validation below fails closed for malformed endpoints.
+  }
   if (redaction !== 'none') {
     result.floating.positions = {};
     result.persona.userName = '';
@@ -1087,6 +1375,8 @@ const redactSettings = (settings: AppSettings, redaction: ExportRedaction): AppS
   if (redaction === 'strict') {
     result.persona.name = REDACTED;
     result.ai.model = '';
+    result.ai.fallback.model = '';
+    result.ai.fallback.enabled = false;
     result.feishu.configured = false;
     result.feishu.clientId = '';
     result.feishu.relayBaseUrl = '';
@@ -1113,6 +1403,186 @@ const redactAudit = (records: readonly AuditRecord[], redaction: ExportRedaction
   return rehashAudit(redacted);
 };
 
+const markdownInline = (value: string): string =>
+  value
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const markdownMultiline = (value: string): string =>
+  value
+    .split(/\r?\n/)
+    .map((line) => `> ${line.length > 0 ? line : ' '}`)
+    .join('\n');
+
+const markdownDate = (value: string | undefined): string | undefined => {
+  if (value === undefined) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().replace('T', ' ').replace(/\.000Z$/, ' UTC');
+};
+
+const markdownStatus = (status: Task['status']): string => {
+  if (status === 'completed') return '已完成';
+  if (status === 'cancelled') return '已取消';
+  return '待办';
+};
+
+const markdownPriority = (priority: Task['priority']): string | undefined => {
+  const labels: Record<Task['priority'], string | undefined> = {
+    none: undefined,
+    low: '低',
+    medium: '中',
+    high: '高',
+    urgent: '紧急',
+  };
+  return labels[priority];
+};
+
+const markdownSource = (task: Task): string =>
+  task.source.type === 'feishu' ? '飞书' : '本地';
+
+const markdownRecurrence = (task: Task): string | undefined => {
+  const recurrence = task.recurrence;
+  if (recurrence === undefined) return undefined;
+  if (recurrence.frequency === 'daily') {
+    return recurrence.interval === 1 ? '每天' : `每 ${recurrence.interval} 天`;
+  }
+  if (recurrence.frequency === 'monthly') {
+    const day = recurrence.dayOfMonth === undefined ? '' : ` ${recurrence.dayOfMonth} 日`;
+    return recurrence.interval === 1
+      ? `每月${day}`.trim()
+      : `每 ${recurrence.interval} 个月${day}`.trim();
+  }
+  const weekdays = recurrence.weekdays?.length
+    ? `（周${recurrence.weekdays.map((day) => ['日', '一', '二', '三', '四', '五', '六'][day] ?? day).join('、')}）`
+    : '';
+  return recurrence.interval === 1
+    ? `每周${weekdays}`
+    : `每 ${recurrence.interval} 周${weekdays}`;
+};
+
+const markdownTaskSort = (left: Task, right: Task): number => {
+  const statusRank = (task: Task): number =>
+    task.status === 'open' ? 0 : task.status === 'completed' ? 1 : 2;
+  const statusDifference = statusRank(left) - statusRank(right);
+  if (statusDifference !== 0) return statusDifference;
+  const leftDate = left.dueAt ?? left.plannedDate ?? left.startAt ?? '9999-12-31';
+  const rightDate = right.dueAt ?? right.plannedDate ?? right.startAt ?? '9999-12-31';
+  const dateDifference = leftDate.localeCompare(rightDate);
+  if (dateDifference !== 0) return dateDifference;
+  const orderDifference = left.privateOrder - right.privateOrder;
+  if (orderDifference !== 0) return orderDifference;
+  return left.title.localeCompare(right.title, 'zh-CN') || left.id.localeCompare(right.id);
+};
+
+const renderMarkdownTask = (
+  task: Task,
+  projects: ReadonlyMap<string, TaskProject>,
+  lists: ReadonlyMap<string, TaskList>,
+): string => {
+  const checkbox = task.status === 'completed' ? 'x' : ' ';
+  const title = markdownInline(task.title) || '未命名任务';
+  const lines = [`- [${checkbox}] **${title}**`];
+  const metadata: string[] = [
+    `状态：${markdownStatus(task.status)}`,
+    `来源：${markdownSource(task)}`,
+  ];
+  const priority = markdownPriority(task.priority);
+  if (priority !== undefined) metadata.push(`优先级：${priority}`);
+  if (task.projectId !== undefined) {
+    metadata.push(`项目：${markdownInline(projects.get(task.projectId)?.name ?? task.projectId)}`);
+  }
+  if (task.listId !== undefined) {
+    metadata.push(`清单：${markdownInline(lists.get(task.listId)?.name ?? task.listId)}`);
+  }
+  if (task.plannedDate !== undefined) metadata.push(`计划：${task.plannedDate}`);
+  if (task.startAt !== undefined) metadata.push(`开始：${markdownDate(task.startAt) ?? task.startAt}`);
+  if (task.dueAt !== undefined) metadata.push(`截止：${markdownDate(task.dueAt) ?? task.dueAt}`);
+  if (task.estimatedMinutes !== undefined) metadata.push(`预计：${task.estimatedMinutes} 分钟`);
+  if (task.actualMinutes !== undefined) metadata.push(`实际：${task.actualMinutes} 分钟`);
+  const recurrence = markdownRecurrence(task);
+  if (recurrence !== undefined) metadata.push(`循环：${recurrence}`);
+  if (task.tags.length > 0) metadata.push(`标签：${task.tags.map((tag) => `#${markdownInline(tag)}`).join(' ')}`);
+  if (task.contexts !== undefined && task.contexts.length > 0) {
+    metadata.push(`情境：${task.contexts.map(markdownInline).join('、')}`);
+  }
+  lines.push(`  - ${metadata.join(' · ')}`);
+
+  if (task.notes.trim().length > 0) {
+    lines.push(`  - 备注：\n${markdownMultiline(task.notes.trim()).replace(/^/gm, '  ')}`);
+  }
+  if (task.privateNotes.trim().length > 0) {
+    lines.push(`  - 私人备注：\n${markdownMultiline(task.privateNotes.trim()).replace(/^/gm, '  ')}`);
+  }
+  if (task.links.length > 0) {
+    lines.push(`  - 链接：${task.links.map((link) => `[${markdownInline(link.label ?? link.url)}](${link.url})`).join('、')}`);
+  }
+  if (task.attachments.length > 0) {
+    const attachments = task.attachments.map((attachment) => {
+      const size = attachment.size === undefined ? '' : `，${attachment.size} B`;
+      return `${markdownInline(attachment.name)}${attachment.mimeType ? `（${attachment.mimeType}${size}）` : size}`;
+    });
+    lines.push(`  - 附件：${attachments.join('、')}`);
+  }
+  return lines.join('\n');
+};
+
+const renderMarkdownExport = (bundle: PortableDataBundle): string => {
+  const tasks = [...(bundle.data.tasks ?? [])].sort(markdownTaskSort);
+  const projects = new Map((bundle.data.projects ?? []).map((project) => [project.id, project]));
+  const lists = new Map((bundle.data.lists ?? []).map((list) => [list.id, list]));
+  const lines = [
+    '# Todo Agent 任务导出',
+    '',
+    `> 导出时间：${bundle.exportedAt}`,
+    `> 脱敏级别：${bundle.redaction === 'none' ? '不脱敏' : bundle.redaction === 'private' ? '私人内容已隐藏' : '严格脱敏'}`,
+    '',
+  ];
+
+  if (projects.size > 0) {
+    lines.push('## 项目', '');
+    [...projects.values()]
+      .filter((project) => !project.archived)
+      .sort((left, right) => left.privateOrder - right.privateOrder || left.name.localeCompare(right.name, 'zh-CN'))
+      .forEach((project) => lines.push(`- ${markdownInline(project.name)}`));
+    lines.push('');
+  }
+  if (lists.size > 0) {
+    lines.push('## 清单', '');
+    [...lists.values()]
+      .filter((list) => !list.archived)
+      .sort((left, right) => left.privateOrder - right.privateOrder || left.name.localeCompare(right.name, 'zh-CN'))
+      .forEach((list) => lines.push(`- ${markdownInline(list.name)}`));
+    lines.push('');
+  }
+
+  const sections: Array<[Task['status'], string]> = [
+    ['open', '待办'],
+    ['completed', '已完成'],
+    ['cancelled', '已取消'],
+  ];
+  if (tasks.length === 0) {
+    lines.push('## 任务', '', '暂无任务。', '');
+  } else {
+    sections.forEach(([status, label]) => {
+      const sectionTasks = tasks.filter((task) => task.status === status);
+      if (sectionTasks.length === 0) return;
+      lines.push(`## ${label}`, '');
+      sectionTasks.forEach((task, index) => {
+        lines.push(renderMarkdownTask(task, projects, lists));
+        if (index < sectionTasks.length - 1) lines.push('');
+      });
+      lines.push('');
+    });
+  }
+  lines.push('---', '', '此文件由 Todo Agent 生成；凭据、访问令牌、本地文件路径和导入用审计链不会写入 Markdown。', '');
+  return lines.join('\n');
+};
+
 const categoryPlan = (
   incomingIds: readonly string[],
   existingIds: ReadonlySet<string>,
@@ -1137,6 +1607,16 @@ const planImport = (
   const tasks = categoryPlan(
     (bundle.data.tasks ?? []).map(({ id }) => id),
     new Set(Object.keys(current.taskState.tasks)),
+    strategy,
+  );
+  const projects = categoryPlan(
+    (bundle.data.projects ?? []).map(({ id }) => id),
+    new Set(Object.keys(current.taskState.projects ?? {})),
+    strategy,
+  );
+  const lists = categoryPlan(
+    (bundle.data.lists ?? []).map(({ id }) => id),
+    new Set(Object.keys(current.taskState.lists ?? {})),
     strategy,
   );
   const drafts = categoryPlan(
@@ -1166,6 +1646,8 @@ const planImport = (
     exportedAt: bundle.exportedAt,
     redaction: bundle.redaction,
     tasks,
+    projects,
+    lists,
     drafts,
     operations,
     settings: {
@@ -1190,9 +1672,16 @@ const planImport = (
   };
 };
 
-const remapTask = (task: Task, taskIds: ReadonlyMap<string, string>): Task => {
+const remapTask = (
+  task: Task,
+  taskIds: ReadonlyMap<string, string>,
+  projectIds: ReadonlyMap<string, string> = new Map(),
+  listIds: ReadonlyMap<string, string> = new Map(),
+): Task => {
   const result = clone(task);
   result.id = taskIds.get(result.id) ?? result.id;
+  if (result.projectId !== undefined) result.projectId = projectIds.get(result.projectId) ?? result.projectId;
+  if (result.listId !== undefined) result.listId = listIds.get(result.listId) ?? result.listId;
   if (result.parentId !== undefined) result.parentId = taskIds.get(result.parentId) ?? result.parentId;
   result.dependencyIds = result.dependencyIds.map((id) => taskIds.get(id) ?? id);
   if (result.recurrenceSeriesId !== undefined) {
@@ -1205,13 +1694,15 @@ const remapOperation = (
   operation: TaskOperation,
   id: string,
   taskIds: ReadonlyMap<string, string>,
+  projectIds: ReadonlyMap<string, string> = new Map(),
+  listIds: ReadonlyMap<string, string> = new Map(),
 ): TaskOperation => ({
   ...clone(operation),
   id,
   changes: operation.changes.map((change) => ({
     taskId: taskIds.get(change.taskId) ?? change.taskId,
-    before: change.before === null ? null : remapTask(change.before, taskIds),
-    after: change.after === null ? null : remapTask(change.after, taskIds),
+    before: change.before === null ? null : remapTask(change.before, taskIds, projectIds, listIds),
+    after: change.after === null ? null : remapTask(change.after, taskIds, projectIds, listIds),
   })),
 });
 
@@ -1239,6 +1730,12 @@ export class DataPortabilityService {
     if (include.tasks) {
       data.tasks = Object.values(snapshot.taskState.tasks).map((task) => redactTask(task, redaction));
     }
+    if (include.projects) {
+      data.projects = Object.values(snapshot.taskState.projects ?? {}).map((project) => redactProject(project, redaction));
+    }
+    if (include.lists) {
+      data.lists = Object.values(snapshot.taskState.lists ?? {}).map((list) => redactList(list, redaction));
+    }
     if (include.drafts) {
       data.drafts = Object.values(snapshot.taskState.drafts).map((draft) => redactDraft(draft, redaction));
     }
@@ -1263,6 +1760,23 @@ export class DataPortabilityService {
   async exportJson(options: DataExportOptions = {}): Promise<string> {
     const bundle = await this.createExport(options);
     return `${JSON.stringify(bundle, null, options.pretty === false ? 0 : 2)}\n`;
+  }
+
+  async exportMarkdown(options: DataMarkdownExportOptions = {}): Promise<string> {
+    const redaction = options.redaction ?? 'private';
+    const bundle = await this.createExport({
+      redaction,
+      include: {
+        tasks: options.include?.tasks ?? true,
+        projects: options.include?.projects ?? true,
+        lists: options.include?.lists ?? true,
+        drafts: false,
+        operations: false,
+        settings: false,
+        permissionAudit: false,
+      },
+    });
+    return renderMarkdownExport(bundle);
   }
 
   async previewImport(
@@ -1290,6 +1804,48 @@ export class DataPortabilityService {
         ...(bundle.data.tasks ?? []).map(({ id }) => id),
       ]);
       const taskIds = new Map<string, string>();
+      const usedProjectIds = new Set([
+        ...Object.keys(draft.taskState.projects ?? {}),
+        ...(bundle.data.projects ?? []).map(({ id }) => id),
+      ]);
+      const projectIds = new Map<string, string>();
+      const usedListIds = new Set([
+        ...Object.keys(draft.taskState.lists ?? {}),
+        ...(bundle.data.lists ?? []).map(({ id }) => id),
+      ]);
+      const listIds = new Map<string, string>();
+      if (options.strategy === 'copy') {
+        preview.projects.conflicts.forEach((id) => {
+          const copyId = this.#uniqueCopyId('project', id, usedProjectIds);
+          projectIds.set(id, copyId);
+          usedProjectIds.add(copyId);
+        });
+      }
+      if (options.strategy === 'copy') {
+        preview.lists.conflicts.forEach((id) => {
+          const copyId = this.#uniqueCopyId('list', id, usedListIds);
+          listIds.set(id, copyId);
+          usedListIds.add(copyId);
+        });
+      }
+      for (const source of bundle.data.projects ?? []) {
+        const conflict = draft.taskState.projects?.[source.id] !== undefined;
+        if (conflict && options.strategy === 'skip') continue;
+        const imported = clone(source);
+        if (conflict && options.strategy === 'copy') {
+          imported.id = projectIds.get(source.id)!;
+        }
+        draft.taskState.projects[imported.id] = imported;
+      }
+      for (const source of bundle.data.lists ?? []) {
+        const conflict = draft.taskState.lists?.[source.id] !== undefined;
+        if (conflict && options.strategy === 'skip') continue;
+        const imported = clone(source);
+        if (conflict && options.strategy === 'copy') {
+          imported.id = listIds.get(source.id)!;
+        }
+        draft.taskState.lists[imported.id] = imported;
+      }
       if (options.strategy === 'copy') {
         preview.tasks.conflicts.forEach((id) => {
           const copyId = this.#uniqueCopyId('task', id, usedTaskIds);
@@ -1300,7 +1856,7 @@ export class DataPortabilityService {
       for (const task of bundle.data.tasks ?? []) {
         const conflict = draft.taskState.tasks[task.id] !== undefined;
         if (conflict && options.strategy === 'skip') continue;
-        const imported = remapTask(task, taskIds);
+        const imported = remapTask(task, taskIds, projectIds, listIds);
         draft.taskState.tasks[imported.id] = imported;
       }
 
@@ -1331,7 +1887,7 @@ export class DataPortabilityService {
           ? this.#uniqueCopyId('operation', source.id, usedOperationIds)
           : source.id;
         usedOperationIds.add(operationId);
-        const imported = remapOperation(source, operationId, taskIds);
+        const imported = remapOperation(source, operationId, taskIds, projectIds, listIds);
         if (existingIndex >= 0 && options.strategy === 'overwrite') {
           draft.taskState.operations[existingIndex] = imported;
         } else {
@@ -1350,6 +1906,8 @@ export class DataPortabilityService {
         digest: preview.digest,
         strategy: options.strategy,
         tasks: this.#withoutConflicts(preview.tasks),
+        projects: this.#withoutConflicts(preview.projects),
+        lists: this.#withoutConflicts(preview.lists),
         drafts: this.#withoutConflicts(preview.drafts),
         operations: this.#withoutConflicts(preview.operations),
         settings: preview.settings.action === 'overwrite'
@@ -1368,7 +1926,7 @@ export class DataPortabilityService {
   }
 
   #uniqueCopyId(
-    kind: 'task' | 'draft' | 'operation',
+    kind: 'task' | 'project' | 'list' | 'draft' | 'operation',
     originalId: string,
     used: ReadonlySet<string>,
   ): string {

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ApplyTodayPlanRequest,
+  BulkTaskRequest,
   CreateTaskInput,
   RecurrenceEditScope,
   Task,
@@ -130,13 +132,19 @@ export interface TaskController {
   lastOperationId?: string;
   select(id?: TaskId): void;
   refresh(): Promise<void>;
-  create(input: CreateTaskInput): Promise<TaskMutationResult | undefined>;
+  create(
+    input: CreateTaskInput,
+    options?: { selectCreated?: boolean },
+  ): Promise<TaskMutationResult | undefined>;
   update(
     id: TaskId,
     patch: UpdateTaskInput,
     recurrenceScope?: RecurrenceEditScope,
   ): Promise<string | undefined>;
-  toggleComplete(task: Task): Promise<string | undefined>;
+  toggleComplete(
+    task: Task,
+    options?: { selectUpdated?: boolean },
+  ): Promise<string | undefined>;
   moveToToday(id: TaskId): Promise<string | undefined>;
   startFocus(id: TaskId): Promise<string | undefined>;
   pauseFocus(id: TaskId): Promise<string | undefined>;
@@ -145,6 +153,8 @@ export interface TaskController {
   restore(id: TaskId): Promise<string | undefined>;
   purge(id: TaskId): Promise<string | undefined>;
   reorderToday(taskIds: TaskId[]): Promise<string | undefined>;
+  applyTodayPlan(request: ApplyTodayPlanRequest): Promise<string | undefined>;
+  applyBulkTaskAction(request: BulkTaskRequest): Promise<string | undefined>;
   undo(operationId?: string): Promise<void>;
 }
 
@@ -281,16 +291,22 @@ export function useTaskController(
   }, []);
 
   const create = useCallback(
-    async (input: CreateTaskInput) => {
+    async (
+      input: CreateTaskInput,
+      options?: { selectCreated?: boolean },
+    ) => {
+      const selectCreated = options?.selectCreated !== false;
       if (api) {
         const mutationRequest = ++mutationRequestRef.current;
         const result = await api.create(input);
         if (mutationRequest !== mutationRequestRef.current) return result;
         setLastOperationId(result.operationId);
-        selectedIdRef.current = result.task.id;
-        setSelectedId(result.task.id);
+        if (selectCreated) {
+          selectedIdRef.current = result.task.id;
+          setSelectedId(result.task.id);
+        }
         await refresh();
-        if (mutationRequest === mutationRequestRef.current) {
+        if (selectCreated && mutationRequest === mutationRequestRef.current) {
           selectedIdRef.current = result.task.id;
           setSelectedId(result.task.id);
           setSelectedTask(result.task);
@@ -313,9 +329,11 @@ export function useTaskController(
             : { status: "local" },
       });
       setFallback((current) => [task, ...current]);
-      selectedIdRef.current = task.id;
-      setSelectedId(task.id);
-      setSelectedTask(task);
+      if (selectCreated) {
+        selectedIdRef.current = task.id;
+        setSelectedId(task.id);
+        setSelectedTask(task);
+      }
       return undefined;
     },
     [api, refresh],
@@ -383,8 +401,97 @@ export function useTaskController(
     [api, refresh],
   );
 
+  const applyTodayPlan = useCallback(
+    async (request: ApplyTodayPlanRequest) => {
+      if (api) {
+        const operation = await api.applyTodayPlan(request);
+        setLastOperationId(operation.id);
+        await refresh();
+        return operation.id;
+      }
+      const selected = new Map(
+        request.items.map((item, index) => [item.id, { item, index }]),
+      );
+      const cleared = new Set(request.clearTaskIds);
+      const plannedDate = request.date ?? localDate();
+      setFallback((current) =>
+        current.map((task) => {
+          const plan = selected.get(task.id);
+          if (plan) {
+            return {
+              ...task,
+              plannedDate,
+              privateOrder: plan.index,
+              estimatedMinutes:
+                plan.item.estimatedMinutes ?? task.estimatedMinutes,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          if (cleared.has(task.id)) {
+            return {
+              ...task,
+              plannedDate: undefined,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return task;
+        }),
+      );
+      return undefined;
+    },
+    [api, refresh],
+  );
+
+  const applyBulkTaskAction = useCallback(
+    async (request: BulkTaskRequest) => {
+      if (api) {
+        const operation = await api.applyBulkTaskAction(request);
+        setLastOperationId(operation.id);
+        await refresh();
+        return operation.id;
+      }
+      const selected = new Set(request.ids);
+      const now = new Date().toISOString();
+      setFallback((current) =>
+        current.map((task) => {
+          if (!selected.has(task.id)) return task;
+          if (request.action.kind === "complete") {
+            return {
+              ...task,
+              status: "completed",
+              completedAt: request.action.completedAt ?? now,
+              updatedAt: now,
+            };
+          }
+          if (request.action.kind === "reopen") {
+            return {
+              ...task,
+              status: "open",
+              completedAt: undefined,
+              updatedAt: now,
+            };
+          }
+          if (request.action.kind === "move-to-today") {
+            return {
+              ...task,
+              plannedDate: request.action.date ?? localDate(),
+              updatedAt: now,
+            };
+          }
+          if (request.action.kind === "trash") {
+            return { ...task, deletedAt: now, updatedAt: now };
+          }
+          return { ...task, deletedAt: undefined, updatedAt: now };
+        }),
+      );
+      return undefined;
+    },
+    [api, refresh],
+  );
+
   const toggleComplete = useCallback(
-    async (task: Task) => {
+    async (task: Task, options?: { selectUpdated?: boolean }) => {
+      const selectUpdated = options?.selectUpdated !== false;
       if (api) {
         const mutationRequest = ++mutationRequestRef.current;
         const result =
@@ -395,7 +502,7 @@ export function useTaskController(
           return result.operationId;
         setLastOperationId(result.operationId);
         await refresh();
-        if (mutationRequest === mutationRequestRef.current) {
+        if (selectUpdated && mutationRequest === mutationRequestRef.current) {
           selectedIdRef.current = result.task.id;
           setSelectedId(result.task.id);
           setSelectedTask(result.task);
@@ -525,6 +632,8 @@ export function useTaskController(
       restore: (id) => runMutation("restore", id),
       purge,
       reorderToday,
+      applyTodayPlan,
+      applyBulkTaskAction,
       undo,
     }),
     [
@@ -542,6 +651,8 @@ export function useTaskController(
       runMutation,
       purge,
       reorderToday,
+      applyTodayPlan,
+      applyBulkTaskAction,
       undo,
     ],
   );

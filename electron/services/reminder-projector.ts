@@ -279,6 +279,8 @@ export const projectReminderCandidates = (
         body: reminder.label?.trim() || '任务提醒',
         scheduledAt: scheduled.toISOString(),
         source: reminder.source,
+        ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
+        priority: task.priority,
       });
     }
 
@@ -300,6 +302,8 @@ export const projectReminderCandidates = (
           body: '任务已到截止时间',
           scheduledAt: scheduled.toISOString(),
           source: task.source.type,
+          ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
+          priority: task.priority,
         });
       }
     }

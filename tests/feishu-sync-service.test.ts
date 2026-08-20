@@ -49,10 +49,15 @@ const clone = <Value>(value: Value): Value => structuredClone(value);
 
 class MemoryLocalStore implements FeishuLocalStorePort {
   state: LocalAppState = createEmptyLocalAppState();
+  /** Simulates a user transaction committing immediately before the pull lock. */
+  beforeNextTransaction?: (state: LocalAppState) => void;
 
   async transact<Result>(
     mutator: (draft: LocalAppState) => Result | Promise<Result>,
   ): Promise<Result> {
+    const before = this.beforeNextTransaction;
+    this.beforeNextTransaction = undefined;
+    before?.(this.state);
     const draft = clone(this.state);
     const result = await mutator(draft);
     draft.revision += 1;
@@ -754,6 +759,141 @@ describe("Feishu application pull adapter", () => {
       "Full fallback result",
     );
   });
+
+  it("merges a user edit committed at the pull write boundary without losing public fields", async () => {
+    const harness = createHarness();
+    const remote = harness.remote as FakeRemote;
+    const baseDue = new Date(NOW + 60_000).toISOString();
+    const localDue = new Date(NOW + 120_000).toISOString();
+    remote.tasks.set("remote-pull-race", {
+      guid: "remote-pull-race",
+      summary: "Base title",
+      description: "Base notes",
+      due: { timestamp: String(Date.parse(baseDue)), is_all_day: false },
+      status: "open",
+      members: [
+        { id: "ou_base_assignee", role: "assignee", type: "user" },
+        { id: "ou_base_follower", role: "follower", type: "user" },
+      ],
+      tasklists: [{ tasklist_guid: "tasklist-base" }],
+      updated_at: "v1",
+    });
+    await harness.service.syncNow({ forceFull: true });
+    const localId = (await harness.service.getState()).localIdByGuid[
+      "remote-pull-race"
+    ];
+
+    remote.tasks.set("remote-pull-race", {
+      ...remote.tasks.get("remote-pull-race")!,
+      description: "Notes changed remotely",
+      updated_at: "v2",
+    });
+    harness.localStore.beforeNextTransaction = (state) => {
+      const task = state.tasks[localId];
+      task.title = "Title edited at transaction boundary";
+      task.dueAt = localDue;
+      task.dueAtIsAllDay = true;
+      task.status = "completed";
+      task.completedAt = new Date(NOW).toISOString();
+      task.assigneeIds = ["ou_local_assignee"];
+      task.followerIds = ["ou_local_follower"];
+      task.source = {
+        ...task.source,
+        tasklist: {
+          tasklistGuid: "tasklist-local",
+          sectionGuid: "section-local",
+        },
+      };
+      task.sync = { ...task.sync, status: "pending" };
+    };
+
+    const report = await harness.service.syncNow({ forceFull: true });
+
+    expect(report).toMatchObject({ pulled: 1, conflicts: [] });
+    expect(await harness.adapter.getTask(localId, true)).toMatchObject({
+      title: "Title edited at transaction boundary",
+      notes: "Notes changed remotely",
+      dueAt: localDue,
+      dueAtIsAllDay: true,
+      status: "completed",
+      assigneeIds: ["ou_local_assignee"],
+      followerIds: ["ou_local_follower"],
+      source: {
+        tasklist: {
+          tasklistGuid: "tasklist-local",
+          sectionGuid: "section-local",
+        },
+        remoteVersion: "v2",
+      },
+      sync: { status: "pending" },
+    });
+    expect((await harness.service.getState()).queue).toEqual([
+      expect.objectContaining({ localId, kind: "update", attempts: 0 }),
+    ]);
+  });
+
+  it("detects divergent user edits committed at the pull write boundary as conflicts", async () => {
+    const harness = createHarness();
+    const remote = harness.remote as FakeRemote;
+    const baseDue = new Date(NOW + 60_000).toISOString();
+    const localDue = new Date(NOW + 120_000).toISOString();
+    const remoteDue = new Date(NOW + 180_000).toISOString();
+    remote.tasks.set("remote-pull-conflict-race", {
+      guid: "remote-pull-conflict-race",
+      summary: "Base title",
+      due: { timestamp: String(Date.parse(baseDue)), is_all_day: false },
+      status: "open",
+      members: [{ id: "ou_base", role: "assignee", type: "user" }],
+      tasklists: [{ tasklist_guid: "tasklist-base" }],
+      updated_at: "v1",
+    });
+    await harness.service.syncNow({ forceFull: true });
+    const localId = (await harness.service.getState()).localIdByGuid[
+      "remote-pull-conflict-race"
+    ];
+
+    remote.tasks.set("remote-pull-conflict-race", {
+      ...remote.tasks.get("remote-pull-conflict-race")!,
+      summary: "Remote title",
+      due: { timestamp: String(Date.parse(remoteDue)), is_all_day: false },
+      members: [{ id: "ou_remote", role: "assignee", type: "user" }],
+      tasklists: [{ tasklist_guid: "tasklist-remote" }],
+      updated_at: "v2",
+    });
+    harness.localStore.beforeNextTransaction = (state) => {
+      const task = state.tasks[localId];
+      task.title = "Local title";
+      task.dueAt = localDue;
+      task.dueAtIsAllDay = true;
+      task.assigneeIds = ["ou_local"];
+      task.source = {
+        ...task.source,
+        tasklist: { tasklistGuid: "tasklist-local" },
+      };
+      task.sync = { ...task.sync, status: "pending" };
+    };
+
+    const report = await harness.service.syncNow({ forceFull: true });
+
+    expect(report.conflicts).toHaveLength(1);
+    expect(report.conflicts[0]?.fields.map(({ field }) => field)).toEqual([
+      "title",
+      "dueAt",
+      "assigneeIds",
+      "tasklist",
+    ]);
+    expect(await harness.adapter.getTask(localId, true)).toMatchObject({
+      title: "Local title",
+      dueAt: localDue,
+      dueAtIsAllDay: true,
+      assigneeIds: ["ou_local"],
+      source: { tasklist: { tasklistGuid: "tasklist-local" } },
+      sync: {
+        status: "conflict",
+        conflictFields: ["title", "dueAt", "assigneeIds", "tasklist"],
+      },
+    });
+  });
 });
 
 describe("Feishu application push and recovery", () => {
@@ -1257,9 +1397,9 @@ describe("Feishu application push and recovery", () => {
           localId: localIds[0],
           attempts: 1,
         });
-        // A retained failure skips pull, so the optimistic local completion is
-        // preserved while later queue items still reach Feishu.
-        expect(remote.listAllCalls).toBe(1);
+        // A terminal item is retained and visible, but no longer prevents the
+        // account pull from advancing after the other queue items are sent.
+        expect(remote.listAllCalls).toBe(2);
       }
       expect(await harness.adapter.getTask(localIds[0], true)).toMatchObject({
         status: "completed",
@@ -1276,9 +1416,108 @@ describe("Feishu application push and recovery", () => {
       }
 
       await harness.service.syncNow({ forceFull: true });
-      expect(remote.completeAttempts).toHaveLength(retained ? 4 : 3);
+      // Retained 4xx items are quarantined from automatic retry; a fresh local
+      // mutation can explicitly reactivate one.
+      expect(remote.completeAttempts).toHaveLength(3);
     },
   );
+
+  it("quarantines a permanent bad item while later pulls advance and a new edit can reactivate it", async () => {
+    const harness = createHarness();
+    const remote = harness.remote as FakeRemote;
+    remote.tasks.set("remote-terminal-bad", {
+      guid: "remote-terminal-bad",
+      summary: "Bad completion",
+      status: "open",
+      updated_at: "v1",
+    });
+    remote.tasks.set("remote-pull-after-bad", {
+      guid: "remote-pull-after-bad",
+      summary: "Remote before",
+      status: "open",
+      updated_at: "v1",
+    });
+    await harness.service.syncNow({ forceFull: true });
+    const initial = await harness.service.getState();
+    const badId = initial.localIdByGuid["remote-terminal-bad"];
+    const pulledId = initial.localIdByGuid["remote-pull-after-bad"];
+    await harness.localStore.transact((state) => {
+      const task = state.tasks[badId];
+      task.status = "completed";
+      task.completedAt = new Date(NOW).toISOString();
+      task.sync = { ...task.sync, status: "pending" };
+    });
+    remote.completeErrors.set(
+      "remote-terminal-bad",
+      new FeishuPermissionError("completion denied", { status: 403 }),
+    );
+    remote.tasks.set("remote-pull-after-bad", {
+      ...remote.tasks.get("remote-pull-after-bad")!,
+      summary: "Remote changed despite bad queue item",
+      updated_at: "v2",
+    });
+
+    const failed = await harness.service.syncNow({ forceFull: true });
+
+    expect(failed).toMatchObject({
+      pushed: 0,
+      pulled: 2,
+      issue: { code: "PERMISSION_DENIED", retryable: false },
+    });
+    expect(remote.completeAttempts).toEqual(["remote-terminal-bad"]);
+    expect(await harness.adapter.getTask(pulledId)).toMatchObject({
+      title: "Remote changed despite bad queue item",
+      sync: { status: "synced" },
+    });
+    expect((await harness.service.getState()).queue).toEqual([
+      expect.objectContaining({
+        localId: badId,
+        kind: "complete",
+        attempts: 1,
+        lastError: "PERMISSION_DENIED",
+      }),
+    ]);
+
+    remote.tasks.set("remote-pull-after-bad", {
+      ...remote.tasks.get("remote-pull-after-bad")!,
+      summary: "Remote advanced again",
+      updated_at: "v3",
+    });
+    // Recreate the service to prove the quarantine is derived from durable
+    // queue data rather than process-only memory.
+    let restartedIds = 0;
+    const restarted = new FeishuSyncService({
+      remote,
+      adapter: harness.adapter,
+      stateStore: harness.stateStore,
+      now: () => NOW,
+      createId: () => `restarted-sync-id-${++restartedIds}`,
+      fullSyncIntervalMs: 60_000,
+    });
+    await restarted.syncNow({ forceFull: true });
+    expect(remote.completeAttempts).toEqual(["remote-terminal-bad"]);
+    expect(await harness.adapter.getTask(pulledId)).toMatchObject({
+      title: "Remote advanced again",
+    });
+    expect((await restarted.getState()).queue[0]).toMatchObject({
+      attempts: 1,
+      lastError: "PERMISSION_DENIED",
+    });
+
+    remote.completeErrors.delete("remote-terminal-bad");
+    await restarted.enqueueComplete(badId);
+    const reactivated = (await restarted.getState()).queue[0];
+    expect(reactivated).toMatchObject({ attempts: 0 });
+    expect(reactivated).not.toHaveProperty("lastError");
+    const recovered = await restarted.syncNow({ forceFull: true });
+    expect(recovered).toMatchObject({ pushed: 1 });
+    expect(recovered).not.toHaveProperty("issue");
+    expect(remote.completeAttempts).toEqual([
+      "remote-terminal-bad",
+      "remote-terminal-bad",
+    ]);
+    expect((await restarted.getState()).queue).toEqual([]);
+  });
 
   it("distinguishes a retryable rate limit from offline work and resumes it later", async () => {
     const waits: number[] = [];
@@ -2022,6 +2261,9 @@ describe("Feishu Task v2 tasklist synchronization", () => {
       (await harness.service.getState()).mappingsByLocalId[local.id],
     ).toMatchObject({ guid: "created-guid-1" });
 
+    // Reauthorization/user retry explicitly reactivates the quarantined 403;
+    // background polling alone must not issue the same denied write forever.
+    await harness.service.enqueueUpsert(local.id);
     const retried = await harness.service.syncNow({ forceFull: true });
     expect(retried).toMatchObject({ pushed: 1, offline: false });
     expect(remote.createPayloads).toHaveLength(1);

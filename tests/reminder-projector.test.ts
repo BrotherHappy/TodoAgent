@@ -89,6 +89,7 @@ describe('projectReminderCandidates', () => {
         body: '提前准备',
         scheduledAt,
         source: 'local',
+        priority: 'medium',
       },
     ]);
   });

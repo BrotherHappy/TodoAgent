@@ -16,7 +16,11 @@ interface WindowManagerOptions {
   onMainCloseRequested: () => boolean;
 }
 
-const SAFE_EXTERNAL_PROTOCOLS = new Set(["https:", "mailto:"]);
+// HTTP links are intentionally allowed alongside HTTPS because task context
+// and attachment references accept both schemes. The URL is still parsed and
+// restricted to these protocols before leaving the app; file/javascript/data
+// URLs never reach the system browser.
+const SAFE_EXTERNAL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const e2eBackgroundWindows =
   process.env.TODO_AGENT_E2E_BACKGROUND === "1";
 

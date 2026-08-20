@@ -3,11 +3,14 @@ export type FloatingTopMode = 'always' | 'focus-only' | 'never';
 export type PetTab = 'all' | 'today' | 'focus' | 'chat' | 'home';
 /** How the OpenAI-compatible model endpoint authenticates requests. */
 export type AiAuthenticationMode = 'bearer' | 'none';
+/** How Agent chooses between the primary and optional local model. */
+export type AiRoutingMode = 'primary-only' | 'fallback-on-error' | 'local-only';
 export const FLOATING_HOVER_EXPAND_DELAY_MIN_MS = 200;
 export const FLOATING_HOVER_EXPAND_DELAY_MAX_MS = 5_000;
 export const FLOATING_HOVER_EXPAND_DELAY_DEFAULT_MS = 1_000;
 export type AgentPermissionMode = 'read-only' | 'standard' | 'full-access';
 export type PersonaPreset = 'minimal' | 'warm' | 'calm' | 'strict';
+export type TaskReminderSourceMode = 'normal' | 'important-only' | 'off';
 export type FeishuConnectionMode =
   | 'personal-direct'
   | 'existing-direct'
@@ -24,6 +27,19 @@ export interface NotificationSettings {
   quietHoursEnabled: boolean;
   quietHoursStart: string;
   quietHoursEnd: string;
+  /** Maximum number of task reminder banners per local day; 0 means unlimited. */
+  dailyTaskReminderLimit: number;
+  /** After repeated dismissal of one task reminder, stop resurfacing that reminder. */
+  taskIgnoreBackoffEnabled: boolean;
+  /** Minimum gap between different ordinary task reminders; 0 disables the gap. */
+  taskReminderMinIntervalMinutes: number;
+  /** Source-specific policy for local and Feishu task reminders. */
+  taskReminderSourceMode: {
+    local: TaskReminderSourceMode;
+    feishu: TaskReminderSourceMode;
+  };
+  /** Optional project-specific overrides; project ID is the task model's projectId. */
+  taskReminderProjectMode: Record<string, TaskReminderSourceMode>;
   mutedUntil?: string;
 }
 
@@ -69,6 +85,8 @@ export interface PetBehaviorSettings {
   actionPack: 'balanced' | 'calm' | 'playful' | 'focused';
   animationIntensity: 'gentle' | 'lively';
   proactiveIntervalMinutes: number;
+  /** Maximum proactive companion messages per local day; 0 means unlimited. */
+  proactiveDailyLimit: number;
   meetingMode: boolean;
   seasonalEvents: boolean;
 }
@@ -81,12 +99,24 @@ export interface AiProviderSettings {
    * `none` is an explicit opt-in for a trusted self-hosted endpoint that
    * does not use an API key. It never causes an empty Authorization header to
    * be sent.
-   */
+  */
   authMode: AiAuthenticationMode;
+  /** Use the local provider only when the primary provider has a retryable failure. */
+  routing: AiRoutingMode;
+  /** Optional OpenAI-compatible local/self-hosted provider. Disabled by default. */
+  fallback: AiFallbackProviderSettings;
   timeoutMs: number;
   retries: number;
   dailyTokenLimit: number;
   dailyCostLimit: number;
+  credentialId?: string;
+}
+
+export interface AiFallbackProviderSettings {
+  enabled: boolean;
+  endpoint: string;
+  model: string;
+  authMode: AiAuthenticationMode;
   credentialId?: string;
 }
 
@@ -157,6 +187,14 @@ export const defaultSettings: AppSettings = {
     quietHoursEnabled: false,
     quietHoursStart: '22:00',
     quietHoursEnd: '08:00',
+    dailyTaskReminderLimit: 8,
+    taskIgnoreBackoffEnabled: true,
+    taskReminderMinIntervalMinutes: 120,
+    taskReminderSourceMode: {
+      local: 'normal',
+      feishu: 'normal',
+    },
+    taskReminderProjectMode: {},
   },
   floating: {
     enabled: true,
@@ -192,6 +230,7 @@ export const defaultSettings: AppSettings = {
     actionPack: 'balanced',
     animationIntensity: 'lively',
     proactiveIntervalMinutes: 45,
+    proactiveDailyLimit: 2,
     meetingMode: false,
     seasonalEvents: true,
   },
@@ -200,6 +239,13 @@ export const defaultSettings: AppSettings = {
     endpoint: 'https://api.openai.com/v1',
     model: '',
     authMode: 'bearer',
+    routing: 'primary-only',
+    fallback: {
+      enabled: false,
+      endpoint: 'http://127.0.0.1:11434/v1',
+      model: 'llama3.2',
+      authMode: 'none',
+    },
     timeoutMs: 30_000,
     retries: 1,
     dailyTokenLimit: 100_000,

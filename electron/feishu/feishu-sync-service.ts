@@ -71,6 +71,8 @@ export interface FeishuApplicationConflict {
 export interface FeishuApplicationSyncState {
   schemaVersion: 1;
   accountId: string;
+  /** Opaque authorized-user/app binding. Missing only on legacy state. */
+  syncIdentityId?: string;
   mappingsByLocalId: Record<string, FeishuTaskMapping>;
   localIdByGuid: Record<string, string>;
   queue: FeishuApplicationQueueItem[];
@@ -144,6 +146,7 @@ export interface FeishuSyncServiceOptions {
   remote: FeishuApplicationRemoteApi;
   adapter: FeishuTaskAdapter;
   stateStore: FeishuApplicationStateStore;
+  syncIdentityId?: string;
   connectivity?: FeishuConnectivityPort;
   scheduler?: FeishuPollingScheduler;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -209,10 +212,14 @@ const defaultScheduler: FeishuPollingScheduler = {
   clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
 };
 
-function emptyState(accountId: string): FeishuApplicationSyncState {
+function emptyState(
+  accountId: string,
+  syncIdentityId?: string,
+): FeishuApplicationSyncState {
   return {
     schemaVersion: 1,
     accountId,
+    ...(syncIdentityId === undefined ? {} : { syncIdentityId }),
     mappingsByLocalId: {},
     localIdByGuid: {},
     queue: [],
@@ -426,10 +433,30 @@ function isTerminalItemError(error: unknown): boolean {
   );
 }
 
+/**
+ * A terminal 4xx is retained for repair/inspection, but it is quarantined
+ * from automatic retries. The durable attempts/lastError pair intentionally
+ * carries this state without a schema migration; an explicit new mutation
+ * clears both fields and reactivates the item.
+ */
+function terminalQueueIssue(
+  item: FeishuApplicationQueueItem,
+): FeishuSyncIssue | undefined {
+  if (item.attempts < 1) return undefined;
+  if (item.lastError === 'PERMISSION_DENIED') {
+    return { code: 'PERMISSION_DENIED', retryable: false };
+  }
+  if (item.lastError === 'SYNC_FAILED') {
+    return { code: 'SYNC_FAILED', retryable: false };
+  }
+  return undefined;
+}
+
 export class FeishuSyncService {
   private readonly remote: FeishuApplicationRemoteApi;
   private readonly adapter: FeishuTaskAdapter;
   private readonly stateStore: FeishuApplicationStateStore;
+  private readonly syncIdentityId?: string;
   private readonly connectivity: FeishuConnectivityPort;
   private readonly scheduler: FeishuPollingScheduler;
   private readonly sleep: (milliseconds: number) => Promise<void>;
@@ -448,6 +475,7 @@ export class FeishuSyncService {
     this.remote = options.remote;
     this.adapter = options.adapter;
     this.stateStore = options.stateStore;
+    this.syncIdentityId = options.syncIdentityId;
     this.connectivity = options.connectivity ?? { isOnline: () => true };
     this.scheduler = options.scheduler ?? defaultScheduler;
     this.sleep = options.sleep ?? defaultSleep;
@@ -474,14 +502,44 @@ export class FeishuSyncService {
   private async ensureState(): Promise<FeishuApplicationSyncState> {
     if (this.state) return this.state;
     const loaded = await this.stateStore.load();
+    const legacyMatchesLabel =
+      loaded?.syncIdentityId === undefined &&
+      loaded?.accountId === this.adapter.accountId;
+    const boundIdentityMatches =
+      this.syncIdentityId !== undefined &&
+      loaded?.syncIdentityId === this.syncIdentityId;
     if (
       loaded &&
       loaded.schemaVersion === 1 &&
-      loaded.accountId === this.adapter.accountId
+      (boundIdentityMatches ||
+        (this.syncIdentityId === undefined
+          ? loaded.accountId === this.adapter.accountId
+          : legacyMatchesLabel))
     ) {
-      this.state = clone(loaded);
+      this.state = {
+        ...clone(loaded),
+        accountId: this.adapter.accountId,
+        ...(this.syncIdentityId === undefined
+          ? {}
+          : { syncIdentityId: this.syncIdentityId }),
+      };
+      if (
+        this.syncIdentityId !== undefined &&
+        loaded.syncIdentityId === undefined
+      ) {
+        await this.adapter.claimLegacyTasks(
+          [
+            ...Object.keys(loaded.mappingsByLocalId),
+            ...loaded.queue.map((item) => item.localId),
+            ...Object.keys(loaded.conflicts),
+          ],
+          this.syncIdentityId,
+        );
+        await this.stateStore.save(clone(this.state));
+      }
+      if (boundIdentityMatches) await this.adapter.relabelOwnedTasks();
     } else {
-      this.state = emptyState(this.adapter.accountId);
+      this.state = emptyState(this.adapter.accountId, this.syncIdentityId);
     }
     return this.state;
   }
@@ -594,12 +652,19 @@ export class FeishuSyncService {
   private enqueueInState(
     localId: string,
     kind: FeishuApplicationQueueKind,
+    options: { reactivateTerminal?: boolean } = {},
   ): FeishuApplicationQueueItem {
     const state = this.state!;
     const create = state.queue.find(
       (item) => item.localId === localId && item.kind === 'create',
     );
-    if (create && kind !== 'delete') return create;
+    if (create && kind !== 'delete') {
+      if (options.reactivateTerminal && terminalQueueIssue(create)) {
+        create.attempts = 0;
+        delete create.lastError;
+      }
+      return create;
+    }
 
     if (kind === 'delete') {
       state.queue = state.queue.filter((item) => item.localId !== localId);
@@ -613,7 +678,14 @@ export class FeishuSyncService {
         (item) => item.localId === localId && item.kind !== 'delete',
       );
       if (existing) {
+        if (terminalQueueIssue(existing) && !options.reactivateTerminal) {
+          return existing;
+        }
         existing.kind = kind;
+        if (options.reactivateTerminal && terminalQueueIssue(existing)) {
+          existing.attempts = 0;
+          delete existing.lastError;
+        }
         return existing;
       }
     }
@@ -635,10 +707,19 @@ export class FeishuSyncService {
     requestedKind: FeishuApplicationQueueKind,
   ): Promise<FeishuApplicationQueueItem> {
     await this.ensureState();
+    const claimed = await this.adapter.claimTask(localId);
+    if (!claimed) {
+      throw new Error("Feishu task is not owned by the active authorized identity.");
+    }
     const mapping = this.state!.mappingsByLocalId[localId];
     const kind =
       requestedKind === 'update' && !mapping ? 'create' : requestedKind;
-    const item = this.enqueueInState(localId, kind);
+    const item = this.enqueueInState(localId, kind, {
+      // Calls reaching this method are explicit TaskService notifications or
+      // user/API enqueue requests. Unlike capturePendingLocalChanges, they
+      // represent a new edit and may safely reactivate a quarantined item.
+      reactivateTerminal: true,
+    });
     await this.adapter.setSyncStatus(localId, 'pending');
     await this.persist();
     return clone(item);
@@ -1215,6 +1296,12 @@ export class FeishuSyncService {
   ): Promise<{ stopped: boolean; retainedItemFailures: boolean }> {
     const state = this.state!;
     let retainedItemFailures = false;
+    for (const item of state.queue) {
+      const issue = terminalQueueIssue(item);
+      if (!issue) continue;
+      retainedItemFailures = true;
+      recordSyncIssue(report, issue);
+    }
     // A newer local mutation can arrive while a network request is in flight.
     // A guarded confirmation replaces the completed item with a fresh item;
     // process that fresh item in this run rather than waiting for the next poll.
@@ -1222,7 +1309,8 @@ export class FeishuSyncService {
     const visitedItemIds = new Set<string>();
     for (;;) {
       const item = state.queue.find(
-        (candidate) => !visitedItemIds.has(candidate.id),
+        (candidate) =>
+          !visitedItemIds.has(candidate.id) && !terminalQueueIssue(candidate),
       );
       if (!item) break;
       visitedItemIds.add(item.id);
@@ -1275,9 +1363,8 @@ export class FeishuSyncService {
     const remote = await this.enrichTasklists(incomingRemote, report);
     const state = this.state!;
     let localId = state.localIdByGuid[remote.guid];
-    let local = localId ? await this.adapter.getTask(localId, true) : undefined;
 
-    if (!local) {
+    if (!localId) {
       const created = await this.adapter.createFromRemote(remote);
       localId = created.id;
       const base = remoteTaskToFeishuSnapshot(remote);
@@ -1300,40 +1387,62 @@ export class FeishuSyncService {
     const hasPendingDelete = state.queue.some(
       (item) => item.localId === localId && item.kind === 'delete',
     );
-    if (local.deletedAt && hasPendingDelete) return;
-
-    const localSnapshot = localTaskToFeishuSnapshot(local);
     const remoteSnapshot = retainKnownMemberSnapshot(
       remoteTaskToFeishuSnapshot(remote),
       mapping.base,
     );
-    const merge = threeWayMergeFeishuTask(
-      mapping.base,
-      localSnapshot,
-      remoteSnapshot,
+    const retainedItem = state.queue.find(
+      (item) => item.localId === localId && terminalQueueIssue(item),
     );
-    if (merge.conflicts.length > 0) {
+    const retainedIssue = retainedItem
+      ? terminalQueueIssue(retainedItem)
+      : undefined;
+    const merge = await this.adapter.mergeAndApplyRemote(
+      localId,
+      remote,
+      mapping.base,
+      remoteSnapshot,
+      retainedIssue
+        ? {
+            localChangesStatus:
+              retainedIssue.code === 'PERMISSION_DENIED'
+                ? 'permission-denied'
+                : 'failed',
+            localChangesError: retainedIssue.code,
+          }
+        : {},
+    );
+
+    if (merge.outcome === 'missing') {
+      const created = await this.adapter.createFromRemote(remote);
+      this.setMapping({
+        localId: created.id,
+        guid: remote.guid,
+        base: remoteSnapshot,
+        remoteVersion: remote.updated_at,
+      });
+      delete state.conflicts[localId];
+      report.pulled += 1;
+      return;
+    }
+    if (merge.outcome === 'locally-deleted') {
+      if (!hasPendingDelete) this.enqueueInState(localId, 'delete');
+      return;
+    }
+    if (merge.outcome === 'conflict') {
       const conflict = this.registerConflict(
         localId,
         remote.guid,
         mapping.base,
-        localSnapshot,
+        merge.local,
         remoteSnapshot,
         merge.conflicts,
         remote.updated_at,
       );
       report.conflicts.push(clone(conflict));
-      await this.adapter.setSyncStatus(localId, 'conflict', {
-        error: 'The task changed locally and in Feishu.',
-        conflictFields: merge.conflicts.map((value) => value.field),
-      });
       return;
     }
 
-    await this.adapter.applyRemote(localId, remote, {
-      snapshot: merge.merged,
-      status: merge.localChanges.length > 0 ? 'pending' : 'synced',
-    });
     this.setMapping({
       ...mapping,
       guid: remote.guid,
@@ -1364,7 +1473,11 @@ export class FeishuSyncService {
 
   private async fullPull(report: FeishuSyncRunReport): Promise<void> {
     report.usedFullSync = true;
-    const remotes = await this.withBackoff(() => this.remote.listAllTasks());
+    const remotes = await this.withBackoff(() =>
+      this.remote.listAllAccessibleTasks
+        ? this.remote.listAllAccessibleTasks()
+        : this.remote.listAllTasks(),
+    );
     for (const remote of remotes) {
       await this.applyRemoteChange(remote, report);
     }
@@ -1459,7 +1572,7 @@ export class FeishuSyncService {
       }
 
       const queueResult = await this.drainQueue(report);
-      if (queueResult.stopped || queueResult.retainedItemFailures) {
+      if (queueResult.stopped) {
         report.cursor = this.state!.cursor;
         report.conflicts = Object.values(this.state!.conflicts).map(clone);
         return report;

@@ -35,13 +35,16 @@ import type {
   FeishuRuntimeFactoryOptions,
 } from '../electron/feishu/feishu-runtime-factory';
 import {
+  deriveFeishuAppIdentityId,
   deriveFeishuAppSecretCredentialId,
+  deriveFeishuAuthorizedTokenCredentialId,
   deriveFeishuTokenCredentialId,
 } from '../electron/feishu/feishu-credential-ids';
 import {
   FeishuDesktopController,
   FeishuDesktopControllerError,
   type FeishuDesktopPersonalConfiguration,
+  type FeishuDesktopConfiguration,
   type FeishuDesktopSettingsPort,
   type FeishuDesktopStatus,
 } from '../electron/feishu/feishu-desktop-controller';
@@ -62,6 +65,7 @@ function token(): FeishuTokenSet {
   return {
     accessToken: 'token-hidden-from-controller-output',
     refreshToken: 'refresh-hidden-from-controller-output',
+    openId: 'ou_controller_test',
     tokenType: 'Bearer',
     scope: [],
     expiresAt: NOW + 3_600_000,
@@ -353,6 +357,9 @@ function harness(options: {
     configuration: FeishuDesktopPersonalConfiguration,
   ) => void | Promise<void>;
   onOpenAuthorizationUrl?: (url: string) => void | Promise<void>;
+  onConfigurationChange?: (
+    configuration: FeishuDesktopConfiguration,
+  ) => void | Promise<void>;
 } = {}) {
   const settings = new MemorySettings();
   if (options.connected) settings.add('token-ref', 'feishu-token');
@@ -384,6 +391,7 @@ function harness(options: {
       openedAuthorizationUrls.push(url);
       await options.onOpenAuthorizationUrl?.(url);
     },
+    onConfigurationChange: options.onConfigurationChange,
   });
   return {
     controller,
@@ -398,6 +406,51 @@ function harness(options: {
 }
 
 describe('FeishuDesktopController connection state machine', () => {
+  it('moves a completed OAuth token into an app-and-open_id-bound credential slot', async () => {
+    const changes: FeishuDesktopConfiguration[] = [];
+    const context = harness({
+      onConfigurationChange: (configuration) => {
+        changes.push(structuredClone(configuration));
+      },
+    });
+    await context.controller.configure({
+      accountId: 'editable-label',
+      tokenCredentialId: 'legacy-token-slot',
+      mode: 'relay',
+      relayBaseUrl: 'https://relay.example.test',
+      clientId: 'cli_relay',
+    });
+    const oauth = oauthAttempt();
+    context.runtime.nextOAuth = oauth.authorization;
+    await context.controller.beginOAuth();
+    const authorized = { ...token(), openId: 'ou_real_user' };
+    oauth.resolve(authorized);
+    await context.controller.completeOAuth();
+
+    const appIdentityId = deriveFeishuAppIdentityId({
+      mode: 'relay',
+      clientId: 'cli_relay',
+      relayBaseUrl: 'https://relay.example.test',
+    });
+    const expectedCredentialId = deriveFeishuAuthorizedTokenCredentialId({
+      appIdentityId,
+      openId: 'ou_real_user',
+    });
+    expect(changes).toEqual([
+      expect.objectContaining({ tokenCredentialId: expectedCredentialId }),
+    ]);
+    expect(context.settings.deleted).toContain('legacy-token-slot');
+    const stored = context.settings.getCredential(expectedCredentialId)!;
+    expect(JSON.parse(stored)).toMatchObject({
+      openId: 'ou_real_user',
+      appIdentityId,
+    });
+    expect(expectedCredentialId).not.toContain('ou_real_user');
+    expect(JSON.stringify(context.controller.status())).not.toContain(
+      authorized.accessToken,
+    );
+  });
+
   it('orchestrates personal app registration, secure persistence, and Device OAuth without leaking the secret', async () => {
     const registration = registrationAttempt();
     const context = harness({

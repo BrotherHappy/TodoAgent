@@ -1,4 +1,5 @@
 import type { PublicCredentialState } from '../../src/shared/settings';
+import type { FeishuTokenSet } from '../../src/shared/feishu-types';
 import type {
   FeishuApplicationConflict,
   FeishuConflictDecision,
@@ -27,6 +28,7 @@ import {
 import {
   createFeishuRuntime,
   FeishuRuntimeConfigurationError,
+  serializeStoredFeishuToken,
   type FeishuOAuthAuthorization,
   type FeishuRuntime,
   type FeishuRuntimeFactoryOptions,
@@ -34,6 +36,8 @@ import {
 } from './feishu-runtime-factory';
 import {
   deriveFeishuAppSecretCredentialId,
+  deriveFeishuAppIdentityId,
+  deriveFeishuAuthorizedTokenCredentialId,
   deriveFeishuTokenCredentialId,
   sameFeishuCredentialIdentity,
 } from './feishu-credential-ids';
@@ -171,6 +175,10 @@ export type FeishuDesktopControllerOptions = RuntimeBaseOptions & {
   personalRegistrationFactory?: () => FeishuAppRegistrationSession;
   onPersonalConfiguration?: (
     configuration: FeishuDesktopPersonalConfiguration,
+  ) => void | Promise<void>;
+  /** Persists an identity-bound token reference after OAuth or legacy migration. */
+  onConfigurationChange?: (
+    configuration: FeishuDesktopConfiguration,
   ) => void | Promise<void>;
   onOpenAuthorizationUrl?: (url: string) => void | Promise<void>;
 };
@@ -419,6 +427,9 @@ export class FeishuDesktopController {
   private readonly onPersonalConfiguration?: (
     configuration: FeishuDesktopPersonalConfiguration,
   ) => void | Promise<void>;
+  private readonly onConfigurationChange?: (
+    configuration: FeishuDesktopConfiguration,
+  ) => void | Promise<void>;
   private readonly onOpenAuthorizationUrl?: (
     url: string,
   ) => void | Promise<void>;
@@ -442,6 +453,7 @@ export class FeishuDesktopController {
       onSecurityWarning,
       personalRegistrationFactory,
       onPersonalConfiguration,
+      onConfigurationChange,
       onOpenAuthorizationUrl,
       ...baseOptions
     } = options;
@@ -452,6 +464,7 @@ export class FeishuDesktopController {
     this.startPersonalRegistration =
       personalRegistrationFactory ?? startFeishuAppRegistration;
     this.onPersonalConfiguration = onPersonalConfiguration;
+    this.onConfigurationChange = onConfigurationChange;
     this.onOpenAuthorizationUrl = onOpenAuthorizationUrl;
     this.now = options.now ?? Date.now;
     this.baseOptions = baseOptions;
@@ -511,6 +524,93 @@ export class FeishuDesktopController {
 
   private credential(id: string): PublicCredentialState | undefined {
     return this.settings.listCredentials().find((item) => item.id === id);
+  }
+
+  private appIdentityId(
+    configuration: FeishuDesktopConfiguration,
+  ): string {
+    return deriveFeishuAppIdentityId({
+      mode: configuration.mode,
+      clientId: configuration.clientId,
+      relayBaseUrl:
+        configuration.mode === 'relay'
+          ? configuration.relayBaseUrl
+          : undefined,
+    });
+  }
+
+  /**
+   * Copies a token into a real-user/app-bound vault slot and atomically moves
+   * the active configuration to it. Raw token material never crosses this
+   * controller/settings boundary or appears in status/errors.
+   */
+  private async bindAuthorizedToken(
+    configuration: FeishuDesktopConfiguration,
+    token: FeishuTokenSet,
+  ): Promise<FeishuDesktopConfiguration> {
+    const openId = token.openId?.trim();
+    if (!openId) {
+      throw new FeishuRuntimeConfigurationError(
+        'Feishu authorization did not return a stable user identity.',
+      );
+    }
+    const appIdentityId = this.appIdentityId(configuration);
+    if (
+      token.appIdentityId !== undefined &&
+      token.appIdentityId !== appIdentityId
+    ) {
+      throw new FeishuRuntimeConfigurationError(
+        'The encrypted Feishu token belongs to another OAuth application.',
+      );
+    }
+    const boundToken: FeishuTokenSet = { ...token, appIdentityId };
+    // Embedders without a persistence callback still get an identity-bound
+    // runtime restart, but retain their caller-owned credential reference.
+    // The desktop app always supplies the callback below.
+    if (!this.onConfigurationChange) return configuration;
+    const tokenCredentialId = deriveFeishuAuthorizedTokenCredentialId({
+      appIdentityId,
+      openId,
+      tenantKey: token.tenantKey,
+    });
+    const next = { ...configuration, tokenCredentialId } as FeishuDesktopConfiguration;
+    const previousCredentialId = configuration.tokenCredentialId;
+    if (previousCredentialId === tokenCredentialId) {
+      await this.settings.setCredential(
+        'feishu-token',
+        serializeStoredFeishuToken(boundToken),
+        tokenCredentialId,
+      );
+      return next;
+    }
+
+    await this.settings.setCredential(
+      'feishu-token',
+      serializeStoredFeishuToken(boundToken),
+      tokenCredentialId,
+    );
+    try {
+      await this.onConfigurationChange(clone(next));
+    } catch (error) {
+      await this.settings.deleteCredential(tokenCredentialId).catch(() => false);
+      // OAuth has already replaced the previous slot in this runtime. Keeping
+      // it would silently restore the new user under stale configuration.
+      await this.settings.deleteCredential(previousCredentialId).catch(() => false);
+      throw error;
+    }
+    await this.settings.deleteCredential(previousCredentialId);
+    return next;
+  }
+
+  private async restartWithAuthorizedToken(
+    runtime: FeishuRuntime,
+    token: FeishuTokenSet,
+  ): Promise<void> {
+    const configuration = this.configuration!;
+    await runtime.close();
+    if (this.runtime === runtime) this.runtime = undefined;
+    this.configuration = await this.bindAuthorizedToken(configuration, token);
+    await this.ensureRuntime();
   }
 
   private validateConfiguration(configuration: FeishuDesktopConfiguration): void {
@@ -632,17 +732,18 @@ export class FeishuDesktopController {
       // reference also protects older callers that still use one fixed id.
       await this.settings.deleteCredential(configuration.tokenCredentialId);
     }
-    this.configuration = clone(configuration);
+    const verifiedConfiguration = clone(configuration);
+    this.configuration = verifiedConfiguration;
     const connected =
       !identityChanged &&
-      this.credential(configuration.tokenCredentialId)?.kind === 'feishu-token';
+      this.credential(verifiedConfiguration.tokenCredentialId)?.kind === 'feishu-token';
     this.publish({
       state: connected ? 'connected' : 'disconnected',
       configured: true,
       connected,
       polling: false,
-      accountId: configuration.accountId,
-      mode: configuration.mode,
+      accountId: verifiedConfiguration.accountId,
+      mode: verifiedConfiguration.mode,
       authorizationStep: undefined,
       oauthExpiresAt: undefined,
       lastError: undefined,
@@ -718,7 +819,13 @@ export class FeishuDesktopController {
       wasConnected: this.currentStatus.connected,
     };
     const completion = authorization.completion.then(
-      () => {
+      async (token) => {
+        try {
+          await this.restartWithAuthorizedToken(runtime, token);
+        } catch (error) {
+          pending.wasConnected = false;
+          throw error;
+        }
         if (this.pendingOAuth === pending) {
           this.publish({
             state: 'connected',
@@ -883,7 +990,8 @@ export class FeishuDesktopController {
         throw error;
       }
       if (cancellationRequested) throw personalConnectCancelledError();
-      await authorization.completion;
+      const token = await authorization.completion;
+      await this.restartWithAuthorizedToken(runtime, token);
     })();
 
     const completion = rawCompletion.then(

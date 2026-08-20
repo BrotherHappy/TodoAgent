@@ -7,7 +7,9 @@ import {
   type FeishuDesktopApi,
   type NotificationDesktopApi,
   type PetDesktopApi,
+  type SelectedTextContextView,
 } from "../src/shared/desktop-api";
+import type { TaskAttachment } from "../src/shared/models";
 import {
   FLOATING_HOVER_EXPAND_DELAY_MAX_MS,
   FLOATING_HOVER_EXPAND_DELAY_MIN_MS,
@@ -25,6 +27,12 @@ import { rendererUrlIsTrusted } from "./trusted-renderer";
 
 const idSchema = z.string().trim().min(1).max(512);
 const routeSchema = z.string().trim().min(1).max(80).optional();
+const localAttachmentSchema = z
+  .object({
+    id: idSchema,
+    localPath: z.string().trim().min(1).max(8_192),
+  })
+  .strict();
 
 const settingsSchema = z
   .object({
@@ -44,6 +52,21 @@ const settingsSchema = z
         quietHoursEnabled: z.boolean(),
         quietHoursStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u),
         quietHoursEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u),
+        dailyTaskReminderLimit: z.number().int().min(0).max(50),
+        taskIgnoreBackoffEnabled: z.boolean(),
+        taskReminderMinIntervalMinutes: z.number().int().min(0).max(1_440),
+        taskReminderSourceMode: z
+          .object({
+            local: z.enum(["normal", "important-only", "off"]),
+            feishu: z.enum(["normal", "important-only", "off"]),
+          })
+          .strict(),
+        taskReminderProjectMode: z
+          .record(
+            z.string().trim().min(1).max(512),
+            z.enum(["normal", "important-only", "off"]),
+          )
+          .refine((value) => Object.keys(value).length <= 100, "最多配置 100 个项目提醒策略"),
         mutedUntil: z.string().datetime().optional(),
       })
       .strict(),
@@ -105,6 +128,7 @@ const settingsSchema = z
         actionPack: z.enum(["balanced", "calm", "playful", "focused"]),
         animationIntensity: z.enum(["gentle", "lively"]),
         proactiveIntervalMinutes: z.number().int().min(15).max(240),
+        proactiveDailyLimit: z.number().int().min(0).max(20),
         meetingMode: z.boolean(),
         seasonalEvents: z.boolean(),
       })
@@ -117,6 +141,22 @@ const settingsSchema = z
         // A renderer from the immediately preceding build may not have this
         // field yet; preserving Bearer as the default never weakens auth.
         authMode: z.enum(["bearer", "none"]).default("bearer"),
+        routing: z.enum(["primary-only", "fallback-on-error", "local-only"]).default("primary-only"),
+        fallback: z
+          .object({
+            enabled: z.boolean(),
+            endpoint: z.string().trim().url().max(2_048),
+            model: z.string().trim().max(240),
+            authMode: z.enum(["bearer", "none"]).default("none"),
+            credentialId: z.string().trim().min(1).max(512).optional(),
+          })
+          .strict()
+          .default({
+            enabled: false,
+            endpoint: "http://127.0.0.1:11434/v1",
+            model: "llama3.2",
+            authMode: "none",
+          }),
         timeoutMs: z.number().int().min(1_000).max(300_000),
         retries: z.number().int().min(0).max(5),
         dailyTokenLimit: z.number().int().min(0).max(100_000_000),
@@ -180,6 +220,12 @@ const credentialSchema = z
 
 export interface DesktopIpcDependencies {
   tasks: TaskService;
+  taskAttachments?: {
+    choose(): Promise<TaskAttachment[]>;
+    open(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<void>;
+    preview(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<import("../src/shared/models").TaskAttachmentPreview>;
+    remove(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<void>;
+  };
   settings: SettingsService;
   agent: AgentDesktopService;
   feishu: FeishuDesktopApi;
@@ -189,6 +235,9 @@ export interface DesktopIpcDependencies {
   devServerUrl?: string;
   rendererPath: string;
   getInfo: () => AppInfo;
+  readClipboard: () => { text: string; characters: number; truncated: boolean; capturedAt: string };
+  readActiveWindow: () => { status: "captured" | "unavailable"; appName?: string; title?: string; reason?: "unsupported" | "permission-denied" | "empty" | "error"; capturedAt: string } | Promise<{ status: "captured" | "unavailable"; appName?: string; title?: string; reason?: "unsupported" | "permission-denied" | "empty" | "error"; capturedAt: string }>;
+  readSelectedText: () => SelectedTextContextView | Promise<SelectedTextContextView>;
   showMain: (route?: string) => void;
   showQuickCapture: () => void;
   setFloatingVisible: (visible: boolean) => Promise<AppSettings>;
@@ -315,21 +364,203 @@ export function registerDesktopIpc(
       dependencies.tasks.reorderToday(z.array(idSchema).max(500).parse(input)),
     ),
   );
+  handle(DESKTOP_CHANNELS.taskApplyTodayPlan, (_event, input) => {
+    const request = z
+      .object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+        items: z
+          .array(
+            z
+              .object({
+                id: idSchema,
+                estimatedMinutes: z.number().int().min(5).max(720).optional(),
+              })
+              .strict(),
+          )
+          .max(500),
+        clearTaskIds: z.array(idSchema).max(500),
+        baselines: z
+          .array(
+            z
+              .object({
+                id: idSchema,
+                plannedDate: z
+                  .string()
+                  .regex(/^\d{4}-\d{2}-\d{2}$/u)
+                  .optional(),
+                privateOrder: z.number().finite(),
+                estimatedMinutes: z.number().finite().nonnegative().optional(),
+              })
+              .strict(),
+          )
+          .max(500),
+      })
+      .strict()
+      .refine(
+        (value) => value.items.length + value.clearTaskIds.length <= 500,
+        {
+          message: "Today plan cannot change more than 500 tasks at once.",
+          path: ["items"],
+        },
+      )
+      .parse(input);
+    return changed(() => dependencies.tasks.applyTodayPlan(request));
+  });
+  handle(DESKTOP_CHANNELS.taskApplyBulkAction, (_event, input) => {
+    const request = z
+      .object({
+        ids: z.array(idSchema).min(1).max(500),
+        action: z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("complete"), completedAt: z.string().datetime().optional() }).strict(),
+          z.object({ kind: z.literal("reopen") }).strict(),
+          z.object({
+            kind: z.literal("move-to-today"),
+            date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+          }).strict(),
+          z.object({ kind: z.literal("trash") }).strict(),
+          z.object({ kind: z.literal("restore") }).strict(),
+        ]),
+        baselines: z.array(
+          z.object({ id: idSchema, updatedAt: z.string().datetime() }).strict(),
+        ).max(500).optional(),
+      })
+      .strict()
+      .refine((value) => new Set(value.ids).size === value.ids.length, {
+        message: "Batch task ids must be unique.",
+        path: ["ids"],
+      })
+      .refine(
+        (value) =>
+          value.baselines === undefined ||
+          (value.baselines.length === value.ids.length &&
+            new Set(value.baselines.map((baseline) => baseline.id)).size ===
+              value.baselines.length &&
+            value.ids.every((id) => value.baselines!.some((baseline) => baseline.id === id))),
+        {
+          message: "Batch baselines must include every selected task.",
+          path: ["baselines"],
+        },
+      )
+      .parse(input);
+    return changed(() => dependencies.tasks.applyBulkTaskAction(request));
+  });
   handle(DESKTOP_CHANNELS.taskTrash, (_event, input) =>
     changed(() => dependencies.tasks.moveToTrash(idSchema.parse(input))),
   );
   handle(DESKTOP_CHANNELS.taskRestore, (_event, input) =>
     changed(() => dependencies.tasks.restoreTask(idSchema.parse(input))),
   );
-  handle(DESKTOP_CHANNELS.taskPurge, (_event, input) =>
-    changed(() => dependencies.tasks.purgeTask(idSchema.parse(input))),
-  );
+  handle(DESKTOP_CHANNELS.taskPurge, async (_event, input) => {
+    const id = idSchema.parse(input);
+    const existing = await dependencies.tasks.getTask(id, true);
+    const result = await changed(() => dependencies.tasks.purgeTask(id));
+    if (existing && dependencies.taskAttachments) {
+      await Promise.all(
+        existing.attachments
+          .filter((attachment) => attachment.localPath)
+          .map((attachment) => dependencies.taskAttachments!.remove(attachment).catch(() => undefined)),
+      );
+    }
+    return result;
+  });
+  handle(DESKTOP_CHANNELS.taskHistory, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        limit: z.number().int().min(1).max(100).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.tasks.getTaskHistory(request.id, request.limit);
+  });
   handle(DESKTOP_CHANNELS.taskUndo, (_event, input) =>
     changed(() =>
       dependencies.tasks.undo(
         input === undefined ? undefined : idSchema.parse(input),
       ),
     ),
+  );
+  handle(DESKTOP_CHANNELS.taskChooseAttachments, () => {
+    if (!dependencies.taskAttachments) throw new Error("TASK_ATTACHMENTS_UNAVAILABLE");
+    return dependencies.taskAttachments.choose();
+  });
+  handle(DESKTOP_CHANNELS.taskOpenAttachment, (_event, input) => {
+    if (!dependencies.taskAttachments) throw new Error("TASK_ATTACHMENTS_UNAVAILABLE");
+    return dependencies.taskAttachments.open(localAttachmentSchema.parse(input));
+  });
+  handle(DESKTOP_CHANNELS.taskPreviewAttachment, (_event, input) => {
+    if (!dependencies.taskAttachments) throw new Error("TASK_ATTACHMENTS_UNAVAILABLE");
+    return dependencies.taskAttachments.preview(localAttachmentSchema.parse(input));
+  });
+  handle(DESKTOP_CHANNELS.taskDeleteAttachment, (_event, input) => {
+    if (!dependencies.taskAttachments) throw new Error("TASK_ATTACHMENTS_UNAVAILABLE");
+    return dependencies.taskAttachments.remove(localAttachmentSchema.parse(input));
+  });
+  handle(DESKTOP_CHANNELS.projectList, (_event, input) =>
+    dependencies.tasks.listProjects(z.boolean().optional().parse(input) ?? false),
+  );
+  handle(DESKTOP_CHANNELS.projectCreate, (_event, input) => {
+    const request = z
+      .object({
+        name: z.string().trim().min(1).max(80),
+        color: z.enum(["violet", "blue", "green", "amber", "rose", "slate"]).optional(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() => dependencies.tasks.createProject(request));
+  });
+  handle(DESKTOP_CHANNELS.projectUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            name: z.string().trim().min(1).max(80).optional(),
+            color: z.enum(["violet", "blue", "green", "amber", "rose", "slate"]).optional(),
+            archived: z.boolean().optional(),
+            privateOrder: z.number().finite().nonnegative().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() => dependencies.tasks.updateProject(request.id, request.patch));
+  });
+  handle(DESKTOP_CHANNELS.projectDelete, (_event, input) =>
+    changed(() => dependencies.tasks.deleteProject(idSchema.parse(input))),
+  );
+  handle(DESKTOP_CHANNELS.listList, (_event, input) =>
+    dependencies.tasks.listLists(z.boolean().optional().parse(input) ?? false),
+  );
+  handle(DESKTOP_CHANNELS.listCreate, (_event, input) => {
+    const request = z
+      .object({
+        name: z.string().trim().min(1).max(80),
+        color: z.enum(["violet", "blue", "green", "amber", "rose", "slate"]).optional(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() => dependencies.tasks.createList(request));
+  });
+  handle(DESKTOP_CHANNELS.listUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            name: z.string().trim().min(1).max(80).optional(),
+            color: z.enum(["violet", "blue", "green", "amber", "rose", "slate"]).optional(),
+            archived: z.boolean().optional(),
+            privateOrder: z.number().finite().nonnegative().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() => dependencies.tasks.updateList(request.id, request.patch));
+  });
+  handle(DESKTOP_CHANNELS.listDelete, (_event, input) =>
+    changed(() => dependencies.tasks.deleteList(idSchema.parse(input))),
   );
   handle(DESKTOP_CHANNELS.draftSave, (_event, input) =>
     dependencies.tasks.saveDraft(input as never),
@@ -376,6 +607,9 @@ export function registerDesktopIpc(
   );
 
   handle(DESKTOP_CHANNELS.shellGetInfo, () => dependencies.getInfo());
+  handle(DESKTOP_CHANNELS.shellReadClipboard, () => dependencies.readClipboard());
+  handle(DESKTOP_CHANNELS.shellReadActiveWindow, () => dependencies.readActiveWindow());
+  handle(DESKTOP_CHANNELS.shellReadSelectedText, () => dependencies.readSelectedText());
   handle(DESKTOP_CHANNELS.shellShowMain, (_event, input) =>
     dependencies.showMain(routeSchema.parse(input)),
   );
@@ -417,7 +651,7 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.shellOpenExternal, (_event, input) => {
     const value = z.string().trim().min(1).max(2_048).parse(input);
     const parsed = new URL(value);
-    if (!["https:", "mailto:"].includes(parsed.protocol))
+    if (!["http:", "https:", "mailto:"].includes(parsed.protocol))
       throw new Error("UNSAFE_EXTERNAL_URL");
     return dependencies.openExternal(parsed.toString());
   });
@@ -769,6 +1003,16 @@ export function registerDesktopIpc(
         : z.string().trim().max(10_000).parse(input),
     ),
   );
+  handle(DESKTOP_CHANNELS.petDiaryFromTask, (_event, input) => {
+    const request = z
+      .object({
+        taskId: idSchema,
+        userNote: z.string().trim().max(2_000).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.createDiaryFromTask(request.taskId, request.userNote);
+  });
   handle(DESKTOP_CHANNELS.petDiaryUpdate, (_event, input) => {
     const request = z
       .object({
@@ -826,6 +1070,8 @@ export function registerDesktopIpc(
             operations: z.boolean().optional(),
             settings: z.boolean().optional(),
             permissionAudit: z.boolean().optional(),
+            projects: z.boolean().optional(),
+            lists: z.boolean().optional(),
           })
           .strict()
           .optional(),
@@ -833,6 +1079,23 @@ export function registerDesktopIpc(
       .strict()
       .parse(input ?? {});
     return dependencies.data.exportToFile(request);
+  });
+  handle(DESKTOP_CHANNELS.dataMarkdownExport, (_event, input) => {
+    const request = z
+      .object({
+        redaction: z.enum(["none", "private", "strict"]).optional(),
+        include: z
+          .object({
+            tasks: z.boolean().optional(),
+            projects: z.boolean().optional(),
+            lists: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .parse(input ?? {});
+    return dependencies.data.exportMarkdownToFile(request);
   });
   handle(DESKTOP_CHANNELS.dataPreviewImport, () =>
     dependencies.data.previewImport(),

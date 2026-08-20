@@ -11,6 +11,7 @@ import type {
   Task,
   TaskFilter,
   TaskSnapshotChange,
+  TaskResearchCard,
   TaskSyncStatus,
   UpdateTaskInput,
 } from "../../src/shared/models";
@@ -59,9 +60,10 @@ const idSchema = z.string().trim().min(1).max(512);
 const operationIdSchema = z.string().trim().min(1).max(512);
 const MAX_BULK_CREATE = 25;
 const MAX_BULK_MUTATE = 50;
+const MAX_SPLIT_STEPS = 7;
 // Feishu currently exposes title, notes, start time and due time as mutable
 // remote fields. Project/list placement remains a private local organization
-// choice, just like plannedDate and tags.
+// choice, just like plannedDate, tags and manual contexts.
 const REMOTE_UPDATE_FIELDS = new Set(["title", "notes", "startAt", "dueAt"]);
 // Keep this in sync with TaskService's snapshot comparison for undo. Unlike a
 // normal update, an undo restores a whole snapshot, so status, all-day flags,
@@ -116,6 +118,7 @@ const createArgumentsSchema = z.strictObject({
   dueAt: isoDateSchema.nullable(),
   priority: prioritySchema,
   tags: z.array(z.string().trim().min(1).max(120)).max(100),
+  contexts: z.array(z.string().trim().min(1).max(40)).max(20).nullable().optional(),
 });
 
 const updateArgumentsSchema = z
@@ -131,6 +134,7 @@ const updateArgumentsSchema = z
     dueAt: isoDateSchema.nullable(),
     priority: prioritySchema.nullable(),
     tags: z.array(z.string().trim().min(1).max(120)).max(100).nullable(),
+    contexts: z.array(z.string().trim().min(1).max(40)).max(20).nullable().optional(),
     clearFields: z
       .array(
         z.enum([
@@ -142,6 +146,7 @@ const updateArgumentsSchema = z
           "startAt",
           "dueAt",
           "tags",
+          "contexts",
         ]),
       )
       .max(8),
@@ -160,8 +165,9 @@ const updateArgumentsSchema = z
           "dueAt",
           "priority",
           "tags",
+          "contexts",
         ] as const
-      ).filter((field) => args[field] !== null),
+      ).filter((field) => args[field] !== null && args[field] !== undefined),
     );
     if (supplied.size === 0 && args.clearFields.length === 0) {
       context.addIssue({
@@ -186,6 +192,26 @@ const updateArgumentsSchema = z
       }
     }
   });
+
+const researchCardArgumentsSchema = z.strictObject({
+  id: idSchema,
+  title: z.string().trim().min(1).max(200),
+  url: z
+    .string()
+    .trim()
+    .max(2_000)
+    .refine((value) => {
+      if (!value) return true;
+      try {
+        const parsed = new URL(value);
+        return ["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password;
+      } catch {
+        return false;
+      }
+    }, "Research card URL must be an HTTP(S) URL without credentials."),
+  summary: z.string().max(5_000),
+  actionItems: z.array(z.string().trim().min(1).max(500)).max(20),
+});
 
 const completeArgumentsSchema = z.strictObject({
   id: idSchema,
@@ -220,11 +246,35 @@ const bulkCreateItemSchema = z.strictObject({
   dueAt: isoDateSchema.nullable(),
   priority: prioritySchema,
   tags: z.array(z.string().trim().min(1).max(120)).max(100),
+  contexts: z.array(z.string().trim().min(1).max(40)).max(20).nullable().optional(),
 });
 
 const bulkCreateArgumentsSchema = z.strictObject({
   tasks: z.array(bulkCreateItemSchema).min(1).max(MAX_BULK_CREATE),
 });
+
+const splitTaskItemSchema = z.strictObject({
+  title: z.string().trim().min(1).max(500),
+  notes: z.string().max(5_000),
+  priority: prioritySchema,
+  estimatedMinutes: z.number().int().min(5).max(720).nullable(),
+});
+
+const splitTaskArgumentsSchema = z
+  .strictObject({
+    id: idSchema,
+    subtasks: z.array(splitTaskItemSchema).min(2).max(MAX_SPLIT_STEPS),
+  })
+  .superRefine((args, context) => {
+    const titles = args.subtasks.map((item) => item.title.toLocaleLowerCase());
+    if (new Set(titles).size !== titles.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["subtasks"],
+        message: "Subtask titles must be unique.",
+      });
+    }
+  });
 
 const bulkUpdateArgumentsSchema = z
   .strictObject({
@@ -314,6 +364,23 @@ const parametersFor = <Arguments extends AgentJsonValue>(
 ): JsonSchema => {
   const converted = z.toJSONSchema(schema) as Record<string, unknown>;
   delete converted.$schema;
+  // The model-facing contract stays strict even for renderer-side backward
+  // compatibility fields such as `contexts`: the runtime parser may accept
+  // an omitted legacy field, while every property is still declared required
+  // in the JSON schema sent to the provider (nullable means “clear/unused”).
+  const requireObjectProperties = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(requireObjectProperties);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (record.type === "object" && record.properties && typeof record.properties === "object") {
+      record.required = Object.keys(record.properties as Record<string, unknown>);
+    }
+    Object.values(record).forEach(requireObjectProperties);
+  };
+  requireObjectProperties(converted);
   return converted as JsonSchema;
 };
 
@@ -348,7 +415,7 @@ const result = (
 const compactTask = (task: Task, scope: ModelDataScope): AgentJsonValue => {
   if (!scope.taskTitlesAndTimes) {
     // Keep only an opaque local reference so a user can still explicitly target the
-    // item later. Status, source, priority, tags and sync state can all reveal task
+    // item later. Status, source, priority, tags, contexts and sync state can all reveal task
     // meaning or origin, so they cross the same privacy boundary as the title.
     return { id: task.id, redacted: true };
   }
@@ -359,9 +426,30 @@ const compactTask = (task: Task, scope: ModelDataScope): AgentJsonValue => {
       scope.notes && (task.source.type === "local" || scope.feishuContent)
         ? task.notes
         : null,
+    comments:
+      scope.notes && (task.source.type === "local" || scope.feishuContent)
+        ? (task.comments ?? []).map((comment) => ({
+            body: comment.body,
+            author: comment.author,
+            createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+        }))
+        : null,
+    researchCards:
+      scope.notes && (task.source.type === "local" || scope.feishuContent)
+        ? (task.researchCards ?? []).map((card) => ({
+            id: card.id,
+            title: card.title,
+            url: card.url ?? null,
+            summary: card.summary,
+            actionItems: card.actionItems,
+            capturedAt: card.capturedAt,
+          }))
+        : null,
     status: task.status,
     priority: task.priority,
     source: task.source.type,
+    parentId: task.parentId ?? null,
     projectId: task.projectId ?? null,
     listId: task.listId ?? null,
     plannedDate: task.plannedDate ?? null,
@@ -378,6 +466,7 @@ const compactTask = (task: Task, scope: ModelDataScope): AgentJsonValue => {
           : null,
     })),
     tags: task.tags,
+    contexts: task.contexts ?? [],
     syncStatus: task.sync.status,
   };
 };
@@ -396,14 +485,15 @@ const changedFields = (args: z.infer<typeof updateArgumentsSchema>): string[] =>
         "dueAt",
         "priority",
         "tags",
+        "contexts",
       ] as const
-    ).filter((field) => args[field] !== null),
+    ).filter((field) => args[field] !== null && args[field] !== undefined),
     ...args.clearFields,
   ].filter((field, index, fields) => fields.indexOf(field) === index);
 
 const clearedFieldValue = (field: string): unknown => {
   if (field === "notes" || field === "privateNotes") return "";
-  if (field === "tags") return [];
+  if (field === "tags" || field === "contexts") return [];
   return undefined;
 };
 
@@ -479,8 +569,13 @@ const patchForUpdate = (
     "dueAt",
     "priority",
     "tags",
+    "contexts",
   ] as const) {
-    if (fields.includes(field) && args[field] !== null)
+    if (
+      fields.includes(field) &&
+      args[field] !== null &&
+      args[field] !== undefined
+    )
       (patch as Record<string, unknown>)[field] = args[field];
   }
   args.clearFields.forEach((field) => {
@@ -836,6 +931,7 @@ export const createTaskTools = (
           dueAt: args.dueAt ?? undefined,
           priority: args.priority,
           tags: args.tags,
+          contexts: args.contexts ?? [],
           sync: {
             status: args.source === "feishu" ? "pending" : "local",
           },
@@ -902,6 +998,156 @@ export const createTaskTools = (
               : [],
           undoOperationId: updated.operationId,
         });
+      },
+    }),
+    taskTool({
+      name: "task_add_research_card",
+      description:
+        "Attach a source, concise summary, and optional action items to one task as private local context. This never writes the card back to Feishu.",
+      schema: researchCardArgumentsSchema,
+      sensitiveArgumentPaths: ["url", "summary", "actionItems"],
+      analyze: async (args) => {
+        const task = await requireActiveTask(args.id);
+        const existing = task.researchCards ?? [];
+        if (existing.length >= 20) {
+          throw new Error("RESEARCH_CARD_LIMIT_REACHED");
+        }
+        return {
+          risk: "R1",
+          targets: [{ kind: "task", value: args.id }],
+          reads: ["current task private context"],
+          writes: ["one private research card"],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: {
+            action: "add-research-card",
+            taskId: args.id,
+            title: args.title,
+            actionItemCount: args.actionItems.length,
+            remoteWrite: false,
+          },
+          baseVersions: { [args.id]: task.updatedAt },
+        };
+      },
+      execute: async (args, context) => {
+        const current = await requireActiveTask(args.id);
+        const existing = current.researchCards ?? [];
+        if (existing.length >= 20) {
+          throw new Error("RESEARCH_CARD_LIMIT_REACHED");
+        }
+        const card: TaskResearchCard = {
+          id: randomUUID(),
+          title: args.title,
+          ...(args.url ? { url: args.url } : {}),
+          summary: args.summary.trim(),
+          actionItems: args.actionItems,
+          capturedAt: new Date().toISOString(),
+        };
+        const updated = await options.tasks.updateTask(args.id, {
+          researchCards: [...existing, card],
+        });
+        notifyChanged();
+        return result(context, {
+          task: compactTask(updated.task, options.getModelDataScope()),
+          researchCardId: card.id,
+          undoOperationId: updated.operationId,
+        });
+      },
+    }),
+    taskTool({
+      name: "task_split",
+      description:
+        `Split one task into 2-${MAX_SPLIT_STEPS} local child tasks. The parent stays unchanged and a Feishu parent never receives remote child writes. Use this after presenting the proposed steps for user approval.`,
+      schema: splitTaskArgumentsSchema,
+      sensitiveArgumentPaths: ["subtasks"],
+      analyze: async (args) => {
+        const parent = await requireActiveTask(args.id);
+        return {
+          risk: "R2",
+          targets: [{ kind: "task", value: parent.id }],
+          reads: ["current parent task"],
+          writes: [`create ${args.subtasks.length} local child tasks`],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: {
+            action: "split-task",
+            parent: { id: parent.id, title: parent.title },
+            count: args.subtasks.length,
+            remoteWrite: false,
+            subtasks: args.subtasks.map((item, index) => ({
+              index,
+              title: item.title,
+              priority: item.priority,
+              estimatedMinutes: item.estimatedMinutes,
+            })),
+          },
+          baseVersions: { [parent.id]: parent.updatedAt },
+        };
+      },
+      execute: async (args, context) => {
+        const parent = await requireActiveTask(args.id);
+        const createdTasks: Task[] = [];
+        const operationIds: string[] = [];
+        const processedIndexes: number[] = [];
+        const failedItems: Array<{ index: number; code: string }> = [];
+        for (let index = 0; index < args.subtasks.length; index += 1) {
+          if (context.signal.aborted) {
+            if (operationIds.length > 0) notifyChanged();
+            return interruptedBatchResult(
+              context,
+              {
+                parentTaskId: parent.id,
+                createdTasks: createdTasks.map((task) =>
+                  compactTask(task, options.getModelDataScope()),
+                ),
+                operationIds,
+                processedIndexes,
+                failedItems,
+              },
+              processedIndexes.length,
+              args.subtasks.length,
+            );
+          }
+          const item = args.subtasks[index];
+          try {
+            const mutation = await options.tasks.createTask({
+              title: item.title,
+              notes: item.notes,
+              source: { type: "local" },
+              parentId: parent.id,
+              projectId: parent.projectId,
+              listId: parent.listId,
+              plannedDate: parent.plannedDate,
+              priority: item.priority,
+              estimatedMinutes: item.estimatedMinutes ?? undefined,
+              sync: { status: "local" },
+            });
+            createdTasks.push(mutation.task);
+            operationIds.push(mutation.operationId);
+          } catch (error) {
+            failedItems.push({ index, code: taskErrorCode(error) });
+          }
+          processedIndexes.push(index);
+        }
+        if (operationIds.length > 0) notifyChanged();
+        return result(
+          context,
+          {
+            aborted: false,
+            parentTaskId: parent.id,
+            createdCount: createdTasks.length,
+            failedCount: failedItems.length,
+            processedIndexes,
+            createdTasks: createdTasks.map((task) =>
+              compactTask(task, options.getModelDataScope()),
+            ),
+            failedItems,
+            operationIds,
+          },
+          failedItems.length > 0 ? "partial" : "ok",
+        );
       },
     }),
     taskTool({
@@ -1146,6 +1392,7 @@ export const createTaskTools = (
               dueAt: item.dueAt ?? undefined,
               priority: item.priority,
               tags: item.tags,
+              contexts: item.contexts ?? [],
               sync: { status: "local" },
             });
             createdTasks.push(mutation.task);

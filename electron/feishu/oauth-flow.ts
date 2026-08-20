@@ -22,6 +22,7 @@ interface TokenResponseShape {
   access_token?: string;
   refresh_token?: string;
   open_id?: string;
+  tenant_key?: string;
   token_type?: string;
   scope?: string | string[];
   expires_in?: number;
@@ -200,6 +201,7 @@ async function requestToken(
     accessToken: payload.access_token,
     refreshToken: payload.refresh_token,
     openId: payload.open_id,
+    tenantKey: payload.tenant_key,
     tokenType: payload.token_type || "Bearer",
     scope: scopeList(payload.scope),
     expiresAt: issuedAt + payload.expires_in * 1_000,

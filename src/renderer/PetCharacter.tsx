@@ -213,6 +213,23 @@ export function PetCharacter({
             <path d="m88 34 2 5 5 .4-4 3 1.3 5-4.3-2.8-4.3 2.8 1.3-5-4-3 5-.4Z" />
           </g>
 
+          <g className="pet-season-prop pet-season-prop-spring">
+            <path d="m87 19 5-6 5 6-5 6Z" />
+            <path d="M91 19c-5 5-8 11-8 18" />
+          </g>
+          <g className="pet-season-prop pet-season-prop-summer">
+            <path d="M28 27c17-8 41-8 58 0l-3 5H31Z" />
+            <path d="M47 23c7-4 15-4 22 0" />
+          </g>
+          <g className="pet-season-prop pet-season-prop-autumn">
+            <path d="m92 21 7-3-2 8-6 3Z" />
+            <path d="M94 25c-5 8-7 14-7 22" />
+          </g>
+          <g className="pet-season-prop pet-season-prop-winter">
+            <path d="M35 65c13 5 29 5 44 0l-2 8c-13 5-27 5-40 0Z" />
+            <path className="pet-season-line" d="M45 68v6M57 69v6M69 68v6" />
+          </g>
+
           <g className="pet-prop pet-prop-book">
             <path d="M34 68c8-3 16-1 23 5v19c-7-6-15-8-23-4Z" />
             <path d="M80 68c-8-3-16-1-23 5v19c7-6 15-8 23-4Z" />
@@ -225,6 +242,13 @@ export function PetCharacter({
           <g className="pet-prop pet-prop-ball">
             <circle cx="86" cy="91" r="11" />
             <path className="pet-prop-line" d="M77 86c6 1 11 6 13 13M82 81c1 7 6 12 13 14" />
+          </g>
+          <g className="pet-prop pet-prop-snack">
+            <circle cx="80" cy="78" r="9" />
+            <circle className="pet-snack-chip" cx="76" cy="75" r="1.3" />
+            <circle className="pet-snack-chip" cx="83" cy="73" r="1.2" />
+            <circle className="pet-snack-chip" cx="82" cy="81" r="1.4" />
+            <circle className="pet-snack-chip" cx="76" cy="82" r="1.1" />
           </g>
           <g className="pet-prop pet-prop-headphones">
             <path className="pet-prop-line" d="M33 48c0-17 9-26 24-26s24 9 24 26" />

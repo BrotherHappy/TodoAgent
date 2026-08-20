@@ -8,6 +8,7 @@ import type {
   TaskMutationResult,
 } from "../../src/shared/models";
 import type {
+  FeishuFieldConflict,
   FeishuCreateTaskPayload,
   FeishuPatchTaskPayload,
   FeishuSyncedTaskField,
@@ -23,6 +24,7 @@ import {
   isFeishuTaskCompleted,
   localTaskToFeishuSnapshot,
   remoteTaskToFeishuSnapshot,
+  threeWayMergeFeishuTask,
 } from "./sync-engine";
 import { cloneFeishuTasklistBinding } from "./tasklist-binding";
 
@@ -45,12 +47,36 @@ export interface FeishuTaskAdapterOptions {
   localStore: FeishuLocalStorePort;
   accountId: string;
   currentUserOpenId?: string;
+  /** Opaque binding derived from the real OAuth user and app identity. */
+  syncIdentityId?: string;
   now?: () => number;
 }
 
 export interface ApplyRemoteOptions {
-  status?: "synced" | "pending";
+  status?: Task["sync"]["status"];
   snapshot?: FeishuTaskSyncSnapshot;
+}
+
+export type ApplyRemoteMergeResult =
+  | { outcome: "missing" }
+  | { outcome: "locally-deleted"; task: Task }
+  | {
+      outcome: "conflict";
+      task: Task;
+      local: FeishuTaskSyncSnapshot;
+      conflicts: FeishuFieldConflict[];
+    }
+  | {
+      outcome: "applied";
+      task: Task;
+      local: FeishuTaskSyncSnapshot;
+      localChanges: FeishuSyncedTaskField[];
+    };
+
+export interface ApplyRemoteMergeOptions {
+  /** Keeps a permanently failed local write visible while unrelated pull fields advance. */
+  localChangesStatus?: Task["sync"]["status"];
+  localChangesError?: string;
 }
 
 /**
@@ -158,6 +184,7 @@ export function remoteTaskToCreateInput(
   accountId: string,
   now: () => number = Date.now,
   currentUserOpenId?: string,
+  syncIdentityId?: string,
 ): CreateTaskInput {
   const snapshot = remoteTaskToFeishuSnapshot(remote);
   const tasklist = cloneFeishuTasklistBinding(snapshot.tasklist);
@@ -165,6 +192,7 @@ export function remoteTaskToCreateInput(
     source: {
       type: "feishu",
       accountId,
+      ...(syncIdentityId === undefined ? {} : { syncIdentityId }),
       externalId: remote.guid,
       remoteVersion: remote.updated_at,
       ...(tasklist === undefined ? {} : { tasklist }),
@@ -199,6 +227,7 @@ export class FeishuTaskAdapter {
   private readonly localStore: FeishuLocalStorePort;
   readonly accountId: string;
   private currentUserOpenId?: string;
+  private readonly syncIdentityId?: string;
   private readonly now: () => number;
 
   constructor(options: FeishuTaskAdapterOptions) {
@@ -206,6 +235,7 @@ export class FeishuTaskAdapter {
     this.localStore = options.localStore;
     this.accountId = options.accountId;
     this.currentUserOpenId = options.currentUserOpenId;
+    this.syncIdentityId = options.syncIdentityId;
     this.now = options.now ?? Date.now;
   }
 
@@ -217,11 +247,73 @@ export class FeishuTaskAdapter {
     return this.taskService.getTask(localId, includeDeleted);
   }
 
-  listAccountTasks(): Promise<Task[]> {
-    return this.taskService.listTasks({
+  async listAccountTasks(): Promise<Task[]> {
+    const tasks = await this.taskService.listTasks({
       sourceTypes: ["feishu"],
       accountIds: [this.accountId],
       includeDeleted: true,
+    });
+    return this.syncIdentityId === undefined
+      ? tasks
+      : tasks.filter(
+          (task) => task.source.syncIdentityId === this.syncIdentityId,
+        );
+  }
+
+  /**
+   * Claims only unbound legacy/new tasks. A task already owned by another
+   * OAuth identity is rejected before it can enter this runtime's queue.
+   */
+  async claimTask(localId: string): Promise<Task | undefined> {
+    if (this.syncIdentityId === undefined) {
+      return this.taskService.getTask(localId, true);
+    }
+    return this.localStore.transact((state) => {
+      const task = state.tasks[localId];
+      if (!task || task.source.type !== "feishu") return undefined;
+      if (task.source.accountId !== this.accountId) return undefined;
+      const owner = task.source.syncIdentityId;
+      if (owner !== undefined && owner !== this.syncIdentityId) {
+        throw new Error("Feishu task belongs to another authorized identity.");
+      }
+      task.source.syncIdentityId = this.syncIdentityId;
+      return clone(task);
+    });
+  }
+
+  /** One-time migration for local ids proven by a legacy mapping/queue. */
+  async claimLegacyTasks(
+    localIds: readonly string[],
+    syncIdentityId: string,
+  ): Promise<void> {
+    if (this.syncIdentityId !== syncIdentityId) return;
+    const unique = new Set(localIds);
+    await this.localStore.transact((state) => {
+      for (const localId of unique) {
+        const task = state.tasks[localId];
+        if (
+          task?.source.type === "feishu" &&
+          task.source.accountId === this.accountId &&
+          task.source.syncIdentityId === undefined
+        ) {
+          task.source.syncIdentityId = syncIdentityId;
+        }
+      }
+    });
+  }
+
+  /** Keeps the editable local label in sync without changing real ownership. */
+  async relabelOwnedTasks(): Promise<void> {
+    if (this.syncIdentityId === undefined) return;
+    await this.localStore.transact((state) => {
+      for (const task of Object.values(state.tasks)) {
+        if (
+          task.source.type === "feishu" &&
+          task.source.syncIdentityId === this.syncIdentityId
+        ) {
+          task.source.accountId = this.accountId;
+        }
+      }
     });
   }
 
@@ -232,6 +324,7 @@ export class FeishuTaskAdapter {
         this.accountId,
         this.now,
         this.currentUserOpenId,
+        this.syncIdentityId,
       ),
     );
     return result.task;
@@ -313,6 +406,9 @@ export class FeishuTaskAdapter {
       ...task.source,
       type: "feishu",
       accountId: this.accountId,
+      ...(this.syncIdentityId === undefined
+        ? {}
+        : { syncIdentityId: this.syncIdentityId }),
       externalId: remote.guid,
       remoteVersion: remote.updated_at ?? task.source.remoteVersion,
     };
@@ -346,6 +442,64 @@ export class FeishuTaskAdapter {
     return this.localStore.transact((state) =>
       this.applyRemoteInTransaction(state, localId, remote, options),
     );
+  }
+
+  /**
+   * Reads the latest local task, performs the three-way merge and applies the
+   * result under one LocalStore transaction. A local TaskService mutation that
+   * commits immediately before this transaction is therefore part of the
+   * merge instead of being overwritten by a snapshot read earlier in a pull.
+   */
+  async mergeAndApplyRemote(
+    localId: string,
+    remote: FeishuTaskV2,
+    base: FeishuTaskSyncSnapshot,
+    remoteSnapshot: FeishuTaskSyncSnapshot,
+    options: ApplyRemoteMergeOptions = {},
+  ): Promise<ApplyRemoteMergeResult> {
+    return this.localStore.transact((state) => {
+      const current = state.tasks[localId];
+      if (!current) return { outcome: "missing" };
+      if (current.deletedAt) {
+        return { outcome: "locally-deleted", task: clone(current) };
+      }
+
+      const local = localTaskToFeishuSnapshot(current);
+      const merge = threeWayMergeFeishuTask(base, local, remoteSnapshot);
+      if (merge.conflicts.length > 0) {
+        current.sync = {
+          ...current.sync,
+          status: "conflict",
+          error: "The task changed locally and in Feishu.",
+          conflictFields: merge.conflicts.map((value) => value.field),
+        };
+        current.updatedAt = new Date(this.now()).toISOString();
+        return {
+          outcome: "conflict",
+          task: clone(current),
+          local,
+          conflicts: clone(merge.conflicts),
+        };
+      }
+
+      const hasLocalChanges = merge.localChanges.length > 0;
+      const task = this.applyRemoteInTransaction(state, localId, remote, {
+        snapshot: merge.merged,
+        status: hasLocalChanges
+          ? (options.localChangesStatus ?? "pending")
+          : "synced",
+      });
+      if (hasLocalChanges && options.localChangesError) {
+        state.tasks[localId]!.sync.error = options.localChangesError;
+        task.sync.error = options.localChangesError;
+      }
+      return {
+        outcome: "applied",
+        task,
+        local,
+        localChanges: clone(merge.localChanges),
+      };
+    });
   }
 
   /**
@@ -430,6 +584,9 @@ export class FeishuTaskAdapter {
         ...task.source,
         type: "feishu",
         accountId: this.accountId,
+        ...(this.syncIdentityId === undefined
+          ? {}
+          : { syncIdentityId: this.syncIdentityId }),
         externalId: remoteGuid,
       };
       task.sync = {
@@ -479,6 +636,7 @@ export class FeishuTaskAdapter {
       listId: original.listId,
       sectionId: original.sectionId,
       tags: clone(original.tags),
+      contexts: clone(original.contexts ?? []),
       parentId: original.parentId,
       dependencyIds: clone(original.dependencyIds),
       assigneeIds: [],
@@ -486,6 +644,7 @@ export class FeishuTaskAdapter {
       attachments: clone(original.attachments),
       links: clone(original.links),
       customFields: clone(original.customFields),
+      researchCards: clone(original.researchCards ?? []),
       plannedDate: original.plannedDate,
       startAt: original.startAt,
       startAtIsAllDay: original.startAtIsAllDay,

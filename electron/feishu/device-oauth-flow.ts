@@ -134,6 +134,7 @@ interface OAuthResponseShape {
   access_token?: string;
   refresh_token?: string;
   open_id?: string;
+  tenant_key?: string;
   token_type?: string;
   scope?: string | string[];
   refresh_token_expires_in?: number;
@@ -444,6 +445,7 @@ export function parseFeishuDeviceTokenResponse(
     accessToken: payload.access_token,
     refreshToken: payload.refresh_token || undefined,
     openId: payload.open_id || undefined,
+    tenantKey: payload.tenant_key || undefined,
     tokenType: payload.token_type || "Bearer",
     scope: scopes,
     expiresAt: issuedAt + payload.expires_in * 1_000,

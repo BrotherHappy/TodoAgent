@@ -29,6 +29,9 @@ const petTabs = new Set(['all', 'today', 'focus', 'chat', 'home']);
 const environmentSounds = new Set(['off', 'rain', 'forest', 'cafe', 'white-noise']);
 const petActionPacks = new Set(['balanced', 'calm', 'playful', 'focused']);
 const petAnimationIntensities = new Set(['gentle', 'lively']);
+const aiRoutingModes = new Set(['primary-only', 'fallback-on-error', 'local-only']);
+const aiAuthenticationModes = new Set(['bearer', 'none']);
+const taskReminderSourceModes = new Set(['normal', 'important-only', 'off']);
 
 function clampInteger(
   value: unknown,
@@ -39,6 +42,20 @@ function clampInteger(
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.min(maximum, Math.max(minimum, Math.round(value)))
     : fallback;
+}
+
+function normalizeProjectReminderModes(value: unknown): Record<string, 'normal' | 'important-only' | 'off'> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized: Record<string, 'normal' | 'important-only' | 'off'> = {};
+  for (const [rawProjectId, rawMode] of Object.entries(value as Record<string, unknown>)) {
+    const projectId = rawProjectId.trim();
+    if (!projectId || projectId.length > 512 || normalized[projectId] !== undefined) continue;
+    if (typeof rawMode === 'string' && taskReminderSourceModes.has(rawMode)) {
+      normalized[projectId] = rawMode as 'normal' | 'important-only' | 'off';
+    }
+    if (Object.keys(normalized).length >= 100) break;
+  }
+  return normalized;
 }
 
 async function atomicJsonWrite(filePath: string, value: unknown): Promise<void> {
@@ -104,6 +121,39 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   merged.floating.scalePercent = Number.isFinite(merged.floating.scalePercent)
     ? Math.min(125, Math.max(75, Math.round(merged.floating.scalePercent)))
     : defaultSettings.floating.scalePercent;
+  merged.notifications.dailyTaskReminderLimit = clampInteger(
+    merged.notifications.dailyTaskReminderLimit,
+    defaultSettings.notifications.dailyTaskReminderLimit,
+    0,
+    50,
+  );
+  merged.notifications.taskIgnoreBackoffEnabled =
+    typeof merged.notifications.taskIgnoreBackoffEnabled === 'boolean'
+      ? merged.notifications.taskIgnoreBackoffEnabled
+      : defaultSettings.notifications.taskIgnoreBackoffEnabled;
+  merged.notifications.taskReminderMinIntervalMinutes = clampInteger(
+    merged.notifications.taskReminderMinIntervalMinutes,
+    defaultSettings.notifications.taskReminderMinIntervalMinutes,
+    0,
+    1_440,
+  );
+  if (!merged.notifications.taskReminderSourceMode || typeof merged.notifications.taskReminderSourceMode !== 'object') {
+    merged.notifications.taskReminderSourceMode = {
+      ...defaultSettings.notifications.taskReminderSourceMode,
+    };
+  } else {
+    merged.notifications.taskReminderSourceMode = {
+      local: taskReminderSourceModes.has(merged.notifications.taskReminderSourceMode.local)
+        ? merged.notifications.taskReminderSourceMode.local
+        : defaultSettings.notifications.taskReminderSourceMode.local,
+      feishu: taskReminderSourceModes.has(merged.notifications.taskReminderSourceMode.feishu)
+        ? merged.notifications.taskReminderSourceMode.feishu
+        : defaultSettings.notifications.taskReminderSourceMode.feishu,
+    };
+  }
+  merged.notifications.taskReminderProjectMode = normalizeProjectReminderModes(
+    merged.notifications.taskReminderProjectMode,
+  );
   merged.focus.focusMinutes = clampInteger(
     merged.focus.focusMinutes,
     defaultSettings.focus.focusMinutes,
@@ -143,6 +193,12 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     15,
     240,
   );
+  merged.pet.proactiveDailyLimit = clampInteger(
+    merged.pet.proactiveDailyLimit,
+    defaultSettings.pet.proactiveDailyLimit,
+    0,
+    20,
+  );
   merged.weather.cacheMinutes = clampInteger(
     merged.weather.cacheMinutes,
     defaultSettings.weather.cacheMinutes,
@@ -151,6 +207,24 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   );
   if (!Number.isFinite(merged.weather.latitude)) delete merged.weather.latitude;
   if (!Number.isFinite(merged.weather.longitude)) delete merged.weather.longitude;
+
+  if (!aiRoutingModes.has(merged.ai.routing)) {
+    merged.ai.routing = defaultSettings.ai.routing;
+  }
+  if (!aiAuthenticationModes.has(merged.ai.authMode)) {
+    merged.ai.authMode = defaultSettings.ai.authMode;
+  }
+  if (!merged.ai.fallback || typeof merged.ai.fallback !== 'object') {
+    merged.ai.fallback = clone(defaultSettings.ai.fallback);
+  } else {
+    merged.ai.fallback = {
+      ...defaultSettings.ai.fallback,
+      ...merged.ai.fallback,
+    };
+    if (!aiAuthenticationModes.has(merged.ai.fallback.authMode)) {
+      merged.ai.fallback.authMode = defaultSettings.ai.fallback.authMode;
+    }
+  }
 
   // Keep the ordinary settings document on an explicit allow-list. Types and
   // the renderer IPC schema are useful boundaries, but callers in the main
@@ -173,6 +247,14 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       quietHoursEnabled: merged.notifications.quietHoursEnabled,
       quietHoursStart: merged.notifications.quietHoursStart,
       quietHoursEnd: merged.notifications.quietHoursEnd,
+      dailyTaskReminderLimit: merged.notifications.dailyTaskReminderLimit,
+      taskIgnoreBackoffEnabled: merged.notifications.taskIgnoreBackoffEnabled,
+      taskReminderMinIntervalMinutes: merged.notifications.taskReminderMinIntervalMinutes,
+      taskReminderSourceMode: {
+        local: merged.notifications.taskReminderSourceMode.local,
+        feishu: merged.notifications.taskReminderSourceMode.feishu,
+      },
+      taskReminderProjectMode: clone(merged.notifications.taskReminderProjectMode),
       mutedUntil: merged.notifications.mutedUntil,
     },
     floating: {
@@ -213,6 +295,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       actionPack: merged.pet.actionPack,
       animationIntensity: merged.pet.animationIntensity,
       proactiveIntervalMinutes: merged.pet.proactiveIntervalMinutes,
+      proactiveDailyLimit: merged.pet.proactiveDailyLimit,
       meetingMode: merged.pet.meetingMode,
       seasonalEvents: merged.pet.seasonalEvents,
     },
@@ -221,6 +304,14 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       endpoint: merged.ai.endpoint,
       model: merged.ai.model,
       authMode: merged.ai.authMode,
+      routing: merged.ai.routing,
+      fallback: {
+        enabled: merged.ai.fallback.enabled,
+        endpoint: merged.ai.fallback.endpoint,
+        model: merged.ai.fallback.model,
+        authMode: merged.ai.fallback.authMode,
+        credentialId: merged.ai.fallback.credentialId,
+      },
       timeoutMs: merged.ai.timeoutMs,
       retries: merged.ai.retries,
       dailyTokenLimit: merged.ai.dailyTokenLimit,
@@ -282,6 +373,14 @@ export class SettingsService {
       if (
         raw.floating?.topMode !== this.#settings.floating.topMode ||
         raw.ai?.authMode !== this.#settings.ai.authMode ||
+        raw.ai?.routing !== this.#settings.ai.routing ||
+        raw.ai?.fallback === undefined ||
+        raw.notifications?.dailyTaskReminderLimit !== this.#settings.notifications.dailyTaskReminderLimit ||
+        raw.notifications?.taskIgnoreBackoffEnabled !== this.#settings.notifications.taskIgnoreBackoffEnabled ||
+        raw.notifications?.taskReminderMinIntervalMinutes !== this.#settings.notifications.taskReminderMinIntervalMinutes ||
+        JSON.stringify(raw.notifications?.taskReminderSourceMode) !== JSON.stringify(this.#settings.notifications.taskReminderSourceMode) ||
+        JSON.stringify(raw.notifications?.taskReminderProjectMode) !== JSON.stringify(this.#settings.notifications.taskReminderProjectMode) ||
+        raw.pet?.proactiveDailyLimit !== this.#settings.pet.proactiveDailyLimit ||
         raw.floating?.selectedTab !== this.#settings.floating.selectedTab ||
         raw.floating?.scalePercent !== this.#settings.floating.scalePercent ||
         raw.focus === undefined ||
