@@ -218,6 +218,7 @@ import {
   PetInteractionWheel,
   type FloatingPetGame,
 } from "./PetInteractionWheel";
+import { PetActionPackEditor } from "./PetActionPackEditor";
 import {
   PetCompanionAvatar,
   kindLabels as petCompanionKindLabels,
@@ -9474,6 +9475,15 @@ function SettingsPage({
               </div>
               {actionPackError && <p className="form-error">{actionPackError}</p>}
             </div>
+            <PetActionPackEditor
+              activePack={actionPacks.activePack}
+              disabled={saving}
+              onInstall={(pack) => {
+                actionPacks.install(pack);
+                actionPacks.activate(pack.id);
+                notify(`已安装并启用动作包「${pack.name}」`, "success");
+              }}
+            />
             <div className="settings-subheading">
               <span>工作流模板</span>
               <p>把会议、研究或发布流程保存成几步任务；使用时仍会先预览，再由你确认创建。</p>

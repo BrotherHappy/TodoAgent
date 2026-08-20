@@ -9821,6 +9821,78 @@ select {
   font-size: 12px;
   line-height: 1.5;
 }
+.pet-action-pack-editor {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 4px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 20%, var(--app-line));
+  border-radius: 15px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--app-brand-soft) 25%, var(--app-glass-soft));
+}
+.pet-action-pack-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pet-action-pack-editor-heading strong,
+.pet-action-pack-editor-heading p { margin: 0; }
+.pet-action-pack-editor-heading strong { font-size: 13px; }
+.pet-action-pack-editor-heading p { margin-top: 3px; color: var(--app-text-soft); font-size: 11px; }
+.pet-action-pack-editor-heading > span { color: var(--app-text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.pet-action-pack-editor-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 8px;
+}
+.pet-action-pack-editor-fields label,
+.pet-action-pack-editor-description {
+  display: grid;
+  gap: 4px;
+}
+.pet-action-pack-editor-fields label > span,
+.pet-action-pack-editor-description > span {
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.pet-action-pack-editor-fields .settings-input,
+.pet-action-pack-editor-description .settings-input {
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 9px;
+}
+.pet-action-pack-action-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+.pet-action-pack-action {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--app-line);
+  border-radius: 9px;
+  padding: 6px 7px;
+  color: var(--app-text-soft);
+  background: var(--app-surface-raised);
+  cursor: pointer;
+  font-size: 10px;
+}
+.pet-action-pack-action:hover,
+.pet-action-pack-action:focus-within { border-color: color-mix(in srgb, var(--app-brand) 40%, var(--app-line)); }
+.pet-action-pack-action.is-selected {
+  border-color: color-mix(in srgb, var(--app-brand) 42%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 68%, var(--app-surface-raised));
+}
+.pet-action-pack-action input { accent-color: var(--app-brand); }
+.pet-action-pack-action span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-action-pack-editor-actions { margin-top: 0; }
+@media (max-width: 720px) {
+  .pet-action-pack-action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .settings-inline-note {
   color: var(--app-text-soft);
   font-size: 12px;
