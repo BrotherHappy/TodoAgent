@@ -32,6 +32,7 @@ import {
   GitBranch,
   GripVertical,
   Heart,
+  History,
   Inbox,
   Info,
   Laptop,
@@ -141,6 +142,7 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { conversationTitle } from "./agent-conversation-store";
 import { buildAgentQuickSuggestions } from "./agent-quick-suggestions";
 import {
   buildBulkTaskAgentPrompt,
@@ -5687,13 +5689,18 @@ function AgentPage({
     respondToApproval,
     appendAssistant,
     refreshStatus,
+    conversationId,
+    conversationSessions,
     hasStoredConversation,
     newConversation,
     clearConversation,
+    switchConversation,
+    removeConversation,
     exportConversation,
   } = chat;
   const agentThreadRef = useRef<HTMLElement>(null);
   const chatFollowsOutputRef = useRef(true);
+  const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   useEffect(() => {
     if (!chatFollowsOutputRef.current) return;
     const frame = window.requestAnimationFrame(() => {
@@ -5794,9 +5801,23 @@ function AgentPage({
             <button
               type="button"
               className="soft-button"
+              aria-expanded={conversationMenuOpen}
+              aria-controls="agent-conversation-panel"
               disabled={isSending}
-              onClick={newConversation}
-              title="开始新的本机会话；当前会话将不再作为恢复记录"
+              onClick={() => setConversationMenuOpen((value) => !value)}
+              title="切换本机保存的 Agent 会话"
+            >
+              <History size={14} /> 会话
+            </button>
+            <button
+              type="button"
+              className="soft-button"
+              disabled={isSending}
+              onClick={() => {
+                setConversationMenuOpen(false);
+                newConversation();
+              }}
+              title="开始新的本机会话；当前会话会保留在本机历史中"
             >
               <Plus size={14} /> 新对话
             </button>
@@ -5813,18 +5834,70 @@ function AgentPage({
             <button
               type="button"
               className="icon-button"
-              aria-label="清除本机 Agent 对话并开始新会话"
-              title="清除本机 Agent 对话并开始新会话"
+              aria-label="清除当前本机会话并开始新会话"
+              title="清除当前本机会话并开始新会话"
               disabled={isSending}
               onClick={() => {
                 clearConversation();
-                notify("本机对话已清除", "success");
+                notify("当前本机会话已清除", "success");
               }}
             >
               <Trash2 size={16} />
             </button>
           </div>
         </div>
+        {conversationMenuOpen && (
+          <section
+            id="agent-conversation-panel"
+            className="agent-session-panel"
+            aria-label="本机 Agent 会话"
+          >
+            <div className="agent-session-panel-heading">
+              <div>
+                <strong>本机会话</strong>
+                <small>最多保留 8 个；不会上传或进入飞书</small>
+              </div>
+              <span>{conversationSessions.length}/8</span>
+            </div>
+            {conversationSessions.length === 0 ? (
+              <p className="agent-session-empty">发送一条消息后，这里会保留可切换的会话。</p>
+            ) : (
+              <div className="agent-session-list">
+                {conversationSessions.map((session) => (
+                  <div className="agent-session-row" key={session.conversationId}>
+                    <button
+                      type="button"
+                      className={`agent-session-select ${session.conversationId === conversationId ? "is-active" : ""}`}
+                      disabled={isSending || session.conversationId === conversationId}
+                      onClick={() => {
+                        if (switchConversation(session.conversationId)) {
+                          setConversationMenuOpen(false);
+                        }
+                      }}
+                    >
+                      <strong>{conversationTitle(session)}</strong>
+                      <small>{formatDateTime(session.updatedAt)}</small>
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button agent-session-delete"
+                      aria-label={`删除会话：${conversationTitle(session)}`}
+                      title="删除本机会话"
+                      disabled={isSending}
+                      onClick={() => {
+                        if (removeConversation(session.conversationId)) {
+                          notify("本机会话已删除", "success");
+                        }
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
         {messages.map((message, index) => (
           <div
             key={message.id ?? `${message.role}-${index}`}

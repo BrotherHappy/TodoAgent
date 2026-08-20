@@ -7,11 +7,17 @@ import type {
 import type { ApprovalChoice } from "../shared/agent-types";
 import { mergeAgentDelta } from "./agent-stream-state";
 import {
+  AGENT_CONVERSATIONS_STORAGE_KEY,
   AGENT_CONVERSATION_STORAGE_KEY,
   agentConversationMarkdown,
   clearStoredAgentConversation,
-  readStoredAgentConversation,
+  conversationTitle,
+  readStoredAgentConversationCollection,
+  removeStoredAgentConversation,
+  type StoredAgentConversation,
   writeStoredAgentConversation,
+  writeStoredAgentConversationCollection,
+  upsertStoredAgentConversation,
   type StoredAgentMessage,
 } from "./agent-conversation-store";
 
@@ -86,6 +92,45 @@ const visibleAssistantText = (value: string | undefined): string | undefined => 
   return sanitized.trim().length > 0 ? sanitized : undefined;
 };
 
+const storedMessagesFromUi = (
+  messages: readonly AgentUiMessage[],
+): StoredAgentMessage[] =>
+  messages
+    .filter((message) => !message.streaming && message.text.trim().length > 0)
+    .slice(-50)
+    .map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      feishuSyncReceipts: message.feishuSyncReceipts,
+      syncBaseText: message.syncBaseText,
+    }));
+
+const storedConversationFromUi = (
+  messages: readonly AgentUiMessage[],
+  conversationId: string,
+): StoredAgentConversation | undefined => {
+  const storedMessages = storedMessagesFromUi(messages);
+  if (storedMessages.length === 0) return undefined;
+  return {
+    schemaVersion: 1,
+    conversationId,
+    updatedAt: new Date().toISOString(),
+    messages: storedMessages,
+  };
+};
+
+const uiMessagesFromStored = (
+  conversation: StoredAgentConversation,
+): AgentUiMessage[] =>
+  conversation.messages.map((message) => ({
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    feishuSyncReceipts: message.feishuSyncReceipts,
+    syncBaseText: message.syncBaseText,
+  }));
+
 const feishuActionLabel: Record<AgentFeishuSyncReceipt["action"], string> = {
   created: "已创建",
   updated: "已更新",
@@ -138,19 +183,33 @@ export function useAgentChat({
   persistConversation = false,
   conversationStorageKey = AGENT_CONVERSATION_STORAGE_KEY,
 }: UseAgentChatOptions) {
+  const conversationSessionsStorageKey =
+    conversationStorageKey === AGENT_CONVERSATION_STORAGE_KEY
+      ? AGENT_CONVERSATIONS_STORAGE_KEY
+      : `${conversationStorageKey}:sessions`;
+  const storedCollectionRef = useRef(
+    persistConversation
+      ? readStoredAgentConversationCollection(
+          conversationSessionsStorageKey,
+          conversationStorageKey,
+        )
+      : { schemaVersion: 1 as const, conversations: [] },
+  );
   const storedConversationRef = useRef(
     persistConversation
-      ? readStoredAgentConversation(conversationStorageKey)
+      ? storedCollectionRef.current.activeConversationId
+        ? storedCollectionRef.current.conversations.find(
+            (conversation) =>
+              conversation.conversationId ===
+              storedCollectionRef.current.activeConversationId,
+          )
+        : storedCollectionRef.current.conversations[0]
       : undefined,
   );
   const [messages, setMessages] = useState<AgentUiMessage[]>(() =>
-    storedConversationRef.current?.messages.map((message) => ({
-      id: message.id,
-      role: message.role,
-      text: message.text,
-      feishuSyncReceipts: message.feishuSyncReceipts,
-      syncBaseText: message.syncBaseText,
-    })) ?? [{ role: "assistant", text: initialMessage }],
+    storedConversationRef.current
+      ? uiMessagesFromStored(storedConversationRef.current)
+      : [{ role: "assistant", text: initialMessage }],
   );
   const [input, setInput] = useState("");
   const [approval, setApproval] = useState<AgentApprovalView>();
@@ -160,6 +219,9 @@ export function useAgentChat({
   const [activeRunId, setActiveRunId] = useState<string>();
   const [hasStoredConversation, setHasStoredConversation] = useState(
     storedConversationRef.current !== undefined,
+  );
+  const [conversationSessions, setConversationSessions] = useState<StoredAgentConversation[]>(
+    storedCollectionRef.current.conversations,
   );
   const messagesRef = useRef(messages);
   const activeStreamRef = useRef<ActiveAgentStream | undefined>(undefined);
@@ -178,29 +240,40 @@ export function useAgentChat({
   useEffect(() => {
     if (!persistConversation || messages.length === 0) return undefined;
     const timer = window.setTimeout(() => {
-      const storedMessages: StoredAgentMessage[] = messages
-        .filter((message) => !message.streaming && message.text.trim().length > 0)
-        .slice(-50)
-        .map((message) => ({
-          id: message.id,
-          role: message.role,
-          text: message.text,
-          feishuSyncReceipts: message.feishuSyncReceipts,
-          syncBaseText: message.syncBaseText,
-        }));
-      if (storedMessages.length === 0) return;
-      writeStoredAgentConversation(
-        {
-          schemaVersion: 1,
-          conversationId: conversationIdRef.current,
-          updatedAt: new Date().toISOString(),
-          messages: storedMessages,
-        },
+      const conversation = storedConversationFromUi(
+        messages,
+        conversationIdRef.current,
+      );
+      if (!conversation) return;
+      const persisted = upsertStoredAgentConversation(
+        conversation,
+        conversationIdRef.current,
+        conversationSessionsStorageKey,
         conversationStorageKey,
       );
+      if (!persisted) return;
+      // Keep the legacy single-session key readable for older renderer builds.
+      writeStoredAgentConversation(conversation, conversationStorageKey);
+      setConversationSessions((current) => {
+        const next = [
+          conversation,
+          ...current.filter(
+            (item) => item.conversationId !== conversation.conversationId,
+          ),
+        ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 8);
+        const unchanged =
+          current.length === next.length &&
+          current.every(
+            (item, index) =>
+              item.conversationId === next[index]?.conversationId &&
+              item.updatedAt === next[index]?.updatedAt &&
+              item.messages.length === next[index]?.messages.length,
+          );
+        return unchanged ? current : next;
+      });
     }, 120);
     return () => window.clearTimeout(timer);
-  }, [conversationStorageKey, messages, persistConversation]);
+  }, [conversationSessionsStorageKey, conversationStorageKey, messages, persistConversation]);
 
   const refreshStatus = useCallback(async () => {
     if (!window.desktopApi) return undefined;
@@ -336,34 +409,149 @@ export function useAgentChat({
     setMessages((current) => [...current, { role: "assistant", text }]);
   }, []);
 
+  const rotateConversation = useCallback(
+    (archiveCurrent: boolean) => {
+      const previousConversationId = conversationIdRef.current;
+      const nextConversationId = crypto.randomUUID();
+      if (persistConversation) {
+        const current = storedConversationFromUi(
+          messagesRef.current,
+          previousConversationId,
+        );
+        const collection = readStoredAgentConversationCollection(
+          conversationSessionsStorageKey,
+          conversationStorageKey,
+        );
+        const shouldArchive =
+          archiveCurrent && current?.messages.some((message) => message.role === "user");
+        const conversations = shouldArchive && current
+          ? [
+              current,
+              ...collection.conversations.filter(
+                (conversation) => conversation.conversationId !== previousConversationId,
+              ),
+            ]
+          : collection.conversations.filter(
+              (conversation) => conversation.conversationId !== previousConversationId,
+            );
+        writeStoredAgentConversationCollection(
+          {
+            schemaVersion: 1,
+            activeConversationId: nextConversationId,
+            conversations,
+          },
+          conversationSessionsStorageKey,
+        );
+        // The legacy key is only a compatibility fallback; the active marker
+        // in the collection is authoritative for current renderer builds.
+        clearStoredAgentConversation(conversationStorageKey);
+        setConversationSessions(
+          readStoredAgentConversationCollection(
+            conversationSessionsStorageKey,
+            conversationStorageKey,
+          ).conversations,
+        );
+      }
+      conversationIdRef.current = nextConversationId;
+      setHasStoredConversation(false);
+      setApproval(undefined);
+      setInput("");
+      setRunState("就绪");
+      setMessages([{ role: "assistant", text: initialMessage }]);
+    },
+    [
+      conversationSessionsStorageKey,
+      conversationStorageKey,
+      initialMessage,
+      persistConversation,
+    ],
+  );
+
   const newConversation = useCallback(() => {
-    if (persistConversation) {
-      clearStoredAgentConversation(conversationStorageKey);
-    }
-    conversationIdRef.current = crypto.randomUUID();
-    setHasStoredConversation(false);
-    setApproval(undefined);
-    setInput("");
-    setRunState("就绪");
-    setMessages([{ role: "assistant", text: initialMessage }]);
-  }, [conversationStorageKey, initialMessage, persistConversation]);
+    rotateConversation(true);
+  }, [rotateConversation]);
 
   const clearConversation = useCallback(() => {
-    clearStoredAgentConversation(conversationStorageKey);
-    newConversation();
-  }, [conversationStorageKey, newConversation]);
+    rotateConversation(false);
+  }, [rotateConversation]);
+
+  const switchConversation = useCallback(
+    (targetConversationId: string): boolean => {
+      if (!persistConversation || sendingRef.current) return false;
+      const current = storedConversationFromUi(
+        messagesRef.current,
+        conversationIdRef.current,
+      );
+      if (current && current.conversationId !== targetConversationId) {
+        upsertStoredAgentConversation(
+          current,
+          conversationIdRef.current,
+          conversationSessionsStorageKey,
+          conversationStorageKey,
+        );
+      }
+      const collection = readStoredAgentConversationCollection(
+        conversationSessionsStorageKey,
+        conversationStorageKey,
+      );
+      const target = collection.conversations.find(
+        (conversation) => conversation.conversationId === targetConversationId,
+      );
+      if (!target) return false;
+      writeStoredAgentConversationCollection(
+        { ...collection, activeConversationId: targetConversationId },
+        conversationSessionsStorageKey,
+      );
+      writeStoredAgentConversation(target, conversationStorageKey);
+      conversationIdRef.current = targetConversationId;
+      setMessages(uiMessagesFromStored(target));
+      setConversationSessions(collection.conversations);
+      setHasStoredConversation(true);
+      setApproval(undefined);
+      setInput("");
+      setRunState("就绪");
+      return true;
+    },
+    [conversationSessionsStorageKey, conversationStorageKey, persistConversation],
+  );
+
+  const removeConversation = useCallback(
+    (targetConversationId: string): boolean => {
+      if (!persistConversation || sendingRef.current) return false;
+      if (targetConversationId === conversationIdRef.current) {
+        rotateConversation(false);
+        return true;
+      }
+      const collection = readStoredAgentConversationCollection(
+        conversationSessionsStorageKey,
+        conversationStorageKey,
+      );
+      const removed = removeStoredAgentConversation(
+        targetConversationId,
+        collection.activeConversationId,
+        conversationSessionsStorageKey,
+        conversationStorageKey,
+      );
+      if (removed) {
+        setConversationSessions(
+          readStoredAgentConversationCollection(
+            conversationSessionsStorageKey,
+            conversationStorageKey,
+          ).conversations,
+        );
+      }
+      return removed;
+    },
+    [
+      conversationSessionsStorageKey,
+      conversationStorageKey,
+      persistConversation,
+      rotateConversation,
+    ],
+  );
 
   const exportConversation = useCallback((): string => {
-    const storedMessages: StoredAgentMessage[] = messages
-      .filter((message) => !message.streaming && message.text.trim().length > 0)
-      .slice(-50)
-      .map((message) => ({
-        id: message.id,
-        role: message.role,
-        text: message.text,
-        feishuSyncReceipts: message.feishuSyncReceipts,
-        syncBaseText: message.syncBaseText,
-      }));
+    const storedMessages = storedMessagesFromUi(messages);
     return agentConversationMarkdown({
       schemaVersion: 1,
       conversationId: conversationIdRef.current,
@@ -522,9 +710,12 @@ export function useAgentChat({
     appendAssistant,
     refreshStatus,
     conversationId: conversationIdRef.current,
+    conversationSessions,
     hasStoredConversation,
     newConversation,
     clearConversation,
+    switchConversation,
+    removeConversation,
     exportConversation,
   };
 }

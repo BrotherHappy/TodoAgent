@@ -520,4 +520,46 @@ describe("useAgentChat", () => {
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].role).toBe("assistant");
   });
+
+  it("archives, switches, and removes local conversations without sending them remotely", async () => {
+    const harness = installAgentApi(async (request) => ({
+      runId: request.runId!,
+      state: "completed",
+      assistantText: `回答：${request.message}`,
+    }));
+    const { result } = renderHook(() =>
+      useAgentChat({ initialMessage: "你好", persistConversation: true }),
+    );
+
+    await act(async () => {
+      await result.current.send("旧会话内容");
+    });
+    const oldConversationId = result.current.conversationId;
+    act(() => result.current.newConversation());
+    await act(async () => {
+      await result.current.send("新会话内容");
+    });
+    const newConversationId = result.current.conversationId;
+    expect(newConversationId).not.toBe(oldConversationId);
+    await waitFor(() => expect(result.current.conversationSessions).toHaveLength(2));
+
+    act(() => {
+      expect(result.current.switchConversation(oldConversationId)).toBe(true);
+    });
+    expect(result.current.conversationId).toBe(oldConversationId);
+    expect(result.current.messages.at(-1)?.text).toBe("回答：旧会话内容");
+    expect(harness.send).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      expect(result.current.removeConversation(oldConversationId)).toBe(true);
+    });
+    expect(result.current.conversationId).not.toBe(oldConversationId);
+    expect(result.current.messages).toHaveLength(1);
+    let switchedBack = false;
+    act(() => {
+      switchedBack = result.current.switchConversation(newConversationId);
+    });
+    expect(switchedBack).toBe(true);
+    expect(result.current.messages.at(-1)?.text).toBe("回答：新会话内容");
+  });
 });

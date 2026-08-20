@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   agentConversationMarkdown,
+  AGENT_CONVERSATIONS_STORAGE_KEY,
   clearStoredAgentConversation,
+  conversationTitle,
+  readStoredAgentConversationCollection,
   readStoredAgentConversation,
+  writeStoredAgentConversationCollection,
   writeStoredAgentConversation,
 } from "../src/renderer/agent-conversation-store";
 
@@ -98,5 +102,54 @@ describe("agent conversation store", () => {
     expect(markdown).not.toContain("api-key");
     clearStoredAgentConversation();
     expect(readStoredAgentConversation()).toBeUndefined();
+  });
+
+  it("keeps a bounded local session archive and honors the active session", () => {
+    const older = {
+      schemaVersion: 1 as const,
+      conversationId,
+      updatedAt: "2026-08-21T08:00:00.000Z",
+      messages: [
+        { role: "assistant" as const, text: "你好" },
+        { role: "user" as const, text: "旧会话" },
+      ],
+    };
+    const newer = {
+      ...older,
+      conversationId: "123e4567-e89b-12d3-a456-426614174001",
+      updatedAt: "2026-08-21T09:00:00.000Z",
+      messages: [
+        { role: "assistant" as const, text: "你好" },
+        { role: "user" as const, text: "新会话" },
+      ],
+    };
+    expect(
+      writeStoredAgentConversationCollection({
+        schemaVersion: 1,
+        activeConversationId: older.conversationId,
+        conversations: [older, newer],
+      }),
+    ).toBe(true);
+    expect(readStoredAgentConversationCollection().activeConversationId).toBe(
+      older.conversationId,
+    );
+    expect(readStoredAgentConversationCollection().conversations.map(conversationTitle)).toEqual([
+      "新会话",
+      "旧会话",
+    ]);
+    expect(window.localStorage.getItem(AGENT_CONVERSATIONS_STORAGE_KEY)).not.toBeNull();
+  });
+
+  it("limits the archive to eight valid sessions", () => {
+    const conversations = Array.from({ length: 12 }, (_, index) => ({
+      schemaVersion: 1 as const,
+      conversationId: `123e4567-e89b-12d3-a456-4266141740${String(index).padStart(2, "0")}`,
+      updatedAt: `2026-08-21T${String(index).padStart(2, "0")}:00:00.000Z`,
+      messages: [{ role: "user" as const, text: `会话 ${index}` }],
+    }));
+    expect(
+      writeStoredAgentConversationCollection({ schemaVersion: 1, conversations }),
+    ).toBe(true);
+    expect(readStoredAgentConversationCollection().conversations).toHaveLength(8);
   });
 });

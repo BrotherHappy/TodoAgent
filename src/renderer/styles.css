@@ -7151,6 +7151,92 @@ select {
   font-size: 11px;
   white-space: nowrap;
 }
+.agent-session-panel {
+  display: grid;
+  gap: 10px;
+  margin: -2px 0 14px;
+  border: 1px solid var(--app-line);
+  border-radius: 16px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--app-surface-raised) 94%, transparent);
+  box-shadow: 0 10px 28px rgba(52, 47, 112, 0.06);
+}
+.agent-session-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.agent-session-panel-heading strong,
+.agent-session-panel-heading small {
+  display: block;
+}
+.agent-session-panel-heading strong {
+  color: var(--app-text);
+  font-size: 12px;
+}
+.agent-session-panel-heading small,
+.agent-session-panel-heading > span,
+.agent-session-empty {
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.agent-session-panel-heading small {
+  margin-top: 3px;
+}
+.agent-session-list {
+  display: grid;
+  gap: 5px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.agent-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.agent-session-select {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 8px 10px;
+  text-align: left;
+  color: var(--app-text);
+  background: transparent;
+}
+.agent-session-select:hover:not(:disabled),
+.agent-session-select.is-active {
+  border-color: color-mix(in srgb, var(--app-brand) 25%, var(--app-line));
+  background: var(--app-brand-soft);
+}
+.agent-session-select strong,
+.agent-session-select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-session-select strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+.agent-session-select small {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.agent-session-delete {
+  width: 30px;
+  height: 30px;
+  color: var(--app-text-faint);
+}
+.agent-session-delete:hover:not(:disabled) {
+  color: var(--app-danger);
+}
+.agent-session-empty {
+  margin: 0;
+}
 .agent-quick-suggestions {
   display: grid;
   gap: 7px;

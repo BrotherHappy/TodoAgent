@@ -1,10 +1,13 @@
 import type { AgentFeishuSyncReceipt } from "../shared/desktop-api";
 
 const DEFAULT_STORAGE_KEY = "todo-agent:agent-conversation:v1";
+const DEFAULT_SESSIONS_STORAGE_KEY = "todo-agent:agent-conversations:v1";
 const SCHEMA_VERSION = 1;
 const MAX_MESSAGES = 50;
 const MAX_MESSAGE_LENGTH = 30_000;
 const MAX_TOTAL_LENGTH = 240_000;
+const MAX_SESSIONS = 8;
+const MAX_COLLECTION_LENGTH = 2_000_000;
 
 export interface StoredAgentMessage {
   id?: string;
@@ -19,6 +22,12 @@ export interface StoredAgentConversation {
   conversationId: string;
   updatedAt: string;
   messages: StoredAgentMessage[];
+}
+
+export interface StoredAgentConversationCollection {
+  schemaVersion: 1;
+  activeConversationId?: string;
+  conversations: StoredAgentConversation[];
 }
 
 const syncActions = new Set<AgentFeishuSyncReceipt["action"]>([
@@ -91,32 +100,38 @@ const parseMessage = (value: unknown): StoredAgentMessage | undefined => {
   return message;
 };
 
+const parseConversation = (value: unknown): StoredAgentConversation | undefined => {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== SCHEMA_VERSION ||
+    !isUuid(value.conversationId) ||
+    !Array.isArray(value.messages)
+  ) return undefined;
+  const messages = value.messages
+    .slice(-MAX_MESSAGES)
+    .map(parseMessage)
+    .filter((message): message is StoredAgentMessage => message !== undefined);
+  if (messages.length === 0) return undefined;
+  const totalLength = messages.reduce((sum, message) => sum + message.text.length, 0);
+  if (totalLength > MAX_TOTAL_LENGTH) return undefined;
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    conversationId: value.conversationId,
+    updatedAt:
+      typeof value.updatedAt === "string"
+        ? value.updatedAt
+        : new Date(0).toISOString(),
+    messages,
+  };
+};
+
 export function readStoredAgentConversation(
   storageKey = DEFAULT_STORAGE_KEY,
 ): StoredAgentConversation | undefined {
   try {
     const raw = localStorage.getItem(storageKey);
     if (!raw || raw.length > MAX_TOTAL_LENGTH * 2) return undefined;
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      !isRecord(parsed) ||
-      parsed.schemaVersion !== SCHEMA_VERSION ||
-      !isUuid(parsed.conversationId) ||
-      !Array.isArray(parsed.messages)
-    ) return undefined;
-    const messages = parsed.messages
-      .slice(-MAX_MESSAGES)
-      .map(parseMessage)
-      .filter((message): message is StoredAgentMessage => message !== undefined);
-    if (messages.length === 0) return undefined;
-    const totalLength = messages.reduce((sum, message) => sum + message.text.length, 0);
-    if (totalLength > MAX_TOTAL_LENGTH) return undefined;
-    return {
-      schemaVersion: SCHEMA_VERSION,
-      conversationId: parsed.conversationId,
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString(),
-      messages,
-    };
+    return parseConversation(JSON.parse(raw));
   } catch {
     return undefined;
   }
@@ -158,6 +173,122 @@ export function clearStoredAgentConversation(storageKey = DEFAULT_STORAGE_KEY): 
   }
 }
 
+const sortConversations = (
+  conversations: readonly StoredAgentConversation[],
+): StoredAgentConversation[] =>
+  [...conversations]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, MAX_SESSIONS);
+
+export function conversationTitle(
+  conversation: Pick<StoredAgentConversation, "messages">,
+): string {
+  const firstUserMessage = conversation.messages.find((message) => message.role === "user");
+  const source = firstUserMessage?.text ?? conversation.messages[0]?.text ?? "新对话";
+  const title = source.replace(/\s+/gu, " ").trim().slice(0, 56);
+  return title || "新对话";
+}
+
+export function readStoredAgentConversationCollection(
+  storageKey = DEFAULT_SESSIONS_STORAGE_KEY,
+  legacyStorageKey = DEFAULT_STORAGE_KEY,
+): StoredAgentConversationCollection {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw && raw.length <= MAX_COLLECTION_LENGTH) {
+      const parsed: unknown = JSON.parse(raw);
+      if (isRecord(parsed) && parsed.schemaVersion === SCHEMA_VERSION && Array.isArray(parsed.conversations)) {
+        const conversations = sortConversations(
+          parsed.conversations
+            .map(parseConversation)
+            .filter((conversation): conversation is StoredAgentConversation => conversation !== undefined),
+        );
+        const activeConversationId =
+          typeof parsed.activeConversationId === "string" && isUuid(parsed.activeConversationId)
+            ? parsed.activeConversationId
+            : undefined;
+        return { schemaVersion: SCHEMA_VERSION, activeConversationId, conversations };
+      }
+    }
+  } catch {
+    // Fall through to the pre-v1.81 single-session key.
+  }
+  const legacy = readStoredAgentConversation(legacyStorageKey);
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    activeConversationId: legacy?.conversationId,
+    conversations: legacy ? [legacy] : [],
+  };
+}
+
+export function writeStoredAgentConversationCollection(
+  collection: StoredAgentConversationCollection,
+  storageKey = DEFAULT_SESSIONS_STORAGE_KEY,
+): boolean {
+  try {
+    const conversations = sortConversations(
+      collection.conversations
+        .map((conversation) => parseConversation(conversation))
+        .filter((conversation): conversation is StoredAgentConversation => conversation !== undefined),
+    );
+    const activeConversationId =
+      collection.activeConversationId && isUuid(collection.activeConversationId)
+        ? collection.activeConversationId
+        : undefined;
+    const serialized = JSON.stringify({
+      schemaVersion: SCHEMA_VERSION,
+      activeConversationId,
+      conversations,
+    });
+    if (serialized.length > MAX_COLLECTION_LENGTH) return false;
+    localStorage.setItem(storageKey, serialized);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function upsertStoredAgentConversation(
+  conversation: StoredAgentConversation,
+  activeConversationId = conversation.conversationId,
+  storageKey = DEFAULT_SESSIONS_STORAGE_KEY,
+  legacyStorageKey = DEFAULT_STORAGE_KEY,
+): boolean {
+  const current = readStoredAgentConversationCollection(storageKey, legacyStorageKey);
+  const conversations = [
+    conversation,
+    ...current.conversations.filter((item) => item.conversationId !== conversation.conversationId),
+  ];
+  return writeStoredAgentConversationCollection(
+    { schemaVersion: SCHEMA_VERSION, activeConversationId, conversations },
+    storageKey,
+  );
+}
+
+export function removeStoredAgentConversation(
+  conversationId: string,
+  activeConversationId: string | undefined,
+  storageKey = DEFAULT_SESSIONS_STORAGE_KEY,
+  legacyStorageKey = DEFAULT_STORAGE_KEY,
+): boolean {
+  const current = readStoredAgentConversationCollection(storageKey, legacyStorageKey);
+  return writeStoredAgentConversationCollection(
+    {
+      schemaVersion: SCHEMA_VERSION,
+      activeConversationId,
+      conversations: current.conversations.filter((item) => item.conversationId !== conversationId),
+    },
+    storageKey,
+  );
+}
+
+export const AGENT_CONVERSATIONS_STORAGE_KEY = DEFAULT_SESSIONS_STORAGE_KEY;
+export const AGENT_CONVERSATION_LIMITS = {
+  maxMessages: MAX_MESSAGES,
+  maxMessageLength: MAX_MESSAGE_LENGTH,
+  maxSessions: MAX_SESSIONS,
+};
+
 export function agentConversationMarkdown(
   conversation: StoredAgentConversation,
 ): string {
@@ -176,7 +307,3 @@ export function agentConversationMarkdown(
 }
 
 export const AGENT_CONVERSATION_STORAGE_KEY = DEFAULT_STORAGE_KEY;
-export const AGENT_CONVERSATION_LIMITS = {
-  maxMessages: MAX_MESSAGES,
-  maxMessageLength: MAX_MESSAGE_LENGTH,
-};
