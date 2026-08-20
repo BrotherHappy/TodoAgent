@@ -7321,12 +7321,18 @@ select {
 .pet-team-huddle-task > span { color: var(--app-text-soft); font-size: 10px; }
 .pet-team-huddle-task select { width: 100%; min-height: 34px; border: 1px solid var(--app-line); border-radius: 10px; padding: 6px 8px; color: var(--app-text); background: var(--app-surface-raised); font-size: 11px; }
 .pet-team-huddle-members { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
-.pet-team-huddle-member { display: flex; align-items: center; min-width: 0; gap: 6px; border: 1px solid var(--app-line); border-radius: 12px; padding: 7px; background: color-mix(in srgb, var(--app-surface-raised) 86%, transparent); }
+.pet-team-huddle-member { width: 100%; display: flex; align-items: center; min-width: 0; gap: 6px; border: 1px solid var(--app-line); border-radius: 12px; padding: 7px; color: var(--app-text); background: color-mix(in srgb, var(--app-surface-raised) 86%, transparent); cursor: pointer; text-align: left; transition: border-color 150ms ease, background 150ms ease, transform 150ms ease; }
+.pet-team-huddle-member:hover,
+.pet-team-huddle-member:focus-visible { border-color: color-mix(in srgb, var(--app-brand) 44%, var(--app-line)); background: color-mix(in srgb, var(--app-brand-soft) 42%, var(--app-surface-raised)); transform: translateY(-1px); }
+.pet-team-huddle-member.is-lead { border-color: color-mix(in srgb, var(--app-brand) 58%, var(--app-line)); background: color-mix(in srgb, var(--app-brand-soft) 64%, var(--app-surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-brand) 13%, transparent); }
+.pet-team-huddle-member:disabled { cursor: default; opacity: 0.78; }
 .pet-team-huddle-member > div { min-width: 0; display: grid; gap: 2px; }
 .pet-team-huddle-member strong,
 .pet-team-huddle-member small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pet-team-huddle-member strong { font-size: 10px; }
 .pet-team-huddle-member small { color: var(--app-text-faint); font-size: 9px; }
+.pet-team-huddle-lead { display: grid; gap: 2px; margin: 0; border-left: 2px solid var(--app-brand); padding-left: 8px; color: var(--app-text-soft); font-size: 10px; line-height: 1.4; }
+.pet-team-huddle-lead strong { color: var(--app-brand-strong); font-size: 10px; }
 .pet-team-huddle-members.is-preparing .pet-team-huddle-member { animation: pet-team-huddle-bounce 480ms ease-in-out infinite alternate; }
 .pet-team-huddle-members.is-preparing .pet-team-huddle-member:nth-child(2) { animation-delay: 110ms; }
 .pet-team-huddle-members.is-preparing .pet-team-huddle-member:nth-child(3) { animation-delay: 220ms; }

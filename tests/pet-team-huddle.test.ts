@@ -44,8 +44,18 @@ describe("pet team huddle", () => {
 
   it("assigns presentation-only roles while retaining one task fact", () => {
     const plan = buildPetTeamPlan(task("整理研究资料"), companions);
-    expect(plan).toMatchObject({ task: { id: "整理研究资料" }, members: [{ role: "scout" }, { role: "guard" }] });
+    expect(plan).toMatchObject({
+      task: { id: "整理研究资料" },
+      members: [{ role: "scout" }, { role: "guard" }],
+      lead: { companion: { id: "bird" }, role: "scout" },
+    });
     expect(plan?.summary).toContain("任务状态仍只由 Todo Agent 记录");
+  });
+
+  it("lets the user choose a different lead without changing the task fact", () => {
+    const plan = buildPetTeamPlan(task("准备发布"), companions, "moth");
+    expect(plan?.lead).toMatchObject({ companion: { id: "moth" }, role: "guard" });
+    expect(plan?.task.id).toBe("准备发布");
   });
 
   it("does not create a plan for completed or companion-less tasks", () => {

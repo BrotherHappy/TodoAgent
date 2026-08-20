@@ -13,6 +13,7 @@ export interface PetTeamMember {
 export interface PetTeamPlan {
   task: Task;
   members: PetTeamMember[];
+  lead: PetTeamMember;
   summary: string;
 }
 
@@ -58,16 +59,21 @@ export function pickPetTeamTask(tasks: readonly Task[]): Task | undefined {
 export function buildPetTeamPlan(
   task: Task | undefined,
   companions: readonly PetCompanion[],
+  preferredLeadId?: string,
 ): PetTeamPlan | undefined {
   if (!task || task.status !== "open" || task.deletedAt || companions.length === 0) return undefined;
   const members = companions.map((companion) => ({
     companion,
     ...roleByKind[companion.kind],
   }));
+  const lead =
+    members.find((member) => member.companion.id === preferredLeadId) ?? members[0];
+  if (!lead) return undefined;
   const names = members.map((member) => member.companion.name.trim() || "小伙伴").join("、");
   return {
     task,
     members,
+    lead,
     summary: `${names}会一起陪你完成「${task.title}」，但任务状态仍只由 Todo Agent 记录。`,
   };
 }

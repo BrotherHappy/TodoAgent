@@ -58,6 +58,20 @@ describe("PetTeamHuddleCard", () => {
     expect(onStartFocus).toHaveBeenCalledWith(task);
   });
 
+  it("allows a companion to lead the briefing before preparation", () => {
+    render(
+      <PetTeamHuddleCard
+        companions={companions}
+        tasks={[task]}
+        onStartFocus={vi.fn().mockResolvedValue(undefined)}
+        onOpenTask={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "让云团担任领队，稳住节奏" }));
+    expect(screen.getByText("领队：云团")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "让云团担任领队，稳住节奏" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("keeps the empty state honest when every task is closed", () => {
     render(
       <PetTeamHuddleCard

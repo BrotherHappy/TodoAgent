@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Task } from "../shared/models";
 import type { PetCompanion } from "../shared/pet-types";
 import { PetCompanionAvatar } from "./PetCompanionAvatar";
-import { buildPetTeamPlan, pickPetTeamTask, type PetTeamPlan } from "./pet-team-huddle";
+import {
+  buildPetTeamPlan,
+  pickPetTeamTask,
+  type PetTeamPlan,
+} from "./pet-team-huddle";
 
 type HuddlePhase = "idle" | "preparing" | "ready";
 
@@ -23,11 +27,12 @@ export function PetTeamHuddleCard({
 }: PetTeamHuddleCardProps) {
   const openTasks = tasks.filter((task) => task.status === "open" && !task.deletedAt);
   const [selectedTaskId, setSelectedTaskId] = useState(() => pickPetTeamTask(openTasks)?.id ?? "");
+  const [leadId, setLeadId] = useState("");
   const [phase, setPhase] = useState<HuddlePhase>("idle");
   const [error, setError] = useState("");
   const timerRef = useRef<number | undefined>(undefined);
   const selectedTask = openTasks.find((task) => task.id === selectedTaskId) ?? openTasks[0];
-  const plan: PetTeamPlan | undefined = buildPetTeamPlan(selectedTask, companions);
+  const plan: PetTeamPlan | undefined = buildPetTeamPlan(selectedTask, companions, leadId);
 
   useEffect(() => {
     if (!selectedTask || selectedTask.id !== selectedTaskId) {
@@ -91,7 +96,19 @@ export function PetTeamHuddleCard({
           </label>
           <div className={`pet-team-huddle-members is-${phase}`} data-team-phase={phase}>
             {plan.members.map((member) => (
-              <div className="pet-team-huddle-member" key={member.companion.id} title={member.line}>
+              <button
+                type="button"
+                className={`pet-team-huddle-member ${plan.lead.companion.id === member.companion.id ? "is-lead" : ""}`}
+                key={member.companion.id}
+                title={member.line}
+                aria-label={`让${member.companion.name}担任领队，${member.roleLabel}`}
+                aria-pressed={plan.lead.companion.id === member.companion.id}
+                disabled={disabled || phase !== "idle"}
+                onClick={() => {
+                  setLeadId(member.companion.id);
+                  setError("");
+                }}
+              >
                 <PetCompanionAvatar
                   kind={member.companion.kind}
                   name={member.companion.name}
@@ -102,14 +119,18 @@ export function PetTeamHuddleCard({
                   <strong>{member.companion.name}</strong>
                   <small>{member.roleLabel}</small>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
+          <p className="pet-team-huddle-lead" aria-live="polite">
+            <strong>领队：{plan.lead.companion.name}</strong>
+            <span>{plan.lead.line}</span>
+          </p>
           <p className="pet-team-huddle-summary" aria-live="polite">
             {phase === "preparing"
               ? "小队正在碰头，把第一步和专注节奏准备好…"
               : phase === "ready"
-                ? "小队已就位，准备好就开始这一段专注。"
+                ? `${plan.lead.companion.name}已经带队就位，准备好就开始这一段专注。`
                 : plan.summary}
           </p>
           <div className="pet-team-huddle-actions">
