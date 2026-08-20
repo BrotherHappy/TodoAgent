@@ -94,6 +94,7 @@ flowchart LR
 - 项目实体通过 `projects:list/create/update/delete` 类型化 IPC 暴露给渲染层。旧状态文件缺少 `projects` 时由 LocalStore 在内存中迁移为空对象；数据导出/导入包含项目元数据，复制策略为冲突项目生成新 ID 并同时重映射任务及撤销快照中的 `projectId`，避免复制后任务指向原项目。
 - 清单实体通过 `lists:list/create/update/delete` 类型化 IPC 暴露给渲染层。旧状态文件缺少 `lists` 时由 LocalStore 在内存中迁移为空对象；数据导出/导入包含清单元数据，复制策略为冲突清单生成新 ID 并同时重映射任务及撤销快照中的 `listId`，避免复制后任务指向原清单。删除清单与解除任务关联在同一 LocalStore 事务内完成，且不产生可恢复的任务操作。
 - Quick Capture：无边框、快捷键呼出、失焦可恢复草稿；解析预览后可选择普通任务、无日期/项目/提醒的本地暂存或 Todo Pet 日记。任务路径复用现有 TaskService 与飞书写入边界，暂存路径只创建本地任务并清除排程字段，日记路径通过 `pet:diary-from-capture` 受限 IPC 写入标题与用户原文，不访问任务或凭据；可选 `captureId` 在 PetService 内幂等重试。Todo Pet 任务栏直接调用同一 `capture:parse` IPC，复用日期、标签、情境、时长、循环与 `p1`–`p4` 优先级解析，但强制组装 `source: local`，不从宠物小窗隐式触发飞书写入；解析服务不可用时回退原始标题。
+- 命令面板：`src/renderer/CommandPalette.tsx` 是无副作用的可搜索命令视图；MainWindow 只提供已存在的导航、快速捕获、今日规划、Agent、显示宠物、设置和飞书同步回调。`⌘/Ctrl+K` 打开面板，弹窗状态会隔离返回、新建等全局快捷键；命令面板本身不持有任务快照、不新增 IPC 写入协议，所有任务和同步动作仍走原控制器与权限边界。
 - Todo Pet：唯一桌面悬浮窗口；透明不规则命中区、可拖动、置顶、多显示器，并支持紧凑、悬停预览、展开、专注和安静状态。
 - `src/renderer/focus-insights.ts` 从任务 `focusSessions` 及兼容的聚合专注字段投影一周节奏；`TimelinePage` 只读展示每日柱状图、总投入、专注段、平均时长和投入最多任务，不修改 `Task`、operation 或 Feishu payload。
 - `src/renderer/pet-task-drop-zones.ts` 只定义“专注 / 完成 / 稍后”三种任务搬运目标；`FloatingWindow` 在任务卡原生拖拽期间显示目标区，放下后复用现有 `startPetFocus`、`toggleTaskFromPet` 或 `heldTaskId` 气泡，不创建第二份任务。目标区只负责交互投影，权限、错误处理、撤销与飞书同步仍由原任务控制器和服务承接。

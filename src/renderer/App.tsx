@@ -144,6 +144,10 @@ import {
 } from "./focus-environment-sound";
 import { DailyPlanSheet } from "./DailyPlanSheet";
 import { InboxTriageSheet } from "./InboxTriageSheet";
+import {
+  CommandPalette,
+  type CommandPaletteAction,
+} from "./CommandPalette";
 import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
 import {
@@ -905,6 +909,7 @@ function Titlebar({
   search,
   onSearch,
   onNew,
+  onOpenCommands,
   onHome,
   onBack,
   syncState = "synced",
@@ -913,6 +918,7 @@ function Titlebar({
   search?: string;
   onSearch?: (value: string) => void;
   onNew?: () => void;
+  onOpenCommands?: () => void;
   onHome?: () => void;
   onBack?: () => void;
   syncState?: TaskSyncVisualState;
@@ -959,7 +965,19 @@ function Titlebar({
               <X size={15} aria-hidden="true" />
             </button>
           ) : (
-            <kbd>{isMacPlatform() ? "⌘ K" : "Ctrl K"}</kbd>
+            onOpenCommands ? (
+              <button
+                type="button"
+                className="title-search-command no-drag"
+                onClick={onOpenCommands}
+                aria-label="打开快速命令"
+                title="打开快速命令"
+              >
+                {isMacPlatform() ? "⌘ K" : "Ctrl K"}
+              </button>
+            ) : (
+              <kbd>{isMacPlatform() ? "⌘ K" : "Ctrl K"}</kbd>
+            )
           )}
         </label>
       )}
@@ -10948,6 +10966,7 @@ function MainWindow() {
   const projectState = useProjects();
   const listState = useLists();
   const [newTask, setNewTask] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [dailyPlanOpen, setDailyPlanOpen] = useState(false);
   const [dailyPlanDate, setDailyPlanDate] = useState(() => dateKey());
   const [dailyPlanTasks, setDailyPlanTasks] = useState<Task[]>([]);
@@ -11038,6 +11057,146 @@ function MainWindow() {
     },
     [],
   );
+  const openCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(true);
+  }, []);
+  const closeCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(false);
+  }, []);
+  const commandPaletteActions = useMemo<readonly CommandPaletteAction[]>(
+    () => [
+      {
+        id: "new-task",
+        label: "新建任务",
+        description: "打开完整编辑器，补充日期、提醒、标签或来源",
+        keywords: ["create", "new", "任务", "新增"],
+        shortcut: "⌘ N",
+        icon: <Plus size={16} />,
+        run: () => setNewTask(true),
+      },
+      {
+        id: "quick-capture",
+        label: "快速捕获",
+        description: "用一句话、语音或上下文快速记下新任务",
+        keywords: ["quick", "capture", "inbox", "快捷", "语音"],
+        shortcut: "⌘ ⇧ Space",
+        icon: <Clipboard size={16} />,
+        run: () => void window.desktopApi?.shell.showQuickCapture(),
+      },
+      {
+        id: "search-tasks",
+        label: "搜索任务",
+        description: "进入全部任务并聚焦搜索框",
+        keywords: ["search", "find", "搜索", "查找"],
+        shortcut: "⌘ F",
+        icon: <Search size={16} />,
+        run: () => {
+          navigateTaskCollection("all");
+          window.setTimeout(
+            () =>
+              document
+                .querySelector<HTMLInputElement>("[data-search-input]")
+                ?.focus(),
+            0,
+          );
+        },
+      },
+      {
+        id: "today",
+        label: "打开今天",
+        description: "回到 Today 工作台，查看当前计划",
+        keywords: ["today", "my day", "今天", "计划"],
+        icon: <Sun size={16} />,
+        run: () => navigateTaskCollection("today"),
+      },
+      {
+        id: "inbox",
+        label: "整理暂存",
+        description: "逐项处理尚未安排日期、项目或清单的任务",
+        keywords: ["inbox", "暂存", "整理"],
+        icon: <Inbox size={16} />,
+        run: () => navigateTaskCollection("inbox"),
+      },
+      {
+        id: "all",
+        label: "打开全部任务",
+        description: "查看完整任务事实，不受 Today 过滤影响",
+        keywords: ["all", "全部", "任务"],
+        icon: <LayoutList size={16} />,
+        run: () => navigateTaskCollection("all"),
+      },
+      {
+        id: "plan-today",
+        label: "一起规划今天",
+        description: "预览容量、依赖和预计时长后安排 Today",
+        keywords: ["plan", "planner", "规划", "排程", "容量"],
+        icon: <CalendarDays size={16} />,
+        run: () => {
+          navigateTaskCollection("today");
+          openDailyPlan();
+        },
+      },
+      {
+        id: "pet",
+        label: "打开 Todo Pet 小窝",
+        description: "查看成长、日记、回顾和陪伴设置",
+        keywords: ["pet", "home", "小窝", "宠物"],
+        icon: <UserRound size={16} />,
+        run: () => navigate("pet"),
+      },
+      {
+        id: "agent",
+        label: "和 Agent 聊聊",
+        description: "进入流式 Markdown 对话，先查询再确认任务操作",
+        keywords: ["agent", "chat", "AI", "对话"],
+        icon: <Sparkles size={16} />,
+        run: () => navigate("agent"),
+      },
+      {
+        id: "sync",
+        label: "同步飞书",
+        description: "打开同步页并手动刷新当前连接",
+        keywords: ["sync", "feishu", "飞书", "刷新"],
+        icon: <RefreshCw size={16} />,
+        run: () => {
+          navigate("sync");
+          void window.desktopApi?.feishu
+            .syncNow()
+            .then((report) =>
+              notify(
+                report.issue
+                  ? feishuSyncIssueCopy(report.issue)
+                  : `同步完成：拉取 ${report.pulled}，上传 ${report.pushed}`,
+                report.issue ? "error" : "success",
+              ),
+            )
+            .catch((reason) =>
+              notify(
+                reason instanceof Error ? reason.message : "同步失败，请稍后重试",
+                "error",
+              ),
+            );
+        },
+      },
+      {
+        id: "show-pet",
+        label: "显示桌面宠物",
+        description: "重新显示并唤起置顶的 Todo Pet",
+        keywords: ["floating", "pet", "show", "悬浮", "显示"],
+        icon: <PanelTop size={16} />,
+        run: () => void window.desktopApi?.shell.setFloatingVisible(true),
+      },
+      {
+        id: "settings",
+        label: "打开设置",
+        description: "配置快捷键、同步、模型、提醒和宠物行为",
+        keywords: ["settings", "preferences", "设置", "偏好"],
+        icon: <Settings size={16} />,
+        run: () => navigate("settings"),
+      },
+    ],
+    [navigate, navigateTaskCollection, notify, openDailyPlan],
+  );
   useEffect(
     () =>
       window.desktopApi?.events.onNotification((event) => {
@@ -11120,7 +11279,7 @@ function MainWindow() {
     "trash",
   ].includes(route);
   const modalOpen = Boolean(
-    newTask || dailyPlanOpen || activeReminder || onboarding,
+    newTask || commandPaletteOpen || dailyPlanOpen || activeReminder || onboarding,
   );
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -11130,7 +11289,11 @@ function MainWindow() {
       const shortcutKey =
         (event.metaKey || event.ctrlKey) &&
         ["k", "n"].includes(event.key.toLocaleLowerCase());
-      if (modalOpen) {
+      if (modalOpen && !commandPaletteOpen) {
+        if (isBackShortcut || shortcutKey) event.preventDefault();
+        return;
+      }
+      if (commandPaletteOpen) {
         if (isBackShortcut || shortcutKey) event.preventDefault();
         return;
       }
@@ -11144,16 +11307,7 @@ function MainWindow() {
         event.key.toLocaleLowerCase() === "k"
       ) {
         event.preventDefault();
-        if (!isTaskRoute) {
-          navigateTaskCollection("all");
-        }
-        window.setTimeout(
-          () =>
-            document
-              .querySelector<HTMLInputElement>("[data-search-input]")
-              ?.focus(),
-          0,
-        );
+        setCommandPaletteOpen(true);
       }
       if (
         (event.metaKey || event.ctrlKey) &&
@@ -11165,7 +11319,7 @@ function MainWindow() {
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [goBack, isTaskRoute, modalOpen, navigateTaskCollection]);
+  }, [commandPaletteOpen, goBack, modalOpen]);
   const feishuState = feishuSyncVisualState(feishuStatus);
   const syncState: TaskSyncVisualState = controller.tasks.some(
     (task) => taskSyncVisualState(task.sync.status) === "error",
@@ -11219,6 +11373,7 @@ function MainWindow() {
           search={isTaskRoute ? search : undefined}
           onSearch={isTaskRoute ? setSearch : undefined}
           onNew={() => setNewTask(true)}
+          onOpenCommands={openCommandPalette}
           onHome={() => navigateTaskCollection("today")}
           onBack={route === "today" ? undefined : goBack}
           syncState={syncState}
@@ -11407,6 +11562,12 @@ function MainWindow() {
             projects={projectState.projects}
             lists={listState.lists}
             notify={notify}
+          />
+        )}
+        {commandPaletteOpen && (
+          <CommandPalette
+            actions={commandPaletteActions}
+            onClose={closeCommandPalette}
           />
         )}
         {dailyPlanOpen && (
