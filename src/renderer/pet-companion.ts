@@ -1,5 +1,5 @@
 import type { Task } from "../shared/models";
-import type { AppSettings } from "../shared/settings";
+import { defaultSettings, type AppSettings, type TaskUrgencyWeights } from "../shared/settings";
 import type { ProactiveMessageRecord, WeatherSnapshot } from "../shared/pet-types";
 
 export interface PetCompanionContext {
@@ -63,18 +63,99 @@ const nextTaskPriority: Record<Task["priority"], number> = {
   none: 4,
 };
 
+const defaultUrgencyWeights: TaskUrgencyWeights = defaultSettings.planning.urgencyWeights;
+
 function taskDatePart(value: string | undefined): string | undefined {
   if (!value) return undefined;
   return /^\d{4}-\d{2}-\d{2}$/u.test(value) ? value : value.slice(0, 10);
 }
 
-function taskReason(task: Task, date: string): string {
-  const dueDate = taskDatePart(task.dueAt);
-  if (dueDate !== undefined && dueDate < date) return "已经逾期，先把它往前推进一点";
-  if (dueDate === date) return "今天截止，适合先处理";
-  if (task.plannedDate === date) return "已经安排在今天";
-  if (task.priority === "urgent" || task.priority === "high") return "优先级较高";
-  return "这是当前最容易开始的一项";
+function daysBetween(from: string, to: string): number {
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return 0;
+  return Math.round((toMs - fromMs) / (24 * 60 * 60_000));
+}
+
+function boundedWeight(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(100, value))
+    : fallback;
+}
+
+interface NextTaskSignals {
+  deadline: number;
+  plannedToday: number;
+  priority: number;
+  quickWin: number;
+}
+
+function nextTaskSignals(task: Task, date: string): NextTaskSignals {
+  const due = taskDatePart(task.dueAt);
+  let deadlineScore = 0;
+  if (due !== undefined) {
+    const days = daysBetween(date, due);
+    if (days < 0) {
+      deadlineScore = 100 + Math.min(50, Math.abs(days) * 10);
+    } else if (days === 0) {
+      deadlineScore = 100;
+    } else if (days <= 7) {
+      deadlineScore = Math.max(20, 100 - days * 12);
+    }
+  }
+  const plannedScore = task.plannedDate === date
+    ? 100
+    : task.plannedDate !== undefined && task.plannedDate < date
+      ? 60
+      : 0;
+  const priorityScore = (nextTaskPriority[task.priority] >= 4
+    ? 0
+    : ((4 - nextTaskPriority[task.priority]) / 4) * 100);
+  const estimate = Number(task.estimatedMinutes);
+  const quickWinScore = Number.isFinite(estimate) && estimate > 0
+    ? Math.max(0, 100 - Math.min(100, estimate))
+    : 0;
+  return {
+    deadline: deadlineScore,
+    plannedToday: plannedScore,
+    priority: priorityScore,
+    quickWin: quickWinScore,
+  };
+}
+
+function nextTaskScore(task: Task, date: string, weights: TaskUrgencyWeights): number {
+  const signals = nextTaskSignals(task, date);
+  return (
+    signals.deadline * boundedWeight(weights.deadline, defaultUrgencyWeights.deadline) / 100
+    + signals.plannedToday * boundedWeight(weights.plannedToday, defaultUrgencyWeights.plannedToday) / 100
+    + signals.priority * boundedWeight(weights.priority, defaultUrgencyWeights.priority) / 100
+    + signals.quickWin * boundedWeight(weights.quickWin, defaultUrgencyWeights.quickWin) / 100
+  );
+}
+
+function taskReason(
+  task: Task,
+  date: string,
+  weights: TaskUrgencyWeights,
+): string {
+  const signals = nextTaskSignals(task, date);
+  const contributions: Array<[number, string]> = [
+    [
+      signals.deadline * boundedWeight(weights.deadline, defaultUrgencyWeights.deadline),
+      taskDatePart(task.dueAt) !== undefined && taskDatePart(task.dueAt)! < date
+        ? "已经逾期，先把它往前推进一点"
+        : taskDatePart(task.dueAt) === date
+          ? "今天截止，适合先处理"
+          : "截止日期临近",
+    ],
+    [signals.plannedToday * boundedWeight(weights.plannedToday, defaultUrgencyWeights.plannedToday), "已经安排在今天"],
+    [signals.priority * boundedWeight(weights.priority, defaultUrgencyWeights.priority), "优先级较高"],
+    [signals.quickWin * boundedWeight(weights.quickWin, defaultUrgencyWeights.quickWin), "这是当前最容易开始的一项"],
+  ];
+  const primary = contributions
+    .filter(([score]) => score > 0)
+    .sort((left, right) => right[0] - left[0])[0];
+  return primary?.[1] ?? "这是当前最容易开始的一项";
 }
 
 /**
@@ -84,6 +165,7 @@ function taskReason(task: Task, date: string): string {
 export function recommendNextTask(
   tasks: readonly Task[],
   date: string,
+  weights: TaskUrgencyWeights = defaultUrgencyWeights,
 ): PetNextTask | undefined {
   const visible = tasks.filter(
     (task) => task.status === "open" && !task.deletedAt,
@@ -105,16 +187,10 @@ export function recommendNextTask(
     ? actionable
     : visible.filter((task) => task.dependencyIds.length === 0);
   const sorted = [...candidates].sort((left, right) => {
-    const urgency = (task: Task): number => {
-      const due = taskDatePart(task.dueAt);
-      if (due !== undefined && due < date) return 0;
-      if (due === date || task.plannedDate === date) return 1;
-      return 2;
-    };
     const leftDue = taskDatePart(left.dueAt) ?? "9999-12-31";
     const rightDue = taskDatePart(right.dueAt) ?? "9999-12-31";
     return (
-      urgency(left) - urgency(right) ||
+      nextTaskScore(right, date, weights) - nextTaskScore(left, date, weights) ||
       nextTaskPriority[left.priority] - nextTaskPriority[right.priority] ||
       leftDue.localeCompare(rightDue) ||
       left.privateOrder - right.privateOrder ||
@@ -124,7 +200,7 @@ export function recommendNextTask(
   });
   const task = sorted[0];
   return task
-    ? { taskId: task.id, taskTitle: task.title, reason: taskReason(task, date) }
+    ? { taskId: task.id, taskTitle: task.title, reason: taskReason(task, date, weights) }
     : undefined;
 }
 
@@ -135,6 +211,7 @@ export function buildPetProactiveSuggestion(input: {
   petName: string;
   syncProblem?: boolean;
   privacyMode?: boolean;
+  urgencyWeights?: TaskUrgencyWeights;
 }): PetProactiveSuggestion {
   const open = input.tasks.filter(
     (task) => task.status === "open" && !task.deletedAt,
@@ -149,7 +226,7 @@ export function buildPetProactiveSuggestion(input: {
   );
   const nextTask = input.privacyMode
     ? undefined
-    : recommendNextTask(input.tasks, date);
+    : recommendNextTask(input.tasks, date, input.urgencyWeights);
   const hour = input.now.getHours();
   if (input.syncProblem) {
     return {

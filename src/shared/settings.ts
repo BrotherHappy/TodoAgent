@@ -67,6 +67,21 @@ export interface FocusSettings {
   environmentSound: 'off' | 'rain' | 'forest' | 'cafe' | 'white-noise';
 }
 
+/**
+ * Transparent, local-only weights used when the pet chooses a next task.
+ * They are deliberately bounded rather than exposing an opaque AI score.
+ */
+export interface TaskUrgencyWeights {
+  deadline: number;
+  plannedToday: number;
+  priority: number;
+  quickWin: number;
+}
+
+export interface PlanningSettings {
+  urgencyWeights: TaskUrgencyWeights;
+}
+
 export interface WeatherSettings {
   enabled: boolean;
   city: string;
@@ -161,6 +176,7 @@ export interface AppSettings {
   notifications: NotificationSettings;
   floating: FloatingSettings;
   focus: FocusSettings;
+  planning: PlanningSettings;
   weather: WeatherSettings;
   pet: PetBehaviorSettings;
   ai: AiProviderSettings;
@@ -215,6 +231,14 @@ export const defaultSettings: AppSettings = {
     autoStartBreak: false,
     autoStartNextRound: false,
     environmentSound: 'off',
+  },
+  planning: {
+    urgencyWeights: {
+      deadline: 70,
+      plannedToday: 90,
+      priority: 40,
+      quickWin: 10,
+    },
   },
   weather: {
     enabled: false,

@@ -78,6 +78,14 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     notifications: { ...defaultSettings.notifications, ...value?.notifications },
     floating: { ...defaultSettings.floating, ...value?.floating },
     focus: { ...defaultSettings.focus, ...value?.focus },
+    planning: {
+      ...defaultSettings.planning,
+      ...value?.planning,
+      urgencyWeights: {
+        ...defaultSettings.planning.urgencyWeights,
+        ...value?.planning?.urgencyWeights,
+      },
+    },
     weather: { ...defaultSettings.weather, ...value?.weather },
     pet: { ...defaultSettings.pet, ...value?.pet },
     ai: { ...defaultSettings.ai, ...value?.ai },
@@ -181,6 +189,32 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   if (!environmentSounds.has(merged.focus.environmentSound)) {
     merged.focus.environmentSound = defaultSettings.focus.environmentSound;
   }
+  merged.planning.urgencyWeights = {
+    deadline: clampInteger(
+      merged.planning.urgencyWeights.deadline,
+      defaultSettings.planning.urgencyWeights.deadline,
+      0,
+      100,
+    ),
+    plannedToday: clampInteger(
+      merged.planning.urgencyWeights.plannedToday,
+      defaultSettings.planning.urgencyWeights.plannedToday,
+      0,
+      100,
+    ),
+    priority: clampInteger(
+      merged.planning.urgencyWeights.priority,
+      defaultSettings.planning.urgencyWeights.priority,
+      0,
+      100,
+    ),
+    quickWin: clampInteger(
+      merged.planning.urgencyWeights.quickWin,
+      defaultSettings.planning.urgencyWeights.quickWin,
+      0,
+      100,
+    ),
+  };
   if (!petActionPacks.has(merged.pet.actionPack)) {
     merged.pet.actionPack = defaultSettings.pet.actionPack;
   }
@@ -277,6 +311,14 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       autoStartBreak: merged.focus.autoStartBreak,
       autoStartNextRound: merged.focus.autoStartNextRound,
       environmentSound: merged.focus.environmentSound,
+    },
+    planning: {
+      urgencyWeights: {
+        deadline: merged.planning.urgencyWeights.deadline,
+        plannedToday: merged.planning.urgencyWeights.plannedToday,
+        priority: merged.planning.urgencyWeights.priority,
+        quickWin: merged.planning.urgencyWeights.quickWin,
+      },
     },
     weather: {
       enabled: merged.weather.enabled,

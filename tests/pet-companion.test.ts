@@ -141,6 +141,32 @@ describe("pet companion proactive behavior", () => {
     expect(suggestion.nextTask?.taskId).toBe("dependent");
   });
 
+  it("uses the user's transparent urgency weights when choosing the next task", () => {
+    const tasks = [
+      makeTask("planned", "今天计划", {
+        plannedDate: "2026-08-15",
+        priority: "medium",
+        estimatedMinutes: 90,
+      }),
+      makeTask("quick", "五分钟小事", {
+        priority: "low",
+        estimatedMinutes: 5,
+      }),
+    ];
+    const suggestion = buildPetProactiveSuggestion({
+      now: new Date("2026-08-15T08:00:00"),
+      tasks,
+      petName: "小序",
+      urgencyWeights: {
+        deadline: 0,
+        plannedToday: 0,
+        priority: 0,
+        quickWin: 100,
+      },
+    });
+    expect(suggestion.nextTask?.taskId).toBe("quick");
+  });
+
   it("removes task references from proactive copy in privacy mode", () => {
     const suggestion = buildPetProactiveSuggestion({
       now: new Date("2026-08-15T08:00:00"),

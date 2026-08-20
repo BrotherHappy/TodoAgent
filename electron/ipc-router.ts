@@ -108,6 +108,18 @@ const settingsSchema = z
         ]),
       })
       .strict(),
+    planning: z
+      .object({
+        urgencyWeights: z
+          .object({
+            deadline: z.number().int().min(0).max(100),
+            plannedToday: z.number().int().min(0).max(100),
+            priority: z.number().int().min(0).max(100),
+            quickWin: z.number().int().min(0).max(100),
+          })
+          .strict(),
+      })
+      .strict(),
     weather: z
       .object({
         enabled: z.boolean(),

@@ -109,6 +109,7 @@ import {
   type AiAuthenticationMode,
   type AppSettings,
   type PetTab,
+  type TaskUrgencyWeights,
 } from "../shared/settings";
 import type {
   AgentApprovalView,
@@ -271,6 +272,17 @@ const customFieldTypeLabels: Record<CustomFieldType, string> = {
   url: "链接",
   checkbox: "勾选",
 };
+
+const urgencyWeightLabels: Array<{
+  key: keyof TaskUrgencyWeights;
+  label: string;
+  description: string;
+}> = [
+  { key: "deadline", label: "截止日期", description: "逾期、今天或临近截止的任务" },
+  { key: "plannedToday", label: "今天计划", description: "已经放入 Today 的任务" },
+  { key: "priority", label: "优先级", description: "任务自身的紧急 / 高 / 中 / 低优先级" },
+  { key: "quickWin", label: "短任务", description: "预计时长较短、容易马上开始的任务" },
+];
 
 interface MainNavigationState {
   route: MainRoute;
@@ -7869,6 +7881,67 @@ function SettingsPage({
                 label="关闭后驻留"
               />
             </div>
+            <div className="settings-subheading">
+              <span>任务规划</span>
+              <p>调整 Todo Pet 选择“下一步”时看重什么；只影响本地建议，不改任务事实或飞书。</p>
+            </div>
+            {urgencyWeightLabels.map(({ key, label, description }) => (
+              <div className="settings-row" key={key}>
+                <div>
+                  <strong>{label}</strong>
+                  <p>{description}</p>
+                </div>
+                <div className="settings-number-control">
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={5}
+                    aria-label={`${label}权重`}
+                    value={appSettings.planning.urgencyWeights[key]}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      if (!Number.isFinite(next)) return;
+                      setAppSettings((current) => ({
+                        ...current,
+                        planning: {
+                          ...current.planning,
+                          urgencyWeights: {
+                            ...current.planning.urgencyWeights,
+                            [key]: Math.min(100, Math.max(0, Math.round(next))),
+                          },
+                        },
+                      }));
+                    }}
+                    onBlur={() => void persist(appSettings, "任务规划偏好已更新")}
+                  />
+                  <span>/ 100</span>
+                </div>
+              </div>
+            ))}
+            <div className="settings-row">
+              <div>
+                <strong>恢复默认权重</strong>
+                <p>截止 70 · 今天 90 · 优先级 40 · 短任务 10</p>
+              </div>
+              <button
+                type="button"
+                className="soft-button"
+                disabled={saving}
+                onClick={() =>
+                  void persist(
+                    {
+                      ...appSettings,
+                      planning: structuredClone(defaultSettings.planning),
+                    },
+                    "已恢复默认规划偏好",
+                  )
+                }
+              >
+                恢复默认
+              </button>
+            </div>
           </section>
         )}
         {section === "floating" && (
@@ -12565,6 +12638,7 @@ function FloatingWindow() {
         petName,
         syncProblem: feishuStatus?.state === "error",
         privacyMode,
+        urgencyWeights: petSettings.planning.urgencyWeights,
       });
       lastProactiveAtRef.current = Date.now();
       proactiveMessageRef.current = suggestion.message;

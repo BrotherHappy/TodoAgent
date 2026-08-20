@@ -151,13 +151,14 @@ describe('SettingsService', () => {
     expect(migrated.get().pet.proactiveDailyLimit).toBe(20);
   });
 
-  it('migrates missing Todo Pet domains and normalizes malformed focus and weather values', async () => {
+  it('migrates missing Todo Pet domains and normalizes malformed focus, planning and weather values', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-pet-settings-'));
     const service = new SettingsService(root, encryption);
     await service.load();
     const settingsPath = path.join(root, 'settings.v1.json');
     const raw = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>;
     delete raw.focus;
+    delete raw.planning;
     delete raw.weather;
     delete raw.pet;
     await writeFile(settingsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
@@ -169,6 +170,12 @@ describe('SettingsService', () => {
     expect(migrated.get().pet).toMatchObject({
       interactionsEnabled: true,
       proactiveMessages: true,
+    });
+    expect(migrated.get().planning.urgencyWeights).toEqual({
+      deadline: 70,
+      plannedToday: 90,
+      priority: 40,
+      quickWin: 10,
     });
 
     const current = migrated.get();
@@ -186,12 +193,26 @@ describe('SettingsService', () => {
         cacheMinutes: Number.NaN,
         latitude: Number.POSITIVE_INFINITY,
       },
+      planning: {
+        urgencyWeights: {
+          deadline: 999,
+          plannedToday: -10,
+          priority: Number.NaN,
+          quickWin: 42.7,
+        },
+      },
     });
     expect(migrated.get().focus).toMatchObject({
       focusMinutes: 25,
       shortBreakMinutes: 60,
       cycles: 1,
       environmentSound: 'off',
+    });
+    expect(migrated.get().planning.urgencyWeights).toEqual({
+      deadline: 100,
+      plannedToday: 0,
+      priority: 40,
+      quickWin: 43,
     });
     expect(migrated.get().weather.cacheMinutes).toBe(45);
     expect(migrated.get().weather.latitude).toBeUndefined();

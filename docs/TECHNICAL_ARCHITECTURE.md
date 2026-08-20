@@ -64,6 +64,7 @@ flowchart LR
 - 周视图项目健康由 src/renderer/project-health.ts 纯函数从任务快照投影生成：依赖、逾期、排程和容量只用于解释，不写回任务；本周容量小时和每周 Check-in 记录属于本地偏好/仪式数据，使用带周起始日校验的 localStorage，跨周不会误继承。
 - 工作周期由 src/renderer/work-cycles.ts 纯函数从同一任务快照投影生成：以 Monday-first 为边界支持 1 周 / 2 周，容量由本地每周可投入小时缩放；只统计已有 `plannedDate`、开始时间或时间块的开放任务作为已安排负载，并单独列出无日期/待排候选。该模块不新增 Task 字段、不创建 IPC、不进入 Feishu payload，前后周期与周期长度只保存在 renderer localStorage。
 - 晨间简报的“只剩 2 小时方案”直接调用 `src/shared/daily-planner.ts` 的 `suggestDailyPlan`，传入 120 分钟容量和最多 3 项上限；它只从当前开放任务快照生成候选与 `primaryReason`，不写入任务、不创建 operation。用户点击确认后才进入已有 `DailyPlanSheet` 的预览、原子应用和撤销流程。
+- `AppSettings.planning.urgencyWeights` 是本地可迁移偏好；`src/renderer/pet-companion.ts` 将截止、Today、优先级和短任务映射为可解释的确定性分数，`App.tsx` 传入 Todo Pet 的下一步建议。设置服务将每项限制在 0–100，数据导入允许缺省并回退默认；权重不进入 Task、operation 或 Feishu payload。
 - 今日规划同样将 `DailyPlanConstraints`（本地可用起止时段、过渡 `bufferMinutes`、`minimumBlockMinutes`）传给 `suggestDailyPlan`；规划器返回 `effectiveCapacityMinutes`、`availableWindowMinutes` 和每项的 `belowMinimumBlock` / `short-block` 原因。它只改变建议排序与解释，不进入 `TaskService.applyTodayPlan` 的飞书 payload；用户仍可在 `DailyPlanSheet` 中手动加入短任务并一次确认。
 - `src/shared/daily-schedule.ts` 由 `DailyPlanSheet` 调用生成确认前的只读时间块预览：当天已有 `timeBlock` / 开始时间的任务固定在原位，其余任务按选中顺序填入可用时段并留出过渡缓冲；重叠、超出窗口和无空档项作为显式冲突返回。该纯函数不修改 Task、不创建 operation、不增加 IPC，也不进入 Feishu 写回 payload，用户确认后仍只应用 Today 私人计划字段。
 - `src/shared/multi-day-schedule.ts` 在当天排不下时生成未来 5 个工作日的只读顺延投影：保留固定时间块、跳过周末弹性容量、在截止日期后停止候选，并返回 `past-deadline` / `no-capacity` / `horizon` 原因。它只接受当前任务快照和规划约束，不写 `plannedDate` / `timeBlock`，不创建 IPC 或 operation，UI 也不把预览结果当成已保存事实。

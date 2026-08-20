@@ -835,7 +835,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   const settings = expectRecord(value, path);
   assertOnlyKeys(settings, [
     'schemaVersion', 'theme', 'launchAtLogin', 'closeToTray', 'quickCaptureShortcut',
-    'notifications', 'floating', 'focus', 'weather', 'pet', 'ai', 'feishu', 'modelDataScope', 'persona', 'permissionMode',
+    'notifications', 'floating', 'focus', 'planning', 'weather', 'pet', 'ai', 'feishu', 'modelDataScope', 'persona', 'permissionMode',
     'onboardingComplete',
   ], path);
   if (settings.schemaVersion !== 1) throw new DataImportValidationError('Unsupported settings schema', `${path}.schemaVersion`);
@@ -936,6 +936,20 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectBoolean(focus.autoStartBreak, `${path}.focus.autoStartBreak`);
   expectBoolean(focus.autoStartNextRound, `${path}.focus.autoStartNextRound`);
   expectEnum(focus.environmentSound, ['off', 'rain', 'forest', 'cafe', 'white-noise'] as const, `${path}.focus.environmentSound`);
+
+  const planning = settings.planning === undefined
+    ? expectRecord(clone(defaultSettings.planning), `${path}.planning`)
+    : expectRecord(settings.planning, `${path}.planning`);
+  assertOnlyKeys(planning, ['urgencyWeights'], `${path}.planning`);
+  const urgencyWeights = expectRecord(planning.urgencyWeights, `${path}.planning.urgencyWeights`);
+  assertOnlyKeys(urgencyWeights, ['deadline', 'plannedToday', 'priority', 'quickWin'], `${path}.planning.urgencyWeights`);
+  Object.keys(defaultSettings.planning.urgencyWeights).forEach((key) =>
+    expectNumber(urgencyWeights[key], `${path}.planning.urgencyWeights.${key}`, {
+      integer: true,
+      minimum: 0,
+      maximum: 100,
+    }),
+  );
 
   const weather = settings.weather === undefined
     ? expectRecord(clone(defaultSettings.weather), `${path}.weather`)
@@ -1088,6 +1102,9 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     topMode: 'always',
   } as AppSettings['floating'];
   validated.focus = clone(focus) as unknown as AppSettings['focus'];
+  validated.planning = clone({
+    urgencyWeights: clone(urgencyWeights),
+  }) as unknown as AppSettings['planning'];
   validated.weather = clone(weather) as unknown as AppSettings['weather'];
   validated.pet = clone(pet) as unknown as AppSettings['pet'];
   validated.ai = {
