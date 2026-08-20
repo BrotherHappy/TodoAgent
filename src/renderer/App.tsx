@@ -7992,8 +7992,7 @@ function PetHomePage({
             {roomSeason && (
               <div
                 className={`pet-room-seasonal-layer pet-room-seasonal-${roomSeason.season}`}
-                aria-label={`${roomSeason.label}装饰`}
-                role="presentation"
+                aria-hidden="true"
               >
                 {petRoomSeasonalDecorations(roomSeason.season).map((decoration) => (
                   <span
