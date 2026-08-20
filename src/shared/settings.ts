@@ -163,6 +163,8 @@ export interface PersonaSettings {
   responseLength: 'short' | 'balanced' | 'detailed';
   proactiveLevel: 'quiet' | 'balanced' | 'active';
   reminderStrength: 'gentle' | 'normal' | 'firm';
+  /** Keep Agent language aligned with the live Todo Pet personality. */
+  syncWithPet: boolean;
 }
 
 export interface FeishuIntegrationSettings {
@@ -323,6 +325,7 @@ export const defaultSettings: AppSettings = {
     responseLength: 'balanced',
     proactiveLevel: 'balanced',
     reminderStrength: 'gentle',
+    syncWithPet: true,
   },
   permissionMode: 'standard',
   onboardingComplete: false,

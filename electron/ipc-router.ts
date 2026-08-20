@@ -235,6 +235,7 @@ const settingsSchema = z
         responseLength: z.enum(["short", "balanced", "detailed"]),
         proactiveLevel: z.enum(["quiet", "balanced", "active"]),
         reminderStrength: z.enum(["gentle", "normal", "firm"]),
+        syncWithPet: z.boolean().optional(),
       })
       .strict(),
     permissionMode: z.enum(["read-only", "standard", "full-access"]),

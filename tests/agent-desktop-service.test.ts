@@ -29,6 +29,7 @@ import type {
   ModelToolCall,
 } from "../src/shared/agent-types";
 import type { AgentApprovalView } from "../src/shared/desktop-api";
+import type { PetPersonality } from "../src/shared/pet-types";
 
 const temporaryDirectories: string[] = [];
 
@@ -123,6 +124,7 @@ interface HarnessOptions {
   timeZone?: () => string;
   sourcePolicies?: AgentTaskSourcePolicy[];
   feishuAccountId?: string;
+  petPersonality?: PetPersonality;
 }
 
 const createHarness = async (options: HarnessOptions = {}) => {
@@ -156,6 +158,10 @@ const createHarness = async (options: HarnessOptions = {}) => {
     settings,
     auditLog,
     usageBudget,
+    getPetPersonality:
+      options.petPersonality === undefined
+        ? undefined
+        : () => options.petPersonality,
     listMorningTasks: () => tasks.listTasks({ view: "today" }),
     getTaskForSyncReceipt: (id) => tasks.getTask(id, true),
     createToolRegistry: ({ sourcePolicy }) => {
@@ -746,6 +752,35 @@ describe("AgentDesktopService", () => {
     expect(systemPrompt).toContain("温暖、鼓励");
     expect(systemPrompt).toContain("主动指出遗漏");
     expect(systemPrompt).toContain("回答长度：short");
+  });
+
+  it("links the live Todo Pet personality to Agent language and supports opting out", async () => {
+    const firstGateway = new ScriptedGateway([finalCompletion("活泼回应")]);
+    const secondGateway = new ScriptedGateway([finalCompletion("独立回应")]);
+    const harness = await createHarness({
+      gateways: [firstGateway, secondGateway],
+      petPersonality: "playful",
+    });
+    await configureAi(harness.settings);
+
+    await harness.service.send({ message: "给我一个开始任务的建议" });
+    const linkedPrompt = firstGateway.requests[0].messages.find(
+      (message) => message.role === "system",
+    )?.content;
+    expect(linkedPrompt).toContain("与 Todo Pet 保持同一陪伴性格（playful）");
+    expect(linkedPrompt).toContain("可以有一点轻松的比喻");
+
+    const current = harness.settings.get();
+    await harness.settings.replace({
+      ...current,
+      persona: { ...current.persona, syncWithPet: false },
+    });
+    await harness.service.send({ message: "现在独立回答" });
+    const independentPrompt = secondGateway.requests[0].messages.find(
+      (message) => message.role === "system",
+    )?.content;
+    expect(independentPrompt).toContain("不读取或推断 Todo Pet 性格");
+    expect(independentPrompt).not.toContain("与 Todo Pet 保持同一陪伴性格");
   });
 
   it("injects fresh device-local date, time, timezone, UTC offset, weekday, and default source policy on every Agent turn", async () => {

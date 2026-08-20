@@ -1136,13 +1136,14 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   assertOnlyKeys(scope, ['taskTitlesAndTimes', 'notes', 'feishuContent', 'attachmentText', 'chatHistory'], `${path}.modelDataScope`);
   Object.keys(scope).forEach((key) => expectBoolean(scope[key], `${path}.modelDataScope.${key}`));
   const persona = expectRecord(settings.persona, `${path}.persona`);
-  assertOnlyKeys(persona, ['preset', 'name', 'userName', 'responseLength', 'proactiveLevel', 'reminderStrength'], `${path}.persona`);
+  assertOnlyKeys(persona, ['preset', 'name', 'userName', 'responseLength', 'proactiveLevel', 'reminderStrength', 'syncWithPet'], `${path}.persona`);
   expectEnum(persona.preset, ['minimal', 'warm', 'calm', 'strict'] as const, `${path}.persona.preset`);
   expectString(persona.name, `${path}.persona.name`);
   expectString(persona.userName, `${path}.persona.userName`);
   expectEnum(persona.responseLength, ['short', 'balanced', 'detailed'] as const, `${path}.persona.responseLength`);
   expectEnum(persona.proactiveLevel, ['quiet', 'balanced', 'active'] as const, `${path}.persona.proactiveLevel`);
   expectEnum(persona.reminderStrength, ['gentle', 'normal', 'firm'] as const, `${path}.persona.reminderStrength`);
+  expectOptional(persona, 'syncWithPet', `${path}.persona`, expectBoolean);
   expectEnum(settings.permissionMode, ['read-only', 'standard', 'full-access'] as const, `${path}.permissionMode`);
   expectBoolean(settings.onboardingComplete, `${path}.onboardingComplete`);
   const validated = clone(settings) as unknown as AppSettings;
@@ -1191,6 +1192,11 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     ...clone(defaultSettings.feishu),
     ...(settings.feishu === undefined ? {} : clone(settings.feishu)),
   } as AppSettings['feishu'];
+  validated.persona = {
+    ...clone(defaultSettings.persona),
+    ...clone(persona),
+    syncWithPet: persona.syncWithPet !== false,
+  } as AppSettings['persona'];
   // Portable settings must never recreate OS credential references from
   // defaults after the export redaction step.
   delete validated.feishu.tokenCredentialId;

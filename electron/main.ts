@@ -910,6 +910,7 @@ async function startApplication(): Promise<void> {
     settings: settingsService,
     auditLog,
     usageBudget: modelUsageBudget,
+    getPetPersonality: () => petService?.snapshot().profile.personality,
     listMorningTasks: () => tasks.listTasks({ view: "today" }),
     getTaskForSyncReceipt: (id) => tasks.getTask(id, true),
     createToolRegistry: ({ sourcePolicy }) => {

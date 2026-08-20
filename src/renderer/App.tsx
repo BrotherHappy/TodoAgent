@@ -11299,6 +11299,25 @@ function SettingsPage({
             </div>
             <div className="settings-row">
               <div>
+                <strong>与 Todo Pet 同步人格</strong>
+                <p>开启后，Agent 会跟随小窝中的陪伴性格更新表达方式；不改变权限、工具或任务规则。</p>
+              </div>
+              <Switch
+                checked={appSettings.persona.syncWithPet !== false}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    persona: {
+                      ...appSettings.persona,
+                      syncWithPet: value,
+                    },
+                  }, "Agent 人格联动已更新")
+                }
+                label="与 Todo Pet 同步人格"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
                 <strong>主动程度</strong>
                 <p>决定 Agent 是否主动总结和建议下一步</p>
               </div>

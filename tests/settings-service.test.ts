@@ -214,6 +214,8 @@ describe('SettingsService', () => {
     delete raw.planning;
     delete raw.weather;
     delete raw.pet;
+    const rawPersona = raw.persona as Record<string, unknown>;
+    delete rawPersona.syncWithPet;
     await writeFile(settingsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
 
     const migrated = new SettingsService(root, encryption);
@@ -224,6 +226,7 @@ describe('SettingsService', () => {
       interactionsEnabled: true,
       proactiveMessages: true,
     });
+    expect(migrated.get().persona.syncWithPet).toBe(true);
     expect(migrated.get().planning.urgencyWeights).toEqual({
       deadline: 70,
       plannedToday: 90,

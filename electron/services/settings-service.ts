@@ -473,6 +473,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       responseLength: merged.persona.responseLength,
       proactiveLevel: merged.persona.proactiveLevel,
       reminderStrength: merged.persona.reminderStrength,
+      syncWithPet: merged.persona.syncWithPet !== false,
     },
     permissionMode: merged.permissionMode,
     onboardingComplete: merged.onboardingComplete,
