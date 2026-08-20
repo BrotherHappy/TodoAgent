@@ -237,6 +237,7 @@ import {
   PetCompanionAvatar,
   kindLabels as petCompanionKindLabels,
 } from "./PetCompanionAvatar";
+import { PetTeamHuddleCard } from "./PetTeamHuddleCard";
 import { petCompanionGreeting } from "./pet-companion-interactions";
 import {
   petInteractionFromPoint,
@@ -7623,6 +7624,7 @@ function PetHomePage({
   projects,
   onNavigate,
   onNavigateTask,
+  onStartFocus,
   onPlanTomorrow,
   onReviewAction,
 }: {
@@ -7631,6 +7633,7 @@ function PetHomePage({
   projects: readonly TaskProject[];
   onNavigate: (route: MainRoute) => void;
   onNavigateTask: (task: Task) => void;
+  onStartFocus: (task: Task) => Promise<void>;
   onPlanTomorrow: () => void;
   onReviewAction: (task: Task, action: PetReviewAction) => Promise<void>;
 }) {
@@ -8378,6 +8381,13 @@ function PetHomePage({
                 </div>
               )}
             </section>
+            <PetTeamHuddleCard
+              companions={snapshot.companions}
+              tasks={tasks}
+              disabled={busy}
+              onStartFocus={onStartFocus}
+              onOpenTask={onNavigateTask}
+            />
             <PetCollectionCard inventory={snapshot.inventory} />
           </div>
         </section>
@@ -13248,6 +13258,9 @@ function MainWindow() {
                   navigateTaskCollection(
                     task.status === "completed" ? "completed" : "all",
                   );
+                }}
+                onStartFocus={async (task) => {
+                  await timelineController.startFocus(task.id);
                 }}
                 onReviewAction={async (task, action) => {
                   if (action === "complete") {
