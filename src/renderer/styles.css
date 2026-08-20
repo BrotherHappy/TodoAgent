@@ -5350,6 +5350,37 @@ select {
   color: var(--app-brand-strong);
   background: color-mix(in srgb, var(--app-brand-soft) 76%, transparent);
 }
+.mini-saved-view-picker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  margin: 0 9px 7px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 16%, var(--app-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--app-brand-soft) 36%, transparent);
+}
+.mini-saved-view-picker label {
+  color: var(--app-text-soft);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.mini-saved-view-picker select {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  padding: 4px 6px;
+  color: var(--app-text);
+  background: var(--floating-surface-strong);
+  font: inherit;
+  font-size: 11px;
+}
+.mini-saved-view-picker select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--app-brand) 60%, transparent);
+  outline-offset: 1px;
+}
 .mini-content {
   flex: 1 1 auto;
   min-height: 0;

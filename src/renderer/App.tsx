@@ -164,6 +164,7 @@ import {
   updateProjectReminderModes,
   type ProjectReminderSelection,
 } from "./project-reminder-policy";
+import { filterTasksForPetView } from "./pet-smart-view";
 import {
   localDateTimeInputToIso,
   toLocalDateTimeInput,
@@ -334,6 +335,7 @@ type ReadyDataPreview = Extract<DataPreviewResultView, { status: "ready" }>;
 const floatingAgentDraftId = "floating-agent-prompt";
 const floatingTabStorageKey = "todoAgentFloatingTab";
 const floatingPetOnlyStorageKey = "todoAgentFloatingPetOnly";
+const floatingSmartViewStorageKey = "todoAgentFloatingSmartView";
 const mainNavigationStateKey = "todoAgentMainNavigation";
 
 function isPetTab(value: unknown): value is PetTab {
@@ -365,6 +367,15 @@ function readFloatingPetOnly(): boolean {
     return localStorage.getItem(floatingPetOnlyStorageKey) === "true";
   } catch {
     return false;
+  }
+}
+
+function readFloatingSmartView(): string | undefined {
+  try {
+    const saved = localStorage.getItem(floatingSmartViewStorageKey)?.trim();
+    return saved || undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -13125,6 +13136,8 @@ function FloatingWindow() {
   const suppressPetAvatarClickRef = useRef(false);
   const suppressPetAvatarClickTimerRef = useRef<number | undefined>(undefined);
   const [tab, setTab] = useState<PetTab>(readFloatingTab);
+  const [petSmartViews, setPetSmartViews] = useState<SmartViewDefinition[]>(() => readSmartViews());
+  const [petSmartViewId, setPetSmartViewId] = useState<string | undefined>(readFloatingSmartView);
   const [input, setInput] = useState("");
   const [creatingFloatingTask, setCreatingFloatingTask] = useState(false);
   const floatingCreateRef = useRef(false);
@@ -13383,6 +13396,28 @@ function FloatingWindow() {
       });
     }
   }, [tab]);
+  useEffect(() => {
+    const syncSmartViews = () => setPetSmartViews(readSmartViews());
+    // MainWindow and FloatingWindow have separate React trees but share the
+    // same origin storage. The storage event keeps the pet's picker current
+    // when a view is created or removed in the main app.
+    window.addEventListener("storage", syncSmartViews);
+    return () => window.removeEventListener("storage", syncSmartViews);
+  }, []);
+  useEffect(() => {
+    if (petSmartViewId && !petSmartViews.some((view) => view.id === petSmartViewId)) {
+      setPetSmartViewId(undefined);
+    }
+  }, [petSmartViewId, petSmartViews]);
+  useEffect(() => {
+    try {
+      if (petSmartViewId) localStorage.setItem(floatingSmartViewStorageKey, petSmartViewId);
+      else localStorage.removeItem(floatingSmartViewStorageKey);
+    } catch {
+      // A blocked storage area only loses the convenience of remembering the
+      // picker; the current view remains fully usable.
+    }
+  }, [petSmartViewId]);
   useEffect(
     () => () => {
       hoveringFloatingRef.current = false;
@@ -13469,9 +13504,21 @@ function FloatingWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [expanded, floatingChat.messages, tab]);
+  const activePetSmartView = petSmartViews.find((view) => view.id === petSmartViewId);
+  const petSmartViewTasks = useMemo(
+    () =>
+      activePetSmartView
+        ? filterTasksForPetView(allController.tasks, activePetSmartView, new Date(now))
+        : allController.tasks,
+    [activePetSmartView, allController.tasks, now],
+  );
   const isTaskTab = tab === "all" || tab === "today";
   const displayedTaskController =
     tab === "all" ? allController : todayController;
+  const displayedTaskList =
+    tab === "all" && activePetSmartView
+      ? petSmartViewTasks
+      : displayedTaskController.tasks;
   const elapsed = current
     ? current.focusElapsedSeconds +
       (current.focusStartedAt
@@ -15035,6 +15082,22 @@ function FloatingWindow() {
                 <ExternalLink size={15} />
               </button>
             </div>
+            {tab === "all" && petSmartViews.length > 0 && (
+              <div className="mini-saved-view-picker">
+                <label htmlFor="pet-saved-view">任务视图</label>
+                <select
+                  id="pet-saved-view"
+                  value={petSmartViewId ?? ""}
+                  aria-label="选择 Todo Pet 任务视图"
+                  onChange={(event) => setPetSmartViewId(event.target.value || undefined)}
+                >
+                  <option value="">全部任务</option>
+                  {petSmartViews.map((view) => (
+                    <option key={view.id} value={view.id}>{view.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div
               ref={miniContentRef}
               className={`mini-content ${tab === "chat" ? "mini-chat-content" : ""}`}
@@ -15074,7 +15137,7 @@ function FloatingWindow() {
                 </div>
               )}
               {isTaskTab &&
-                displayedTaskController.tasks.map((task) => (
+                displayedTaskList.map((task) => (
                   <div
                     className="mini-task"
                     key={task.id}
@@ -15113,9 +15176,15 @@ function FloatingWindow() {
                     </small>
                   </div>
                 ))}
-              {isTaskTab && !displayedTaskController.tasks.length && (
+              {isTaskTab && !displayedTaskList.length && (
                 <div className="empty-state">
-                  <p>{tab === "all" ? "还没有未完成任务" : "今天没有待办"}</p>
+                  <p>
+                    {tab === "all"
+                      ? activePetSmartView
+                        ? `“${activePetSmartView.name}”里没有未完成任务`
+                        : "还没有未完成任务"
+                      : "今天没有待办"}
+                  </p>
                 </div>
               )}
               {tab === "chat" &&

@@ -86,6 +86,7 @@ flowchart LR
 - 批量任务动作通过 `tasks:apply-bulk-action` 暴露为受限的判别联合（complete / reopen / move-to-today / trash / restore）。渲染层先收集精确任务 ID 和 `updatedAt` 基线，预览确认后主进程在一次 LocalStore 事务中先验证全部目标、角色、会签、回收站状态和基线，再写入一个 `bulk` operation；完成循环任务时生成的下一次任务也纳入同一 operation。普通任务和飞书任务沿用原有 `applyPatch` / `markSync` 边界，Today 安排只写私人计划字段；撤销复用快照冲突保护，不能把后续本地编辑或远端拉取覆盖掉。
 - 全局任务文本搜索只在主进程对已保存字段做确定性匹配，除标题/备注/来源外包含附件名称与 MIME、链接名称/地址、自定义字段键值、研究卡标题/摘要/行动项与来源；不会读取本地附件正文，也不会因搜索把私人上下文加入飞书写回或 Agent 数据范围。
 - 保存视图由 `src/renderer/smart-views.ts` 以版本兼容的本地 JSON 保存；除优先级、项目和来源外，v1.33 增加精确标签与日期范围（逾期、今天、未来 7 天、无日期），v1.41 增加手动情境条件。读取旧视图时补齐 `tag=all`、`context=all` 与 `dateFilter=any`，过滤只对当前任务快照做确定性投影，不修改任务、不增加同步载荷，也不把筛选条件发送给 Agent。
+- Todo Pet 通过 `src/renderer/pet-smart-view.ts` 复用保存视图定义，在“全部”任务面板对开放任务做纯函数过滤与稳定排序；选择器监听跨窗口 `storage` 事件，主窗口新增/删除视图后宠物可更新。失效视图回退全部任务，过滤器只读 renderer 快照，不进入 TaskService、撤销日志或 Feishu 写回。
 - 任务 `contexts` 是最多 20 个、每项 1–40 字的本地字符串数组；TaskService 会折叠空白并按不区分大小写拒绝重复值，搜索与 `TaskFilter.contexts` 支持 any/all 匹配。渲染层在任务详情和新建任务中用逗号输入，并在行内显示有限数量的上下文胶囊。FeishuTaskAdapter 的共享字段白名单排除 contexts，因此新增、编辑、撤销、远端拉取都不会把它写回或覆盖；导入校验同样限制长度和重复值。
 - v1.35 为保存视图增加 `sort`（`manual` / `priority` / `due` / `title` / `created`）。`readSmartViews` 会把旧视图迁移为 `manual`；`sortSmartViewTasks` 使用稳定排序，不修改 controller 快照，Today 只有 `manual` 才暴露拖动排序。排序设置仅保存在 renderer 本地视图 JSON，不进入 TaskService、撤销日志或 Feishu 写回。
 - 子任务进度由 `src/renderer/subtask-progress.ts` 从当前任务快照按 `parentId/status/deletedAt` 纯函数投影，父任务行只显示完成数/总数，详情用原生 `progressbar` 暴露 `aria-valuenow`。它不新增持久化字段、不参与 FeishuTaskAdapter 共享写回；详情内完成子任务使用保留父任务选择的 mutation 选项，避免操作后跳出上下文，也明确不自动完成父任务。
