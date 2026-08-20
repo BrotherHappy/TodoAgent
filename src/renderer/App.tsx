@@ -142,7 +142,10 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
-import { conversationTitle } from "./agent-conversation-store";
+import {
+  conversationTitle,
+  filterStoredAgentConversations,
+} from "./agent-conversation-store";
 import { buildAgentQuickSuggestions } from "./agent-quick-suggestions";
 import {
   buildBulkTaskAgentPrompt,
@@ -5701,6 +5704,11 @@ function AgentPage({
   const agentThreadRef = useRef<HTMLElement>(null);
   const chatFollowsOutputRef = useRef(true);
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
+  const [conversationSearch, setConversationSearch] = useState("");
+  const visibleConversationSessions = filterStoredAgentConversations(
+    conversationSessions,
+    conversationSearch,
+  );
   useEffect(() => {
     if (!chatFollowsOutputRef.current) return;
     const frame = window.requestAnimationFrame(() => {
@@ -5804,7 +5812,10 @@ function AgentPage({
               aria-expanded={conversationMenuOpen}
               aria-controls="agent-conversation-panel"
               disabled={isSending}
-              onClick={() => setConversationMenuOpen((value) => !value)}
+              onClick={() => {
+                setConversationMenuOpen((value) => !value);
+                setConversationSearch("");
+              }}
               title="切换本机保存的 Agent 会话"
             >
               <History size={14} /> 会话
@@ -5815,6 +5826,7 @@ function AgentPage({
               disabled={isSending}
               onClick={() => {
                 setConversationMenuOpen(false);
+                setConversationSearch("");
                 newConversation();
               }}
               title="开始新的本机会话；当前会话会保留在本机历史中"
@@ -5857,13 +5869,31 @@ function AgentPage({
                 <strong>本机会话</strong>
                 <small>最多保留 8 个；不会上传或进入飞书</small>
               </div>
-              <span>{conversationSessions.length}/8</span>
+              <span>
+                {conversationSearch
+                  ? `${visibleConversationSessions.length}/${conversationSessions.length}`
+                  : `${conversationSessions.length}/8`}
+              </span>
             </div>
+            {conversationSessions.length > 0 && (
+              <label className="agent-session-search">
+                <Search size={14} aria-hidden="true" />
+                <input
+                  type="search"
+                  value={conversationSearch}
+                  onChange={(event) => setConversationSearch(event.target.value)}
+                  placeholder="搜索本机会话…"
+                  aria-label="搜索本机会话"
+                />
+              </label>
+            )}
             {conversationSessions.length === 0 ? (
               <p className="agent-session-empty">发送一条消息后，这里会保留可切换的会话。</p>
+            ) : visibleConversationSessions.length === 0 ? (
+              <p className="agent-session-empty">没有找到匹配的本机会话。</p>
             ) : (
               <div className="agent-session-list">
-                {conversationSessions.map((session) => (
+                {visibleConversationSessions.map((session) => (
                   <div className="agent-session-row" key={session.conversationId}>
                     <button
                       type="button"
@@ -5872,6 +5902,7 @@ function AgentPage({
                       onClick={() => {
                         if (switchConversation(session.conversationId)) {
                           setConversationMenuOpen(false);
+                          setConversationSearch("");
                         }
                       }}
                     >

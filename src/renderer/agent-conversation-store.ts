@@ -189,6 +189,23 @@ export function conversationTitle(
   return title || "新对话";
 }
 
+export function filterStoredAgentConversations(
+  conversations: readonly StoredAgentConversation[],
+  query: string,
+): StoredAgentConversation[] {
+  const normalizedQuery = query.replace(/\0/gu, "").trim().slice(0, 200).toLocaleLowerCase();
+  if (!normalizedQuery) return [...conversations];
+  return conversations.filter((conversation) => {
+    const haystack = [
+      conversationTitle(conversation),
+      ...conversation.messages.map((message) => message.text),
+    ]
+      .join("\n")
+      .toLocaleLowerCase();
+    return haystack.includes(normalizedQuery);
+  });
+}
+
 export function readStoredAgentConversationCollection(
   storageKey = DEFAULT_SESSIONS_STORAGE_KEY,
   legacyStorageKey = DEFAULT_STORAGE_KEY,

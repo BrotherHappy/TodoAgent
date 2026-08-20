@@ -7184,6 +7184,33 @@ select {
 .agent-session-panel-heading small {
   margin-top: 3px;
 }
+.agent-session-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--app-line);
+  border-radius: 10px;
+  padding: 7px 9px;
+  color: var(--app-text-faint);
+  background: var(--app-surface);
+}
+.agent-session-search:focus-within {
+  border-color: color-mix(in srgb, var(--app-brand) 45%, var(--app-line));
+  box-shadow: 0 0 0 2px var(--app-brand-soft);
+}
+.agent-session-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: var(--app-text);
+  background: transparent;
+  font-size: 12px;
+  outline: 0;
+}
+.agent-session-search input::placeholder {
+  color: var(--app-text-faint);
+}
 .agent-session-list {
   display: grid;
   gap: 5px;

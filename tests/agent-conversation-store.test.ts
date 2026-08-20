@@ -4,6 +4,7 @@ import {
   AGENT_CONVERSATIONS_STORAGE_KEY,
   clearStoredAgentConversation,
   conversationTitle,
+  filterStoredAgentConversations,
   readStoredAgentConversationCollection,
   readStoredAgentConversation,
   writeStoredAgentConversationCollection,
@@ -151,5 +152,27 @@ describe("agent conversation store", () => {
       writeStoredAgentConversationCollection({ schemaVersion: 1, conversations }),
     ).toBe(true);
     expect(readStoredAgentConversationCollection().conversations).toHaveLength(8);
+  });
+
+  it("searches session titles and message text locally", () => {
+    const sessions = [
+      {
+        schemaVersion: 1 as const,
+        conversationId,
+        updatedAt: "2026-08-21T08:00:00.000Z",
+        messages: [{ role: "user" as const, text: "整理飞书项目" }],
+      },
+      {
+        schemaVersion: 1 as const,
+        conversationId: "123e4567-e89b-12d3-a456-426614174001",
+        updatedAt: "2026-08-21T09:00:00.000Z",
+        messages: [{ role: "user" as const, text: "写一个发布说明" }],
+      },
+    ];
+    expect(filterStoredAgentConversations(sessions, "飞书")).toHaveLength(1);
+    expect(filterStoredAgentConversations(sessions, "发布说明")[0]?.conversationId).toBe(
+      sessions[1].conversationId,
+    );
+    expect(filterStoredAgentConversations(sessions, "  ")).toHaveLength(2);
   });
 });
