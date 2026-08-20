@@ -237,6 +237,7 @@ import {
   PetCompanionAvatar,
   kindLabels as petCompanionKindLabels,
 } from "./PetCompanionAvatar";
+import { petCompanionGreeting } from "./pet-companion-interactions";
 import {
   petInteractionFromPoint,
   type PetAction,
@@ -7645,6 +7646,8 @@ function PetHomePage({
   const [editingDiary, setEditingDiary] = useState<PetDiaryEntry>();
   const [editingMemory, setEditingMemory] = useState<PetMemoryEntry>();
   const [adventure, setAdventure] = useState<PetAdventure>();
+  const [companionGreeting, setCompanionGreeting] = useState<{ id: string; text: string }>();
+  const companionGreetingTimerRef = useRef<number | undefined>(undefined);
   const [roomDraftPositions, setRoomDraftPositions] = useState(() => projectPetRoomPlacements());
   const roomDraftPositionsRef = useRef(roomDraftPositions);
   const roomStageRef = useRef<HTMLDivElement>(null);
@@ -7744,6 +7747,11 @@ function PetHomePage({
     const apply = (settings: AppSettings) => setSeasonalEvents(settings.pet.seasonalEvents);
     void window.desktopApi.settings.get().then(apply).catch(() => undefined);
     return window.desktopApi.events.onSettingsChanged(apply);
+  }, []);
+  useEffect(() => () => {
+    if (companionGreetingTimerRef.current !== undefined) {
+      window.clearTimeout(companionGreetingTimerRef.current);
+    }
   }, []);
   if (!snapshot) {
     return (
@@ -8038,15 +8046,39 @@ function PetHomePage({
             {snapshot.companions.length > 0 && (
               <div className="pet-room-companions" aria-label="小窝里的陪伴小伙伴">
                 {snapshot.companions.map((companion) => (
-                  <span className="pet-room-companion-slot" key={companion.id}>
+                  <button
+                    type="button"
+                    className={`pet-room-companion-slot ${companionGreeting?.id === companion.id ? "is-greeting" : ""}`}
+                    key={companion.id}
+                    aria-label={`和${companion.name}互动`}
+                    title={`和${companion.name}互动`}
+                    onClick={() => {
+                      setCompanionGreeting({
+                        id: companion.id,
+                        text: petCompanionGreeting(companion),
+                      });
+                      if (companionGreetingTimerRef.current !== undefined) {
+                        window.clearTimeout(companionGreetingTimerRef.current);
+                      }
+                      companionGreetingTimerRef.current = window.setTimeout(() => {
+                        setCompanionGreeting(undefined);
+                        companionGreetingTimerRef.current = undefined;
+                      }, 3_200);
+                    }}
+                  >
                     <PetCompanionAvatar
                       kind={companion.kind}
                       name={companion.name}
                       personality={companion.personality}
                     />
                     <span>{companion.name}</span>
-                  </span>
+                  </button>
                 ))}
+              </div>
+            )}
+            {companionGreeting && (
+              <div className="pet-room-companion-bubble" role="status" aria-live="polite">
+                {companionGreeting.text}
               </div>
             )}
             <PetCharacter

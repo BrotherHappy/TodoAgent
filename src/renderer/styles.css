@@ -6998,15 +6998,48 @@ select {
   display: grid;
   justify-items: center;
   gap: 4px;
+  border: 0;
+  padding: 0;
   color: var(--app-text-soft);
   font-size: 10px;
   font-weight: 650;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.pet-room-companion-slot:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 5px;
+  border-radius: 14px;
+}
+.pet-room-companion-slot.is-greeting .pet-companion-shape {
+  animation: pet-companion-greet 700ms ease-in-out both;
 }
 .pet-room-companion-slot > span:last-child {
   max-width: 82px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.pet-room-companion-bubble {
+  position: absolute;
+  z-index: 5;
+  right: 16%;
+  bottom: 30%;
+  left: 16%;
+  max-width: 310px;
+  margin: auto;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 28%, var(--app-line));
+  border-radius: 14px;
+  padding: 9px 12px;
+  color: var(--app-text);
+  background: color-mix(in srgb, var(--app-surface-raised) 94%, var(--app-brand-soft));
+  box-shadow: 0 9px 22px rgba(53, 48, 132, 0.14);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+  pointer-events: none;
+  animation: pet-companion-bubble-in 180ms ease-out both;
 }
 .pet-companion-avatar {
   --companion-size: 56px;
@@ -7100,6 +7133,11 @@ select {
 @keyframes pet-companion-bob {
   0%, 100% { transform: translateY(0) rotate(-1deg); }
   50% { transform: translateY(-4px) rotate(1deg); }
+}
+@keyframes pet-companion-greet {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  35% { transform: translateY(-6px) rotate(-7deg); }
+  70% { transform: translateY(-2px) rotate(7deg); }
 }
 .pet-companion-roster {
   display: grid;
@@ -7368,7 +7406,8 @@ select {
   text-align: center;
 }
 @media (prefers-reduced-motion: reduce) {
-  .pet-companion-shape { animation: none; }
+  .pet-companion-shape,
+  .pet-room-companion-slot.is-greeting .pet-companion-shape { animation: none; }
   .pet-stamp { transition: none; }
 }
 .pet-room-window {

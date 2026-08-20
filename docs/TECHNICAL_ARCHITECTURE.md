@@ -122,6 +122,7 @@ flowchart LR
 - `PetActionPackEditor` 只是上述动作包校验器的可视化前端：它只能提交 `id`、`name`、`description` 和内置 `PetIdleAction[]`，载入/清空/安装启用都停留在 renderer 设置层；编辑器不会引入脚本、动态代码、网络、文件或外部素材路径。
 - 小窝颜色主题包：`src/renderer/pet-room-theme-packs.ts` 只在 renderer 本机 `localStorage` 保存最多 12 个安装包和当前选择；`PetRoomThemeEditor` 仅提交 `id`、`name`、`description` 与 `top`/`ground`/`window`/`accent` 四个六位十六进制颜色，并支持生成可读 JSON、从本地 JSON 解析到编辑器预览后再安装。校验器拒绝未知字段、脚本、URL、图片路径、任意 CSS 和超长值；主题包只通过 CSS 变量改变房间舞台视觉，不进入 `PetState`、任务、Agent 上下文、权限或飞书 payload，也不会随 `.todo-pet.json` 迁移。带素材的主题包和第三方连接器仍以后续安全边界另行设计。
 - 小窝季节装饰：`src/renderer/pet-room-season.ts` 为四季返回固定的三项装饰数据，`PetHomePage` 只在 `AppSettings.pet.seasonalEvents` 开启时将其投影到房间舞台。坐标是百分比、内容是内置字符，动画只作用于装饰层的 transform；它不写入 `PetState`、localStorage、任务、奖励或飞书 payload，并通过 `prefers-reduced-motion` 停止漂移。
+- 房间伙伴互动：`src/renderer/pet-companion-interactions.ts` 按伙伴种类和陪伴性格生成固定短句；`PetHomePage` 只在 renderer 内保存当前回应和 3.2 秒的临时动作状态。伙伴按钮使用原生键盘可聚焦控件，回应不读取任务/Agent/飞书数据，不写入 `PetState`、奖励或同步队列；减少动态效果时跳过问候动画。
 - `src/renderer/pet-collection.ts` 与 `PetCollectionCard` 只把 `PetSnapshot.inventory` 映射为固定收藏目录，合并数量、标记解锁状态并显示来源提示；它不保存新字段、不复制任务或奖励，也不参与成长、权限或飞书同步。
 - `src/renderer/pet-project-chapters.ts` 与 `PetProjectChapters` 从同一份任务快照和项目实体投影最多 4 个活跃章节，按完成比例和开放任务选择下一步；它只导航到既有项目/任务入口，不创建章节实体、不维护第二套进度、不触发同步。
 - `src/renderer/pet-completion-stamps.ts` 与 `PetCompletionStampsCard` 从同一份任务快照投影最多 12 个最近完成印章，并用 `PetSnapshot.rewards` 标记奖励对账是否完成；它使用任务的 `completedAt` 事实进行本地日期判断，只读导航回原任务，不创建任务/奖励副本、不写入飞书。
