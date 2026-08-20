@@ -111,6 +111,7 @@ import {
   type PetTab,
   type TaskUrgencyWeights,
 } from "../shared/settings";
+import { withBossMode } from "../shared/boss-mode";
 import type {
   AgentApprovalView,
   DataImportStrategyView,
@@ -13554,6 +13555,29 @@ function FloatingWindow() {
       )
       .finally(closeFloatingContextMenu);
   }
+  function toggleBossMode(enabled: boolean): void {
+    if (!window.desktopApi) return;
+    void window.desktopApi.settings
+      .get()
+      .then((settings) =>
+        window.desktopApi!.settings.replace(withBossMode(settings, enabled)),
+      )
+      .then(() => {
+        if (enabled) {
+          // The settings write hides the native window through the main
+          // process. Collapse local surfaces first so re-showing from the
+          // tray never restores an expanded panel or a stale menu.
+          setContextMenuOpen(false);
+          setInteractionWheelOpen(false);
+          setFloatingGame(undefined);
+          setExpanded(false);
+        }
+      })
+      .catch(() => {
+        // The settings page and tray retain the same escape hatch; a failed
+        // toggle must not leave the floating UI in a half-updated state.
+      });
+  }
   function mutePetUntil(until: Date): void {
     if (!window.desktopApi) return;
     void window.desktopApi.settings
@@ -14644,6 +14668,16 @@ function FloatingWindow() {
                 <MessageCircle size={16} />
                 <span>在此处对话</span>
                 <small>打开 Agent</small>
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={petSettings.pet.meetingMode}
+                onClick={() => toggleBossMode(!petSettings.pet.meetingMode)}
+              >
+                <EyeOff size={16} />
+                <span>{petSettings.pet.meetingMode ? "退出 Boss Mode" : "进入 Boss Mode"}</span>
+                <small>{petSettings.pet.meetingMode ? "从托盘恢复" : "隐藏宠物并暂停宠物主动消息"}</small>
               </button>
               <div className="floating-context-divider" role="separator" />
               <button

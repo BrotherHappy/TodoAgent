@@ -5,6 +5,7 @@ export interface TrayStatus {
   agent: 'disabled' | 'ready' | 'thinking' | 'awaiting-approval' | 'running' | 'stopped' | 'error';
   fullAccessExpiresAt?: string;
   floatingVisible: boolean;
+  meetingMode: boolean;
   launchAtLogin: boolean;
 }
 
@@ -14,6 +15,7 @@ interface TrayManagerOptions {
   showMain: (route?: string) => void;
   showQuick: () => void;
   toggleFloating: (visible: boolean) => void;
+  toggleBossMode: (enabled: boolean) => void;
   setLaunchAtLogin: (enabled: boolean) => void;
   stopAgent: () => void;
   quit: () => void;
@@ -68,6 +70,12 @@ export class TrayManager {
         type: 'checkbox',
         checked: status.floatingVisible,
         click: (item) => this.#options.toggleFloating(item.checked),
+      },
+      {
+        label: status.meetingMode ? '退出 Boss Mode' : '进入 Boss Mode',
+        type: 'checkbox',
+        checked: status.meetingMode,
+        click: (item) => this.#options.toggleBossMode(item.checked),
       },
       {
         label: '开机启动',

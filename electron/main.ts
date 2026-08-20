@@ -27,6 +27,7 @@ import type {
 } from "../src/shared/desktop-api";
 import type { TaskAttachment } from "../src/shared/models";
 import { defaultSettings, type AppSettings } from "../src/shared/settings";
+import { withBossMode } from "../src/shared/boss-mode";
 import {
   buildClipboardContextPreview,
   buildSelectedTextContextPreview,
@@ -687,6 +688,7 @@ async function startApplication(): Promise<void> {
     sync: "local",
     agent: settingsService.get().ai.enabled ? "ready" : "disabled",
     floatingVisible: settingsService.get().floating.enabled,
+    meetingMode: settingsService.get().pet.meetingMode,
     launchAtLogin: settingsService.get().launchAtLogin,
   };
   const localPorts = createFeishuLocalPorts({
@@ -962,6 +964,7 @@ async function startApplication(): Promise<void> {
           : status.agent
         : "disabled",
       floatingVisible: settingsService?.get().floating.enabled ?? false,
+      meetingMode: settingsService?.get().pet.meetingMode ?? false,
       launchAtLogin: settingsService?.get().launchAtLogin ?? false,
     }),
     showMain: (route) => requestMainWindow(route),
@@ -974,6 +977,12 @@ async function startApplication(): Promise<void> {
           ...current,
           floating: { ...current.floating, enabled: visible },
         })
+        .then(broadcastSettings);
+    },
+    toggleBossMode: (enabled) => {
+      if (!settingsService) return;
+      void settingsService
+        .replace(withBossMode(settingsService.get(), enabled))
         .then(broadcastSettings);
     },
     setLaunchAtLogin: (enabled) => {

@@ -97,6 +97,7 @@ flowchart LR
 - Quick Capture：无边框、快捷键呼出、失焦可恢复草稿；解析预览后可选择普通任务、无日期/项目/提醒的本地暂存或 Todo Pet 日记。任务路径复用现有 TaskService 与飞书写入边界，暂存路径只创建本地任务并清除排程字段，日记路径通过 `pet:diary-from-capture` 受限 IPC 写入标题与用户原文，不访问任务或凭据；可选 `captureId` 在 PetService 内幂等重试。Todo Pet 任务栏直接调用同一 `capture:parse` IPC，复用日期、标签、情境、时长、循环与 `p1`–`p4` 优先级解析，但强制组装 `source: local`，不从宠物小窗隐式触发飞书写入；解析服务不可用时回退原始标题。
 - 命令面板：`src/renderer/CommandPalette.tsx` 是无副作用的可搜索命令视图；MainWindow 只提供已存在的导航、快速捕获、今日规划、Agent、显示宠物、设置和飞书同步回调。`⌘/Ctrl+K` 打开面板，弹窗状态会隔离返回、新建等全局快捷键；命令面板本身不持有任务快照、不新增 IPC 写入协议，所有任务和同步动作仍走原控制器与权限边界。
 - Todo Pet：唯一桌面悬浮窗口；透明不规则命中区、可拖动、置顶、多显示器，并支持紧凑、悬停预览、展开、专注和安静状态。
+- Boss Mode 复用 `src/shared/boss-mode.ts` 的纯设置投影：一次 `settings.replace` 同时将 `pet.meetingMode` 置为 `true`、隐藏 `floating.enabled`，退出时反向恢复；宠物右键菜单和系统托盘调用同一投影，托盘的退出入口不依赖悬浮窗口存在。该模式只抑制宠物主动消息，不取消任务、专注、飞书同步或系统安全通知，也不新增任务字段或 IPC。
 - `src/renderer/focus-insights.ts` 从任务 `focusSessions` 及兼容的聚合专注字段投影一周节奏；`TimelinePage` 只读展示每日柱状图、总投入、专注段、平均时长和投入最多任务，不修改 `Task`、operation 或 Feishu payload。
 - `src/renderer/pet-task-drop-zones.ts` 只定义“专注 / 完成 / 稍后”三种任务搬运目标；`FloatingWindow` 在任务卡原生拖拽期间显示目标区，放下后复用现有 `startPetFocus`、`toggleTaskFromPet` 或 `heldTaskId` 气泡，不创建第二份任务。目标区只负责交互投影，权限、错误处理、撤销与飞书同步仍由原任务控制器和服务承接。
 - Todo Pet 动作包：渲染进程只接受版本化 JSON 声明，经过字段白名单、动作白名单、长度和唯一性校验后写入本地设置；动作包只能引用内置 `PetIdleAction`，不执行脚本、网络请求、文件读写或动态代码。
