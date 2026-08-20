@@ -7112,6 +7112,60 @@ select {
 }
 .pet-companion-add button:hover,
 .pet-companion-add button:focus-visible { border-color: var(--app-brand); color: var(--app-brand-strong); background: var(--app-brand-soft); }
+.pet-collection-card {
+  display: grid;
+  gap: 11px;
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, #d39b59 24%, var(--app-line));
+  border-radius: 17px;
+  padding: 12px;
+  background: color-mix(in srgb, #fff0cf 28%, var(--app-surface-raised));
+}
+.pet-collection-card .pet-section-heading h3,
+.pet-collection-card .pet-section-heading p { margin: 0; }
+.pet-collection-card .pet-section-heading h3 { font-size: 14px; }
+.pet-collection-card .pet-section-heading p { margin-top: 3px; color: var(--app-text-soft); font-size: 11px; line-height: 1.45; }
+.pet-collection-progress {
+  color: #b16c2d;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pet-collection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.pet-collection-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 48px;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+  padding: 6px 7px;
+  background: color-mix(in srgb, var(--app-surface-raised) 88%, transparent);
+}
+.pet-collection-item.is-locked { opacity: 0.58; }
+.pet-collection-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: #b16c2d;
+  background: color-mix(in srgb, #ffd995 34%, var(--app-brand-soft));
+  font-size: 17px;
+}
+.pet-collection-item.is-locked .pet-collection-icon { color: var(--app-text-faint); background: var(--app-glass-soft); }
+.pet-collection-copy { min-width: 0; display: grid; gap: 2px; }
+.pet-collection-copy strong,
+.pet-collection-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-collection-copy strong { color: var(--app-text); font-size: 11px; }
+.pet-collection-copy small { color: var(--app-text-faint); font-size: 10px; }
+.pet-collection-item > b { color: var(--app-brand-strong); font-size: 10px; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) {
   .pet-companion-shape { animation: none; }
 }
@@ -7434,6 +7488,9 @@ select {
   .pet-games-grid { grid-template-columns: 1fr; }
   .pet-room-stage,
   .pet-adventure-scene { min-height: 300px; }
+}
+@media (max-width: 520px) {
+  .pet-collection-grid { grid-template-columns: 1fr; }
 }
 .mini-composer {
   flex: 0 0 auto;

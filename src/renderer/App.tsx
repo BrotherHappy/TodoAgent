@@ -219,6 +219,7 @@ import {
   type FloatingPetGame,
 } from "./PetInteractionWheel";
 import { PetActionPackEditor } from "./PetActionPackEditor";
+import { PetCollectionCard } from "./PetCollectionCard";
 import {
   PetCompanionAvatar,
   kindLabels as petCompanionKindLabels,
@@ -8116,6 +8117,7 @@ function PetHomePage({
                 </div>
               )}
             </section>
+            <PetCollectionCard inventory={snapshot.inventory} />
           </div>
         </section>
       )}
