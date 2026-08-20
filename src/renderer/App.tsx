@@ -224,12 +224,14 @@ import { PetCollectionCard } from "./PetCollectionCard";
 import { PetCompletionStampsCard } from "./PetCompletionStampsCard";
 import { PetProjectChapters } from "./PetProjectChapters";
 import { PetRoomLayoutControls } from "./PetRoomLayoutControls";
+import { PetRoomThemeEditor } from "./PetRoomThemeEditor";
 import {
   PET_ROOM_DECORATION_DEFAULTS,
   placementForPetRoomPoint,
   projectPetRoomPlacements,
   type PetRoomDecorationId,
 } from "./pet-room-layout";
+import { useInstalledPetRoomThemePacks } from "./pet-room-theme-packs";
 import {
   PetCompanionAvatar,
   kindLabels as petCompanionKindLabels,
@@ -7631,6 +7633,7 @@ function PetHomePage({
   onReviewAction: (task: Task, action: PetReviewAction) => Promise<void>;
 }) {
   const { snapshot, weather, refresh, setWeather } = usePetData();
+  const roomThemePacks = useInstalledPetRoomThemePacks();
   const legacyHabitMigrationStarted = useRef(false);
   const [section, setSection] = useState<
     "home" | "room" | "adventure" | "play" | "diary" | "memory"
@@ -7744,6 +7747,15 @@ function PetHomePage({
   }
   const profile = snapshot.profile;
   const roomAtmosphere = snapshot.appearance.atmosphere ?? "daylight";
+  const activeRoomThemePack = roomThemePacks.activePack;
+  const roomThemeStyle = activeRoomThemePack
+    ? ({
+        "--pet-room-top": activeRoomThemePack.colors.top,
+        "--pet-room-ground": activeRoomThemePack.colors.ground,
+        "--pet-room-window": activeRoomThemePack.colors.window,
+        "--pet-room-accent": activeRoomThemePack.colors.accent,
+      } as CSSProperties)
+    : undefined;
   const hasUnlocked = (itemId: string) =>
     snapshot.inventory.some((item) => item.id === itemId);
   const beginRoomDecorationDrag = (id: PetRoomDecorationId, event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -7961,7 +7973,8 @@ function PetHomePage({
         <section className="pet-room-section">
           <div
             ref={roomStageRef}
-            className={`pet-room-stage room-${snapshot.appearance.roomTheme} atmosphere-${roomAtmosphere}`}
+            className={`pet-room-stage room-${snapshot.appearance.roomTheme} atmosphere-${roomAtmosphere}${activeRoomThemePack ? " custom-room-theme" : ""}`}
+            style={roomThemeStyle}
             onPointerMove={moveRoomDecoration}
             onPointerUp={finishRoomDecorationDrag}
             onPointerCancel={finishRoomDecorationDrag}
@@ -8106,6 +8119,49 @@ function PetHomePage({
                 <option value="night-library">夜航书房</option>
               </select>
             </label>
+            <label>
+              <span>颜色主题包</span>
+              <select
+                aria-label="颜色主题包"
+                value={roomThemePacks.activeId ?? ""}
+                disabled={busy}
+                onChange={(event) => {
+                  const nextId = event.target.value || undefined;
+                  roomThemePacks.activate(nextId);
+                  notify(nextId ? "颜色主题已应用" : "已恢复房间主题颜色", "success");
+                }}
+              >
+                <option value="">跟随房间主题</option>
+                {roomThemePacks.packs.map((pack) => (
+                  <option value={pack.id} key={pack.id}>{pack.name}</option>
+                ))}
+              </select>
+            </label>
+            <PetRoomThemeEditor
+              activePack={activeRoomThemePack}
+              disabled={busy}
+              onInstall={(pack) => {
+                roomThemePacks.install(pack);
+                roomThemePacks.activate(pack.id);
+                notify("颜色主题已安装并应用", "success");
+              }}
+            />
+            {activeRoomThemePack && (
+              <div className="pet-room-theme-pack-current">
+                <span>{activeRoomThemePack.description || "本机颜色主题"}</span>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={busy}
+                  onClick={() => {
+                    roomThemePacks.remove(activeRoomThemePack.id);
+                    notify("颜色主题已移除", "success");
+                  }}
+                >
+                  移除当前主题
+                </button>
+              </div>
+            )}
             <label>
               <span>小窝氛围</span>
               <select

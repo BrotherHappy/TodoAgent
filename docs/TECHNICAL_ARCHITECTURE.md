@@ -120,6 +120,7 @@ flowchart LR
 - `src/renderer/pet-task-drop-zones.ts` 只定义“专注 / 完成 / 稍后”三种任务搬运目标；`FloatingWindow` 在任务卡原生拖拽期间显示目标区，放下后复用现有 `startPetFocus`、`toggleTaskFromPet` 或 `heldTaskId` 气泡，不创建第二份任务。目标区只负责交互投影，权限、错误处理、撤销与飞书同步仍由原任务控制器和服务承接。
 - Todo Pet 动作包：渲染进程只接受版本化 JSON 声明，经过字段白名单、动作白名单、长度和唯一性校验后写入本地设置；动作包只能引用内置 `PetIdleAction`，不执行脚本、网络请求、文件读写或动态代码。
 - `PetActionPackEditor` 只是上述动作包校验器的可视化前端：它只能提交 `id`、`name`、`description` 和内置 `PetIdleAction[]`，载入/清空/安装启用都停留在 renderer 设置层；编辑器不会引入脚本、动态代码、网络、文件或外部素材路径。
+- 小窝颜色主题包：`src/renderer/pet-room-theme-packs.ts` 只在 renderer 本机 `localStorage` 保存最多 12 个安装包和当前选择；`PetRoomThemeEditor` 仅提交 `id`、`name`、`description` 与 `top`/`ground`/`window`/`accent` 四个六位十六进制颜色。校验器拒绝未知字段、脚本、URL、图片路径、任意 CSS 和超长值；主题包只通过 CSS 变量改变房间舞台视觉，不进入 `PetState`、任务、Agent 上下文、权限或飞书 payload，也不会随 `.todo-pet.json` 迁移。带素材的主题包和第三方连接器仍以后续安全边界另行设计。
 - `src/renderer/pet-collection.ts` 与 `PetCollectionCard` 只把 `PetSnapshot.inventory` 映射为固定收藏目录，合并数量、标记解锁状态并显示来源提示；它不保存新字段、不复制任务或奖励，也不参与成长、权限或飞书同步。
 - `src/renderer/pet-project-chapters.ts` 与 `PetProjectChapters` 从同一份任务快照和项目实体投影最多 4 个活跃章节，按完成比例和开放任务选择下一步；它只导航到既有项目/任务入口，不创建章节实体、不维护第二套进度、不触发同步。
 - `src/renderer/pet-completion-stamps.ts` 与 `PetCompletionStampsCard` 从同一份任务快照投影最多 12 个最近完成印章，并用 `PetSnapshot.rewards` 标记奖励对账是否完成；它使用任务的 `completedAt` 事实进行本地日期判断，只读导航回原任务，不创建任务/奖励副本、不写入飞书。
