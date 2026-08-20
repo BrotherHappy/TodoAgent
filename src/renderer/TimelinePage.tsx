@@ -69,6 +69,16 @@ const taskDuration = (task: Task): number => {
     : 30;
 };
 
+const formatCalendarMinutes = (minutes: number): string => {
+  if (minutes >= 1_440 && minutes % 1_440 === 0) {
+    return `${minutes / 1_440} 天`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (!hours) return `${rest} 分钟`;
+  return rest ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`;
+};
+
 export function TimelinePage({
   tasks,
   loading,
@@ -149,6 +159,29 @@ export function TimelinePage({
   const dayCalendarBlocks = useMemo(
     () => calendarBusyBlocksForDate(calendarEvents, date),
     [calendarEvents, date],
+  );
+  const weekCalendarSummaries = useMemo(
+    () => weekDates.map((day) => {
+      const events = calendarEventsForDate(calendarEvents, day);
+      const blocks = calendarBusyBlocksForDate(calendarEvents, day);
+      return {
+        date: day,
+        eventCount: events.length,
+        busyMinutes: blocks.reduce(
+          (total, block) => total + Math.max(0, block.endMinutes - block.startMinutes),
+          0,
+        ),
+      };
+    }),
+    [calendarEvents, weekDates],
+  );
+  const weekCalendarEventCount = weekCalendarSummaries.reduce(
+    (total, day) => total + day.eventCount,
+    0,
+  );
+  const weekCalendarBusyMinutes = weekCalendarSummaries.reduce(
+    (total, day) => total + day.busyMinutes,
+    0,
   );
 
   const moveToSlot = async (taskId: string, minute: number) => {
@@ -315,6 +348,9 @@ export function TimelinePage({
             <>
               <span><CheckCircle2 size={14} /> 完成 {weeklySummary.completedCount} 项</span>
               <span><Clock3 size={14} /> 排程 {weeklySummary.scheduledCount} 项</span>
+              {weekCalendarEventCount > 0 && (
+                <span><CalendarClock size={14} /> 会议 {weekCalendarEventCount} 个 · {formatCalendarMinutes(weekCalendarBusyMinutes)}</span>
+              )}
             </>
           ) : viewMode === "board" ? (
             <>
@@ -483,6 +519,7 @@ export function TimelinePage({
             <div className="timeline-week-grid">
               {weekDates.map((day) => {
                 const dayTasks = tasksForWeekDay(tasks, day);
+                const calendar = weekCalendarSummaries.find((item) => item.date === day);
                 const today = day === localDateKey();
                 return (
                   <article className={`timeline-week-day ${today ? "is-today" : ""}`} key={day}>
@@ -490,6 +527,12 @@ export function TimelinePage({
                       <strong>{new Intl.DateTimeFormat("zh-CN", { weekday: "short" }).format(new Date(`${day}T12:00:00`))}</strong>
                       <span>{day.slice(5).replace("-", "/")}</span>
                       <small>{dayTasks.length} 项</small>
+                      {calendar?.eventCount ? (
+                        <small className="timeline-week-calendar-meta">
+                          <CalendarClock size={11} aria-hidden="true" />
+                          {calendar.eventCount} 个会议 · {formatCalendarMinutes(calendar.busyMinutes)}
+                        </small>
+                      ) : null}
                     </button>
                     <div className="timeline-week-day-tasks">
                       {dayTasks.slice(0, 5).map((task) => (

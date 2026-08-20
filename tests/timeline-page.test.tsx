@@ -151,6 +151,27 @@ describe("TimelinePage", () => {
     expect(screen.getByText(date)).toBeVisible();
   });
 
+  it("surfaces calendar load in the week overview", () => {
+    render(
+      <TimelinePage
+        {...props({
+          calendarEvents: [{
+            id: "calendar-week-1",
+            summary: "周会",
+            startAt: localIsoAt(date, 9 * 60),
+            endAt: localIsoAt(date, 10 * 60 + 30),
+            allDay: false,
+            sourceName: "工作日历",
+          }],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "周" }));
+    expect(screen.getByText("会议 1 个 · 1 小时 30 分钟")).toBeVisible();
+    expect(screen.getByText("1 个会议 · 1 小时 30 分钟")).toBeVisible();
+  });
+
   it("shows focus rhythm and lets the user return to a focused task", () => {
     const onSelect = vi.fn();
     render(

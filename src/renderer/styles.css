@@ -2023,6 +2023,13 @@ select {
   color: var(--app-text-faint);
   font-size: 10px;
 }
+.timeline-week-day-heading .timeline-week-calendar-meta {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--app-brand-strong);
+  font-variant-numeric: tabular-nums;
+}
 .timeline-week-day-tasks {
   display: grid;
   gap: 5px;
