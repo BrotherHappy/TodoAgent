@@ -8540,6 +8540,47 @@ select {
   color: var(--app-text-soft);
   font-size: 12px;
 }
+.settings-project-bulk {
+  display: grid;
+  gap: 8px;
+  margin: 9px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 12px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--app-brand-soft) 38%, transparent);
+}
+.settings-project-bulk > div:first-child strong,
+.settings-project-bulk > div:first-child p {
+  display: block;
+}
+.settings-project-bulk > div:first-child p {
+  margin-top: 3px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.settings-multi-select {
+  width: 100%;
+  min-height: 78px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 9px;
+  padding: 5px;
+  color: var(--app-text);
+  background: var(--app-surface-raised);
+  font: inherit;
+}
+.settings-multi-select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--app-brand) 60%, transparent);
+  outline-offset: 1px;
+}
+.settings-project-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.settings-project-bulk-actions .settings-input {
+  min-width: 150px;
+}
 .settings-number-control {
   display: flex;
   align-items: center;

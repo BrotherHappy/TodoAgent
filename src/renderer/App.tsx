@@ -161,6 +161,10 @@ import { readCalendarEvents, writeCalendarEvents } from "./calendar-store";
 import { buildMorningCalendarSummary } from "./morning-calendar";
 import { suggestMorningRollover } from "./morning-rollover";
 import {
+  updateProjectReminderModes,
+  type ProjectReminderSelection,
+} from "./project-reminder-policy";
+import {
   localDateTimeInputToIso,
   toLocalDateTimeInput,
 } from "./local-datetime";
@@ -7634,6 +7638,14 @@ function SettingsPage({
     )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
     [projectController.tasks],
   );
+  const [selectedReminderProjects, setSelectedReminderProjects] = useState<string[]>([]);
+  const [bulkProjectReminderMode, setBulkProjectReminderMode] =
+    useState<ProjectReminderSelection>("inherit");
+  useEffect(() => {
+    setSelectedReminderProjects((current) =>
+      current.filter((projectId) => projectReminderOptions.includes(projectId)),
+    );
+  }, [projectReminderOptions]);
   const [apiKey, setApiKey] = useState("");
   const [fallbackApiKey, setFallbackApiKey] = useState("");
   const actionPacks = useInstalledPetActionPacks();
@@ -9199,6 +9211,67 @@ function SettingsPage({
                 <div className="settings-subsection-heading">
                   <strong>项目例外</strong>
                   <span>项目策略优先于来源策略；选择“跟随来源”即可恢复全局规则</span>
+                </div>
+                <div className="settings-project-bulk">
+                  <div>
+                    <strong>批量设置项目</strong>
+                    <p>一次为多个项目应用相同策略，未选中的项目保持不变。</p>
+                  </div>
+                  <select
+                    className="settings-multi-select"
+                    multiple
+                    size={Math.min(6, Math.max(3, projectReminderOptions.length))}
+                    aria-label="选择要批量设置提醒策略的项目"
+                    value={selectedReminderProjects}
+                    onChange={(event) =>
+                      setSelectedReminderProjects(
+                        Array.from(event.target.selectedOptions, (option) => option.value),
+                      )
+                    }
+                  >
+                    {projectReminderOptions.map((projectId) => (
+                      <option key={projectId} value={projectId}>{projectId}</option>
+                    ))}
+                  </select>
+                  <div className="settings-project-bulk-actions">
+                    <select
+                      className="settings-input"
+                      aria-label="批量项目提醒策略"
+                      value={bulkProjectReminderMode}
+                      onChange={(event) =>
+                        setBulkProjectReminderMode(event.target.value as ProjectReminderSelection)
+                      }
+                    >
+                      <option value="inherit">跟随来源</option>
+                      <option value="normal">全部提醒</option>
+                      <option value="important-only">仅高优先级</option>
+                      <option value="off">关闭项目</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="soft-button"
+                      disabled={selectedReminderProjects.length === 0 || saving}
+                      onClick={() => {
+                        const nextModes = updateProjectReminderModes(
+                          appSettings.notifications.taskReminderProjectMode,
+                          selectedReminderProjects,
+                          bulkProjectReminderMode,
+                        );
+                        void persist({
+                          ...appSettings,
+                          notifications: {
+                            ...appSettings.notifications,
+                            taskReminderProjectMode: nextModes,
+                          },
+                        }, `已更新 ${selectedReminderProjects.length} 个项目的提醒策略`)
+                          .then((saved) => {
+                            if (saved) setSelectedReminderProjects([]);
+                          });
+                      }}
+                    >
+                      应用到已选
+                    </button>
+                  </div>
                 </div>
                 {projectReminderOptions.map((projectId) => {
                   const override = appSettings.notifications.taskReminderProjectMode[projectId];
