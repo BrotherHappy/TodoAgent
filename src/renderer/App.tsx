@@ -220,6 +220,7 @@ import {
 } from "./PetInteractionWheel";
 import { PetActionPackEditor } from "./PetActionPackEditor";
 import { PetCollectionCard } from "./PetCollectionCard";
+import { PetProjectChapters } from "./PetProjectChapters";
 import {
   PetCompanionAvatar,
   kindLabels as petCompanionKindLabels,
@@ -7606,6 +7607,7 @@ function PetReviewCard({
 function PetHomePage({
   notify,
   tasks,
+  projects,
   onNavigate,
   onNavigateTask,
   onPlanTomorrow,
@@ -7613,6 +7615,7 @@ function PetHomePage({
 }: {
   notify: (message: string, kind?: ToastKind) => void;
   tasks: readonly Task[];
+  projects: readonly TaskProject[];
   onNavigate: (route: MainRoute) => void;
   onNavigateTask: (task: Task) => void;
   onPlanTomorrow: () => void;
@@ -7831,6 +7834,15 @@ function PetHomePage({
             habits={snapshot.habits}
             refresh={refresh}
             notify={notify}
+          />
+          <PetProjectChapters
+            tasks={tasks}
+            projects={projects}
+            onOpenProjects={() => onNavigate("projects")}
+            onOpenTask={(taskId) => {
+              const task = tasks.find((candidate) => candidate.id === taskId);
+              if (task) onNavigateTask(task);
+            }}
           />
           <ElasticHabitsPanel habits={snapshot.habits} refresh={refresh} notify={notify} />
           <EveningReviewCard
@@ -12956,6 +12968,7 @@ function MainWindow() {
               <PetHomePage
                 notify={notify}
                 tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
+                projects={projectState.projects}
                 onNavigate={navigateFromSidebar}
                 onPlanTomorrow={() => {
                   const tomorrow = new Date();
