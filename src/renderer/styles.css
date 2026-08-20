@@ -999,6 +999,221 @@ select {
   margin-top: 12px;
 }
 
+.morning-kickoff {
+  margin-top: 14px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 22%, var(--app-line));
+  border-radius: 16px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--app-brand-soft) 38%, var(--app-glass-soft));
+}
+
+.morning-kickoff-heading {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+}
+
+.morning-kickoff-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+
+.morning-kickoff-heading strong,
+.morning-kickoff-heading small {
+  display: block;
+}
+
+.morning-kickoff-heading strong {
+  color: var(--app-text);
+  font-size: 13px;
+}
+
+.morning-kickoff-heading small {
+  margin-top: 3px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+
+.morning-kickoff-progress {
+  color: var(--app-brand-strong);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.morning-kickoff-step {
+  margin-top: 13px;
+}
+
+.morning-kickoff-question {
+  display: grid;
+  gap: 3px;
+}
+
+.morning-kickoff-question strong {
+  color: var(--app-text);
+  font-size: 13px;
+}
+
+.morning-kickoff-question small {
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+
+.morning-kickoff-task-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.morning-kickoff-task {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--app-line);
+  border-radius: 11px;
+  padding: 7px 9px;
+  color: var(--app-text-soft);
+  background: var(--app-surface-raised);
+  text-align: left;
+  cursor: pointer;
+}
+
+.morning-kickoff-task.is-selected {
+  border-color: var(--app-brand);
+  color: var(--app-text);
+  background: var(--app-brand-soft);
+}
+
+.morning-kickoff-check {
+  display: grid;
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 6px;
+  color: var(--app-brand-strong);
+}
+
+.morning-kickoff-task.is-selected .morning-kickoff-check {
+  border-color: var(--app-brand);
+  background: var(--app-surface-raised);
+}
+
+.morning-kickoff-capacity {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.morning-kickoff-capacity button,
+.morning-kickoff-focus button {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--app-line);
+  border-radius: 11px;
+  padding: 9px;
+  color: var(--app-text-soft);
+  background: var(--app-surface-raised);
+  text-align: left;
+  cursor: pointer;
+}
+
+.morning-kickoff-capacity button.is-selected,
+.morning-kickoff-focus button.is-selected {
+  border-color: var(--app-brand);
+  color: var(--app-text);
+  background: var(--app-brand-soft);
+}
+
+.morning-kickoff-capacity button strong {
+  font-size: 12px;
+}
+
+.morning-kickoff-capacity button small {
+  font-size: 10px;
+}
+
+.morning-kickoff-focus {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.morning-kickoff-focus button {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.morning-kickoff-focus button > span {
+  display: grid;
+  gap: 2px;
+}
+
+.morning-kickoff-focus button strong {
+  color: inherit;
+  font-size: 12px;
+}
+
+.morning-kickoff-focus button small {
+  color: var(--app-text-soft);
+  font-size: 10px;
+}
+
+.morning-kickoff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 11px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+
+.morning-kickoff-summary span {
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--app-glass-soft);
+}
+
+.morning-kickoff-empty {
+  margin: 11px 0 0;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+
+.morning-kickoff-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid var(--app-line);
+}
+
+.morning-kickoff-footer > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.morning-kickoff-hint {
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+
 .brief-short-plan {
   margin-top: 14px;
   border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
@@ -8721,6 +8936,19 @@ select {
   }
   .morning-brief {
     border-radius: 18px;
+  }
+  .morning-kickoff-capacity {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .morning-kickoff-focus {
+    grid-template-columns: 1fr;
+  }
+  .morning-kickoff-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .morning-kickoff-footer > div {
+    justify-content: flex-start;
   }
   .quick-shell {
     padding: 4px;

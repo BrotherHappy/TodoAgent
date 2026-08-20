@@ -74,6 +74,9 @@ export interface DailyPlanSheetProps {
   onAskAgent: (prompt: string) => void;
   /** Defaults to 今天; callers can open the same review for 明天 or a date. */
   targetLabel?: string;
+  /** Optional values collected by the morning kickoff flow. */
+  initialCapacityMinutes?: number;
+  initialTaskIds?: TaskId[];
 }
 
 function formatMinutes(minutes: number): string {
@@ -134,12 +137,16 @@ export function DailyPlanSheet({
   onStartFirst,
   onAskAgent,
   targetLabel,
+  initialCapacityMinutes,
+  initialTaskIds,
 }: DailyPlanSheetProps) {
   const targetName = targetLabel?.trim() || "今天";
   // Keep the established Chinese noun in accessible labels and action copy
   // while allowing the sheet to be reused for 明天/other dates.
   const targetNoun = targetName === "今天" ? "今日" : targetName;
-  const [capacityMinutes, setCapacityMinutes] = useState(240);
+  const [capacityMinutes, setCapacityMinutes] = useState(
+    initialCapacityMinutes ?? 240,
+  );
   const [planMode, setPlanMode] = useState<DailyPlanMode>("balanced");
   const [availableStart, setAvailableStart] = useState(
     formatClock(DEFAULT_DAILY_PLAN_CONSTRAINTS.availableStartMinutes),
@@ -153,7 +160,9 @@ export function DailyPlanSheet({
   const [minimumBlockMinutes, setMinimumBlockMinutes] = useState(
     DEFAULT_DAILY_PLAN_CONSTRAINTS.minimumBlockMinutes,
   );
-  const [selectedIds, setSelectedIds] = useState<TaskId[]>([]);
+  const [selectedIds, setSelectedIds] = useState<TaskId[]>(
+    () => initialTaskIds ?? [],
+  );
   const [durationOverrides, setDurationOverrides] = useState<
     Record<TaskId, number>
   >({});
@@ -171,6 +180,7 @@ export function DailyPlanSheet({
   const savingRef = useRef(saving);
   const onCloseRef = useRef(onClose);
   const wasAppliedRef = useRef(false);
+  const initialSelectionRef = useRef<TaskId[] | undefined>(initialTaskIds);
 
   const activePlanMode =
     PLAN_MODES.find((mode) => mode.id === planMode) ?? PLAN_MODES[1];
@@ -223,8 +233,26 @@ export function DailyPlanSheet({
   }, [suggestion.selectedItems]);
 
   useEffect(() => {
-    if (!applied) resetToSuggestion();
-  }, [applied, resetToSuggestion]);
+    if (applied) return;
+    // A morning kickoff can intentionally seed an empty selection as well as
+    // a few priorities. Preserve that one-time choice on mount; later
+    // planner changes can still use the normal reset-to-suggestion action.
+    if (initialSelectionRef.current !== undefined) {
+      const requiredIds = suggestion.selectedItems
+        .filter((item) => item.isFixed || item.isRetained)
+        .map((item) => item.task.id);
+      const seededIds = [
+        ...requiredIds,
+        ...initialSelectionRef.current,
+      ].filter((id, index, ids) => ids.indexOf(id) === index && itemById.has(id));
+      setSelectedIds(seededIds);
+      initialSelectionRef.current = undefined;
+      setDurationOverrides({});
+      setSaveError(undefined);
+      return;
+    }
+    resetToSuggestion();
+  }, [applied, itemById, resetToSuggestion, suggestion.selectedItems]);
 
   useEffect(() => {
     savingRef.current = saving;

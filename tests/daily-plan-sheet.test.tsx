@@ -114,6 +114,30 @@ describe("DailyPlanSheet", () => {
     ).toBeEnabled();
   });
 
+  it("keeps fixed and retained work while seeding priorities from morning kickoff", async () => {
+    render(
+      <DailyPlanSheet
+        {...makeProps({
+          initialCapacityMinutes: 240,
+          initialTaskIds: [highCandidate.id],
+        })}
+      />,
+    );
+
+    const selectedSection = screen
+      .getByRole("heading", { name: "今天的顺序" })
+      .closest("section");
+    expect(selectedSection).not.toBeNull();
+    expect(
+      within(selectedSection!)
+        .getAllByRole("listitem")
+        .map((item) => item.querySelector("strong")?.textContent),
+    ).toEqual([fixed.title, retained.title, highCandidate.title]);
+    expect(
+      screen.queryByRole("button", { name: `移出${highCandidate.title}` }),
+    ).toBeEnabled();
+  });
+
   it("can reuse the same sheet for tomorrow without changing the Today labels", async () => {
     render(
       <DailyPlanSheet

@@ -145,6 +145,10 @@ import {
 import { DailyPlanSheet } from "./DailyPlanSheet";
 import { InboxTriageSheet } from "./InboxTriageSheet";
 import {
+  MorningKickoffCard,
+  type MorningKickoffPreset,
+} from "./MorningKickoffCard";
+import {
   CommandPalette,
   type CommandPaletteAction,
 } from "./CommandPalette";
@@ -1248,11 +1252,12 @@ function MorningBrief({
   controller: TaskController;
   planningTasks?: Task[];
   notify: (message: string, kind?: ToastKind) => void;
-  onPlanToday: () => void;
+  onPlanToday: (preset?: MorningKickoffPreset) => void;
 }) {
   const [aiSummary, setAiSummary] = useState<string>();
   const [aiRefreshing, setAiRefreshing] = useState(false);
   const [shortPlanOpen, setShortPlanOpen] = useState(false);
+  const [kickoffOpen, setKickoffOpen] = useState(false);
   const openTasks = controller.tasks.filter(
     (task) => task.status === "open" && !task.deletedAt,
   );
@@ -1340,6 +1345,17 @@ function MorningBrief({
       );
     }
   };
+  const startKickoffFocus = async (task: Task) => {
+    try {
+      await controller.startFocus(task.id);
+      notify(`已开始“${task.title}”`, "success");
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "暂时无法开始专注",
+        "error",
+      );
+    }
+  };
   return (
     <section className="morning-brief" aria-label="晨间简报">
       <div className="brief-title">
@@ -1350,9 +1366,18 @@ function MorningBrief({
       </div>
       <p className="brief-copy">{aiSummary ?? localSummary}</p>
       <div className="brief-actions">
-        <button type="button" className="primary-button" onClick={onPlanToday}>
+        <button type="button" className="primary-button" onClick={() => onPlanToday()}>
           <CalendarDays size={15} />
           帮我选今天
+        </button>
+        <button
+          type="button"
+          className={`soft-button ${kickoffOpen ? "active" : ""}`}
+          aria-pressed={kickoffOpen}
+          onClick={() => setKickoffOpen((value) => !value)}
+        >
+          <Sparkles size={15} />
+          {kickoffOpen ? "收起晨间启动" : "三步开始今天"}
         </button>
         {first && (
           <button
@@ -1392,6 +1417,13 @@ function MorningBrief({
           今日不再提醒
         </button>
       </div>
+      {kickoffOpen && (
+        <MorningKickoffCard
+          tasks={planningTasks ?? controller.tasks}
+          onOpenPlan={(preset) => onPlanToday(preset)}
+          onStartFocus={(task) => void startKickoffFocus(task)}
+        />
+      )}
       {shortPlanOpen && (
         <section className="brief-short-plan" aria-label="只剩两小时的替代计划">
           <div className="brief-short-plan-heading">
@@ -1418,7 +1450,7 @@ function MorningBrief({
             <p className="brief-short-plan-empty">目前没有能在两小时内安排的开放任务。</p>
           )}
           <div className="brief-short-plan-actions">
-            <button type="button" className="soft-button" onClick={onPlanToday}>
+            <button type="button" className="soft-button" onClick={() => onPlanToday()}>
               <CalendarDays size={14} />
               在今日规划中确认
             </button>
@@ -1654,7 +1686,7 @@ function TaskListPage({
   onNew: () => void;
   onClearSearch: () => void;
   onAskAgent: (prompt: string) => void;
-  onPlanToday: () => void;
+  onPlanToday: (preset?: MorningKickoffPreset) => void;
   onSourceChange: (source?: TaskSourceType) => void;
 }) {
   const [filterOpen, setFilterOpen] = useState(false);
@@ -2020,7 +2052,7 @@ function TaskListPage({
           <button
             type="button"
             className="soft-button"
-            onClick={route === "today" ? onPlanToday : askToReplan}
+            onClick={route === "today" ? () => onPlanToday() : askToReplan}
           >
             {route === "today" ? (
               <CalendarDays size={16} />
@@ -10969,6 +11001,7 @@ function MainWindow() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [dailyPlanOpen, setDailyPlanOpen] = useState(false);
   const [dailyPlanDate, setDailyPlanDate] = useState(() => dateKey());
+  const [dailyPlanPreset, setDailyPlanPreset] = useState<MorningKickoffPreset>();
   const [dailyPlanTasks, setDailyPlanTasks] = useState<Task[]>([]);
   const [dailyPlanLoading, setDailyPlanLoading] = useState(false);
   const [dailyPlanError, setDailyPlanError] = useState<string>();
@@ -11000,11 +11033,19 @@ function MainWindow() {
       setDailyPlanLoading(false);
     }
   }, [controller.tasks]);
-  const openDailyPlan = useCallback((targetDate = dateKey()) => {
-    setDailyPlanDate(targetDate);
-    setDailyPlanOpen(true);
-    void loadDailyPlan();
-  }, [loadDailyPlan]);
+  const openDailyPlan = useCallback(
+    (targetDate = dateKey(), preset?: MorningKickoffPreset) => {
+      setDailyPlanDate(targetDate);
+      setDailyPlanPreset(preset);
+      setDailyPlanOpen(true);
+      void loadDailyPlan();
+    },
+    [loadDailyPlan],
+  );
+  const openTodayPlan = useCallback(
+    (preset?: MorningKickoffPreset) => openDailyPlan(dateKey(), preset),
+    [openDailyPlan],
+  );
   useEffect(() => {
     const stored = readMainNavigationState(window.history.state);
     if (stored) {
@@ -11403,7 +11444,7 @@ function MainWindow() {
                 onNew={() => setNewTask(true)}
                 onClearSearch={() => setSearch("")}
                 onAskAgent={askAgent}
-                onPlanToday={openDailyPlan}
+                onPlanToday={openTodayPlan}
                 onSourceChange={(source) => navigate(taskView, source, { replace: true })}
               />
               <TaskInspector
@@ -11578,7 +11619,12 @@ function MainWindow() {
             date={dailyPlanDate}
             targetLabel={relativePlanLabel(dailyPlanDate)}
             onRetry={loadDailyPlan}
-            onClose={() => setDailyPlanOpen(false)}
+            initialCapacityMinutes={dailyPlanPreset?.capacityMinutes}
+            initialTaskIds={dailyPlanPreset?.taskIds}
+            onClose={() => {
+              setDailyPlanOpen(false);
+              setDailyPlanPreset(undefined);
+            }}
             onApply={async (request) => {
               const operationId = await controller.applyTodayPlan(request);
               await loadDailyPlan();
@@ -11592,9 +11638,11 @@ function MainWindow() {
               await controller.startFocus(task.id);
               notify(`已开始“${task.title}”`, "success");
               setDailyPlanOpen(false);
+              setDailyPlanPreset(undefined);
             }}
             onAskAgent={(prompt) => {
               setDailyPlanOpen(false);
+              setDailyPlanPreset(undefined);
               askAgent(prompt);
             }}
           />
