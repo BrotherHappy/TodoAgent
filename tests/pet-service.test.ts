@@ -66,6 +66,27 @@ describe("PetService", () => {
     expect(restored.snapshot().habits.some((habit) => habit.id === "water")).toBe(false);
   });
 
+  it("stores optional weekly goals atomically and restores them after restart", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-goals-"));
+    const service = new PetService({ userDataPath: root });
+    await service.initialize();
+    const added = await service.addGoal({
+      title: "守住两件重要的事",
+      metric: "tasks-completed",
+      target: 2,
+      periodStart: "2026-08-17",
+      periodEnd: "2026-08-23",
+    });
+    const id = added.goals[0]!.id;
+    expect(added.goals[0]).toMatchObject({ metric: "tasks-completed", target: 2, enabled: true });
+    await service.updateGoal(id, { metric: "focus-minutes", target: 120, enabled: false });
+    const restored = new PetService({ userDataPath: root });
+    await restored.initialize();
+    expect(restored.snapshot().goals[0]).toMatchObject({ title: "守住两件重要的事", metric: "focus-minutes", target: 120, enabled: false });
+    expect(await restored.deleteGoal(id)).toBe(true);
+    expect(restored.snapshot().goals).toHaveLength(0);
+  });
+
   it("persists an absolute-time focus session and restores it after restart", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-focus-"));
     let now = Date.parse("2026-08-15T01:00:00.000Z");

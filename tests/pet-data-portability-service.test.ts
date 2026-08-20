@@ -62,6 +62,7 @@ describe("PetDataPortabilityService", () => {
     expect(bundle.format).toBe("todo-agent-pet-portable-data");
     expect(bundle.data.pet.profile.name).toBe("团团");
     expect(bundle.data.pet.habits.map((habit) => habit.id)).toContain("water");
+    expect(bundle.data.pet.goals).toEqual([]);
     expect("focus" in bundle.data.pet).toBe(false);
     expect(json).toContain("共同记录");
   });
@@ -76,6 +77,7 @@ describe("PetDataPortabilityService", () => {
     delete base.data.pet.habits;
     const preview = await portability.previewImport(JSON.stringify(base), "overwrite");
     expect(preview.incoming.habits).toBe(3);
+    expect(preview.incoming.goals).toBe(0);
   });
 
   it("previews overwrite and preserves the running focus when applying", async () => {

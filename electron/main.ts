@@ -1387,6 +1387,9 @@ async function startApplication(): Promise<void> {
     completeHabit: (id) => petService!.completeHabit(id),
     snoozeHabit: (id, minutes) => petService!.snoozeHabit(id, minutes),
     deleteHabit: (id) => petService!.deleteHabit(id),
+    addGoal: (input) => petService!.addGoal(input),
+    updateGoal: (id, patch) => petService!.updateGoal(id, patch),
+    deleteGoal: (id) => petService!.deleteGoal(id),
     exportData: () => petDataController.exportToFile(),
     previewDataImport: () => petDataController.previewImport(),
     commitDataImport: async (previewToken, strategy) => {

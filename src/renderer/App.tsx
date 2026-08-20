@@ -134,6 +134,8 @@ import type {
   FocusSessionView,
   PetAdventure,
   PetDiaryEntry,
+  PetGoal,
+  PetGoalMetric,
   PetMemoryEntry,
   PetSnapshot,
   WeatherSnapshot,
@@ -167,6 +169,11 @@ import {
   type ProjectReminderSelection,
 } from "./project-reminder-policy";
 import { filterTasksForPetView } from "./pet-smart-view";
+import {
+  defaultGoalTitle,
+  projectPetGoal,
+  weekRangeFor,
+} from "./pet-goals";
 import {
   localDateTimeInputToIso,
   toLocalDateTimeInput,
@@ -6852,6 +6859,190 @@ function ElasticHabitsPanel({
   );
 }
 
+function PetGoalsPanel({
+  goals,
+  tasks,
+  focusHistory,
+  habits,
+  refresh,
+  notify,
+}: {
+  goals: PetSnapshot["goals"];
+  tasks: readonly Task[];
+  focusHistory: PetSnapshot["focusHistory"];
+  habits: PetSnapshot["habits"];
+  refresh: () => Promise<PetSnapshot | undefined>;
+  notify: (message: string, kind?: ToastKind) => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<{
+    title: string;
+    metric: PetGoalMetric;
+    target: number;
+  }>({ title: defaultGoalTitle("tasks-completed"), metric: "tasks-completed", target: 5 });
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const run = async (operation: () => Promise<unknown>, success: string): Promise<boolean> => {
+    setBusy(true);
+    try {
+      await operation();
+      await refresh();
+      notify(success, "success");
+      return true;
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "目标操作失败", "error");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const facts = useMemo(
+    () => ({ tasks, focusHistory, habits }),
+    [focusHistory, habits, tasks],
+  );
+  const currentPeriod = useMemo(() => weekRangeFor(new Date(now)), [now]);
+  const beginAdd = () => {
+    setEditingId(undefined);
+    setAdding(true);
+    setDraft({ title: defaultGoalTitle("tasks-completed"), metric: "tasks-completed", target: 5 });
+  };
+  const beginEdit = (goal: PetGoal) => {
+    setAdding(false);
+    setEditingId(goal.id);
+    setDraft({ title: goal.title, metric: goal.metric, target: goal.target });
+  };
+  const save = () => {
+    if (!window.desktopApi) return;
+    if (editingId) {
+      void run(
+        () => window.desktopApi!.pet.updateGoal(editingId, draft),
+        "目标已更新",
+      ).then((ok) => {
+        if (ok) setEditingId(undefined);
+      });
+      return;
+    }
+    void run(
+      () =>
+        window.desktopApi!.pet.addGoal({
+          ...draft,
+          periodStart: currentPeriod.periodStart,
+          periodEnd: currentPeriod.periodEnd,
+        }),
+      "已加入本周同行目标",
+    ).then((ok) => {
+      if (ok) {
+        setAdding(false);
+        setDraft({ title: defaultGoalTitle("tasks-completed"), metric: "tasks-completed", target: 5 });
+      }
+    });
+  };
+  const editor = (editingId || adding) ? (
+    <div className="pet-goal-editor">
+      <label>
+        <span>目标名称</span>
+        <input
+          autoFocus
+          aria-label="目标名称"
+          value={draft.title}
+          maxLength={80}
+          onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+        />
+      </label>
+      <label>
+        <span>追踪什么</span>
+        <select
+          aria-label="目标类型"
+          value={draft.metric}
+          onChange={(event) => {
+            const metric = event.target.value as PetGoalMetric;
+            setDraft((current) => ({
+              ...current,
+              metric,
+              title: current.title.trim() ? current.title : defaultGoalTitle(metric),
+            }));
+          }}
+        >
+          <option value="tasks-completed">完成任务</option>
+          <option value="focus-minutes">专注分钟</option>
+          <option value="habit-checkins">习惯照顾</option>
+        </select>
+      </label>
+      <label>
+        <span>本周目标</span>
+        <input
+          type="number"
+          aria-label="本周目标数值"
+          min={1}
+          max={9_999}
+          step={1}
+          value={draft.target}
+          onChange={(event) => setDraft((current) => ({ ...current, target: Number(event.target.value) }))}
+        />
+      </label>
+      <div className="pet-goal-editor-note">本周 {currentPeriod.periodStart.slice(5)} — {currentPeriod.periodEnd.slice(5)} · 可随时暂停</div>
+      <div className="pet-goal-actions">
+        <button type="button" className="primary-button" disabled={busy || !draft.title.trim() || !Number.isFinite(draft.target) || draft.target < 1} onClick={save}>保存</button>
+        <button type="button" className="ghost-button" disabled={busy} onClick={() => { setAdding(false); setEditingId(undefined); }}>取消</button>
+      </div>
+    </div>
+  ) : null;
+  return (
+    <section className="pet-goals-card" aria-labelledby="pet-goals-title">
+      <div className="pet-section-heading">
+        <div>
+          <h2 id="pet-goals-title">本周同行目标</h2>
+          <p>给这一周一个温和方向；不追连续，不因没完成而扣分。</p>
+        </div>
+        <button type="button" className="soft-button" disabled={busy || goals.length >= 3} onClick={beginAdd}>
+          <Plus size={14} /> 新增
+        </button>
+      </div>
+      {editor}
+      <div className="pet-goals-list">
+        {goals.map((goal) => {
+          const progress = projectPetGoal(goal, facts);
+          const isPast = goal.periodEnd < currentPeriod.periodStart;
+          return (
+            <article className={`pet-goal-row ${progress.isComplete ? "is-complete" : ""} ${!goal.enabled ? "is-disabled" : ""} ${isPast ? "is-past" : ""}`} key={goal.id}>
+              <div className="pet-goal-row-top">
+                <span className="pet-goal-mark" aria-hidden="true"><CircleDot size={16} /></span>
+                <div className="pet-goal-copy">
+                  <strong>{goal.title}</strong>
+                  <small>{progress.metricLabel} · {goal.periodStart.slice(5)} — {goal.periodEnd.slice(5)}</small>
+                </div>
+                <b>{progress.value}/{goal.target} <em>{progress.unit}</em></b>
+              </div>
+              <div className="pet-goal-track" aria-label={`${goal.title}进度 ${Math.round(progress.ratio * 100)}%`}>
+                <i style={{ width: `${Math.round(progress.ratio * 100)}%` }} />
+              </div>
+              <div className="pet-goal-row-bottom">
+                <span>{!goal.enabled ? "已暂停" : isPast ? "这周已结束" : progress.isComplete ? "已经一起做到啦" : `还差 ${progress.remaining}${progress.unit}`}</span>
+                <div className="pet-goal-actions">
+                  <button type="button" className="ghost-button" disabled={busy} onClick={() => beginEdit(goal)}>编辑</button>
+                  <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.updateGoal(goal.id, { enabled: !goal.enabled }), goal.enabled ? "目标已暂停" : "目标已恢复")}>{goal.enabled ? "暂停" : "恢复"}</button>
+                  <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.deleteGoal(goal.id), "目标已移除")}>移除</button>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+        {!goals.length && !adding && (
+          <div className="pet-goals-empty">
+            <CircleDot size={17} />
+            <span>还没有本周目标。可以从“完成 5 项任务”开始，也可以按你的节奏自定义。</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function EveningReviewCard({
   tasks,
   focusHistory,
@@ -7314,6 +7505,14 @@ function PetHomePage({
               ))}
             </div>
           </section>
+          <PetGoalsPanel
+            goals={snapshot.goals}
+            tasks={tasks}
+            focusHistory={snapshot.focusHistory}
+            habits={snapshot.habits}
+            refresh={refresh}
+            notify={notify}
+          />
           <ElasticHabitsPanel habits={snapshot.habits} refresh={refresh} notify={notify} />
           <EveningReviewCard
             tasks={tasks}
@@ -10977,6 +11176,8 @@ function SettingsPage({
                   ["库存物品", plan.incoming.inventory, plan.existing.inventory],
                   ["冒险记录", plan.incoming.adventures, plan.existing.adventures],
                   ["小游戏", plan.incoming.miniGames, plan.existing.miniGames],
+                  ["弹性习惯", plan.incoming.habits, plan.existing.habits],
+                  ["本周同行目标", plan.incoming.goals, plan.existing.goals],
                   ["日记", plan.incoming.diary, plan.existing.diary],
                   ["记忆", plan.incoming.memories, plan.existing.memories],
                   ["互动消息", plan.incoming.proactiveMessages, plan.existing.proactiveMessages],

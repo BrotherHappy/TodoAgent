@@ -1127,6 +1127,41 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.petHabitDelete, (_event, input) =>
     dependencies.pet.deleteHabit(idSchema.parse(input)),
   );
+  handle(DESKTOP_CHANNELS.petGoalAdd, (_event, input) => {
+    const request = z
+      .object({
+        title: z.string().trim().min(1).max(80),
+        metric: z.enum(["tasks-completed", "focus-minutes", "habit-checkins"]),
+        target: z.number().int().min(1).max(9_999),
+        periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+        periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.addGoal(request);
+  });
+  handle(DESKTOP_CHANNELS.petGoalUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            title: z.string().trim().min(1).max(80).optional(),
+            metric: z.enum(["tasks-completed", "focus-minutes", "habit-checkins"]).optional(),
+            target: z.number().int().min(1).max(9_999).optional(),
+            periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+            periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+            enabled: z.boolean().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.updateGoal(request.id, request.patch);
+  });
+  handle(DESKTOP_CHANNELS.petGoalDelete, (_event, input) =>
+    dependencies.pet.deleteGoal(idSchema.parse(input)),
+  );
   handle(DESKTOP_CHANNELS.petDataExport, () => dependencies.pet.exportData());
   handle(DESKTOP_CHANNELS.petDataPreviewImport, () =>
     dependencies.pet.previewDataImport(),

@@ -15,6 +15,8 @@ import {
   type PetEvent,
   type PetMemoryEntry,
   type PetHabit,
+  type PetGoal,
+  type PetGoalMetric,
   type PetMiniGameRecord,
   type PetProfile,
   type PetPortableState,
@@ -74,6 +76,7 @@ export function createDefaultPetState(name = "小序", now = Date.now()): PetSta
     diary: [],
     memories: [],
     habits: defaultPetHabits(),
+    goals: [],
     proactiveMessages: [],
   };
 }
@@ -202,6 +205,47 @@ function normalizeState(value: unknown, name: string): PetState {
           .filter((habit, index, list) => habit.id.length > 0 && list.findIndex((candidate) => candidate.id === habit.id) === index)
           .slice(0, 12)
       : defaults.habits,
+    goals: Array.isArray(raw.goals)
+      ? raw.goals
+          .filter((goal): goal is PetGoal => {
+            if (!goal || typeof goal !== "object") return false;
+            const candidate = goal as unknown as Record<string, unknown>;
+            return (
+              typeof candidate.id === "string" &&
+              typeof candidate.title === "string" &&
+              (candidate.metric === "tasks-completed" ||
+                candidate.metric === "focus-minutes" ||
+                candidate.metric === "habit-checkins") &&
+              typeof candidate.target === "number" &&
+              Number.isFinite(candidate.target) &&
+              candidate.target > 0 &&
+              typeof candidate.periodStart === "string" &&
+              typeof candidate.periodEnd === "string" &&
+              isValidGoalDate(candidate.periodStart) &&
+              isValidGoalDate(candidate.periodEnd) &&
+              (candidate.enabled === undefined || typeof candidate.enabled === "boolean")
+            );
+          })
+          .map((goal) => ({
+            id: goal.id.trim().slice(0, 80),
+            title: goal.title.trim().slice(0, 80),
+            metric: goal.metric,
+            target: normalizeGoalTarget(goal.target),
+            periodStart: normalizeGoalDate(goal.periodStart),
+            periodEnd: normalizeGoalDate(goal.periodEnd),
+            enabled: goal.enabled !== false,
+            createdAt: typeof goal.createdAt === "string" ? goal.createdAt : isoNow(),
+            updatedAt: typeof goal.updatedAt === "string" ? goal.updatedAt : isoNow(),
+          }))
+          .filter(
+            (goal, index, list) =>
+              goal.id.length > 0 &&
+              goal.title.length > 0 &&
+              goal.periodStart <= goal.periodEnd &&
+              list.findIndex((candidate) => candidate.id === goal.id) === index,
+          )
+          .slice(0, 3)
+      : [],
     proactiveMessages: Array.isArray(raw.proactiveMessages)
       ? clone(raw.proactiveMessages)
       : [],
@@ -985,6 +1029,68 @@ export class PetService {
     return deleted;
   }
 
+  async addGoal(input: {
+    title: string;
+    metric: PetGoalMetric;
+    target: number;
+    periodStart: string;
+    periodEnd: string;
+  }): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      if (draft.goals.length >= 3) throw new Error("PET_GOAL_LIMIT");
+      const title = input.title.trim().slice(0, 80);
+      if (!title) throw new Error("EMPTY_PET_GOAL");
+      const metric = normalizeGoalMetric(input.metric);
+      const target = normalizeGoalTarget(input.target);
+      const periodStart = normalizeGoalDate(input.periodStart);
+      const periodEnd = normalizeGoalDate(input.periodEnd);
+      if (periodStart > periodEnd) throw new Error("INVALID_PET_GOAL_PERIOD");
+      draft.goals.push({
+        id: randomUUID(),
+        title,
+        metric,
+        target,
+        periodStart,
+        periodEnd,
+        enabled: true,
+        createdAt: isoNow(now),
+        updatedAt: isoNow(now),
+      });
+    });
+  }
+
+  async updateGoal(
+    id: string,
+    patch: Partial<Pick<PetGoal, "title" | "metric" | "target" | "periodStart" | "periodEnd" | "enabled">>,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      const goal = draft.goals.find((candidate) => candidate.id === id);
+      if (!goal) throw new Error("PET_GOAL_NOT_FOUND");
+      if (patch.title !== undefined) {
+        const title = patch.title.trim().slice(0, 80);
+        if (!title) throw new Error("EMPTY_PET_GOAL");
+        goal.title = title;
+      }
+      if (patch.metric !== undefined) goal.metric = normalizeGoalMetric(patch.metric);
+      if (patch.target !== undefined) goal.target = normalizeGoalTarget(patch.target);
+      if (patch.periodStart !== undefined) goal.periodStart = normalizeGoalDate(patch.periodStart);
+      if (patch.periodEnd !== undefined) goal.periodEnd = normalizeGoalDate(patch.periodEnd);
+      if (goal.periodStart > goal.periodEnd) throw new Error("INVALID_PET_GOAL_PERIOD");
+      if (patch.enabled !== undefined) goal.enabled = patch.enabled;
+      goal.updatedAt = isoNow(now);
+    });
+  }
+
+  async deleteGoal(id: string): Promise<boolean> {
+    let deleted = false;
+    await this.#mutate((draft) => {
+      const next = draft.goals.filter((goal) => goal.id !== id);
+      deleted = next.length !== draft.goals.length;
+      draft.goals = next;
+    });
+    return deleted;
+  }
+
   async recordInteraction(kind = "pet"): Promise<PetSnapshot> {
     return this.#mutate((draft, now, events) => {
       const day = isoNow(now).slice(0, 10);
@@ -1178,6 +1284,34 @@ function addInventoryItem(
 function normalizeHabitCadence(value: number): number {
   if (!Number.isFinite(value)) throw new Error("INVALID_PET_HABIT_CADENCE");
   return Math.min(1_440, Math.max(15, Math.round(value)));
+}
+
+function normalizeGoalMetric(value: PetGoalMetric): PetGoalMetric {
+  if (value !== "tasks-completed" && value !== "focus-minutes" && value !== "habit-checkins") {
+    throw new Error("INVALID_PET_GOAL_METRIC");
+  }
+  return value;
+}
+
+function isValidGoalDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function normalizeGoalDate(value: string): string {
+  if (!isValidGoalDate(value)) throw new Error("INVALID_PET_GOAL_DATE");
+  return value;
+}
+
+function normalizeGoalTarget(value: number): number {
+  if (!Number.isFinite(value)) throw new Error("INVALID_PET_GOAL_TARGET");
+  return Math.min(9_999, Math.max(1, Math.round(value)));
 }
 
 const DAILY_ADVENTURES = [

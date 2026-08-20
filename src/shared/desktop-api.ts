@@ -48,6 +48,8 @@ import type {
   PetCustomizationPatch,
   PetDiaryEntry,
   PetEvent,
+  PetGoal,
+  PetGoalMetric,
   PetMemoryEntry,
   PetSnapshot,
   PetMiniGameRecord,
@@ -549,6 +551,18 @@ export interface PetDesktopApi {
   completeHabit(id: string): Promise<PetSnapshot>;
   snoozeHabit(id: string, minutes?: number): Promise<PetSnapshot>;
   deleteHabit(id: string): Promise<boolean>;
+  addGoal(input: {
+    title: string;
+    metric: PetGoalMetric;
+    target: number;
+    periodStart: string;
+    periodEnd: string;
+  }): Promise<PetSnapshot>;
+  updateGoal(
+    id: string,
+    patch: Partial<Pick<PetGoal, "title" | "metric" | "target" | "periodStart" | "periodEnd" | "enabled">>,
+  ): Promise<PetSnapshot>;
+  deleteGoal(id: string): Promise<boolean>;
   exportData(): Promise<PetDataExportResultView>;
   previewDataImport(): Promise<PetDataPreviewResultView>;
   commitDataImport(
@@ -564,6 +578,7 @@ export interface PetDataCountsView {
   rewards: number;
   inventory: number;
   habits: number;
+  goals: number;
   adventures: number;
   miniGames: number;
   diary: number;
@@ -839,6 +854,9 @@ export const DESKTOP_CHANNELS = {
   petHabitComplete: "pet:habit-complete",
   petHabitSnooze: "pet:habit-snooze",
   petHabitDelete: "pet:habit-delete",
+  petGoalAdd: "pet:goal-add",
+  petGoalUpdate: "pet:goal-update",
+  petGoalDelete: "pet:goal-delete",
   petDataExport: "pet:data-export",
   petDataPreviewImport: "pet:data-preview-import",
   petDataCommitImport: "pet:data-commit-import",

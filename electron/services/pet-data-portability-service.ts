@@ -31,6 +31,7 @@ export interface PetDataCounts {
   rewards: number;
   inventory: number;
   habits: number;
+  goals: number;
   adventures: number;
   miniGames: number;
   diary: number;
@@ -155,6 +156,7 @@ const counts = (state: PetPortableState): PetDataCounts => ({
   rewards: state.rewards.length,
   inventory: state.inventory.length,
   habits: state.habits.length,
+  goals: state.goals.length,
   adventures: state.adventures.length,
   miniGames: state.miniGames.length,
   diary: state.diary.length,
@@ -208,7 +210,7 @@ const parseBundle = (json: string, maxBytes: number): PetPortableBundle => {
   const pet = expectRecord(data.pet, "$.data.pet");
   assertOnlyKeys(
     pet,
-    ["schemaVersion", "revision", "profile", "focusHistory", "rewards", "inventory", "appearance", "adventures", "miniGames", "diary", "memories", "habits", "proactiveMessages"],
+    ["schemaVersion", "revision", "profile", "focusHistory", "rewards", "inventory", "appearance", "adventures", "miniGames", "diary", "memories", "habits", "goals", "proactiveMessages"],
     "$.data.pet",
   );
   if (pet.focus !== undefined) throw new PetDataValidationError("Active focus cannot be imported", "$.data.pet.focus");
@@ -219,16 +221,21 @@ const parseBundle = (json: string, maxBytes: number): PetPortableBundle => {
   if (!isRecord(pet.profile)) throw new PetDataValidationError("Expected a pet profile object", "$.data.pet.profile");
   if (!isRecord(pet.appearance)) throw new PetDataValidationError("Expected a pet appearance object", "$.data.pet.appearance");
   const normalized = normalizePortablePetState(pet, "小序");
-  // `habits` was added after schema v1 backups had already shipped. Accept a
-  // missing field from those files and let normalizePortablePetState provide
-  // the default habits; all other durable collections were present from the
-  // first portable format.
+  // `habits` and `goals` were added after schema v1 backups had already
+  // shipped. Accept missing fields from those files and let
+  // normalizePortablePetState provide the defaults; all other durable
+  // collections were present from the first portable format.
   const arrays: Array<keyof PetPortableState> = [
     "focusHistory", "rewards", "inventory", "adventures", "miniGames", "diary", "memories", "proactiveMessages",
   ];
   arrays.forEach((key) => {
     if (!Array.isArray(pet[key])) throw new PetDataValidationError("Expected an array", `$.data.pet.${key}`);
   });
+  for (const key of ["habits", "goals"] as const) {
+    if (pet[key] !== undefined && !Array.isArray(pet[key])) {
+      throw new PetDataValidationError("Expected an array", `$.data.pet.${key}`);
+    }
+  }
   return {
     format: PET_PORTABLE_DATA_FORMAT,
     schemaVersion: 1,

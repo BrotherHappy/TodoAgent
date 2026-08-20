@@ -816,7 +816,7 @@ Todo Pet 的差异化不是“比 Todoist 多一个可爱的皮肤”，而是�
 | Google Tasks | Workspace 侧栏 | 从邮件 / 日历 / 文档创建 | 上下文捕获无跳转 | 剪贴板 / 当前窗口捕获 |
 | Any.do | 日历 + Daily Planner | My Day、位置 / 重复提醒 | 个人和家庭入口广 | 来源聚合与提醒策略 |
 | Structured | 垂直日线 | 拖 Inbox 到时间线、Replan | 视觉时间计划 | 展开窗时间线 |
-| Sunsama | 日计划 + 时间块 | Guided Planning、Rollover | 日常仪式成熟 | 早报 / 晚报流程 |
+| Sunsama | 日计划 + 时间块 | Guided Planning、Rollover、Weekly Objectives | 日常仪式与方向感成熟 | 早报 / 晚报流程，以及可选的本周同行目标 |
 | Akiflow | Universal Inbox + 日历 | 快捷键、P 规划、锁定时间 | 跨工具捕获高效 | 飞书 / 本地统一待整理 |
 | Motion | AI 日历 | 自动排程、依赖、风险 | 处理变化和容量 | Agent 建议日程 |
 | Reclaim | 日历防御层 | 弹性习惯、Focus Time | 习惯能围绕日程移动 | 弹性休息与生活提醒 |
@@ -824,7 +824,7 @@ Todo Pet 的差异化不是“比 Todoist 多一个可爱的皮肤”，而是�
 | Amie | 日历与 Todo 同屏 | `⌘/Ctrl+K`、自然语言、AI 找时间 | 任务时长和时间块同录入 | 语音 + 时长预览 |
 | Tiimo | 视觉时间线 | Brain dump → 步骤 / 时长 / 计划 | 适合执行功能困难用户 | 每次只提示下一步 |
 | Sorted³ | 日线 + Calendar Drawer | Auto Schedule、Magic Select | 自动和手动重排结合 | 两套可解释计划 |
-| Amazing Marvin | 可配置 Day Planner | 策略开关、Check-in | 个性化工作流极强 | 主动性策略模板 |
+| Amazing Marvin | 可配置 Day Planner | 策略开关、Check-in、Goals | 个性化工作流与长期方向极强 | 主动性策略模板与不施压的目标卡 |
 | SkedPal | 约束式日程 | 截止日 + 约束 → 自动排程 | 以“完成目标”而非提醒为中心 | 约束模型和预览 |
 | Remember The Milk | 列表 + Smart List | Smart Add、地点 / 标签 | 上下文过滤简单直接 | 手动上下文，不默认定位 |
 | Superlist | 列表 + section + 笔记 | Talk 语音、会议行动项 | 任务和笔记同上下文 | 语音预览、日记联动 |
@@ -853,7 +853,7 @@ Todo Pet 的差异化不是“比 Todoist 多一个可爱的皮肤”，而是�
 
 | 产品 | UI 形态 | 关键交互 | 相比 Todo Pet 的突出优势 | Todo Pet 具体吸收 |
 |---|---|---|---|---|
-| Finch | 宠物房间 + 目标 | 目标、呼吸、Quests、Micropet | 温和自护和功能引导 | 低压力问候与可选模块 |
+| Finch | 宠物房间 + 目标 | 目标、Goal Challenges、呼吸、Quests、Micropet | 温和自护和功能引导 | 低压力问候、可选模块与基于事实的目标进度 |
 | Forest | 种树专注 | 计时、阻断、群组、森林 | 专注成果视觉化强 | 任务成果变收藏 |
 | Habitica | RPG 任务 | 经验、金币、装备、宠物、任务 | 奖励经济和长期目标 | 装扮 / 家园 / 章节 |
 | Focus Friend | 宠物 + 计时器 | Focus Shield、暂停、休息 | 专注主线极清楚 | 专注气泡状态机 |
@@ -961,3 +961,4 @@ Todo Pet 的差异化不是“比 Todoist 多一个可爱的皮肤”，而是�
 | 2026-08-20 | v1.73 | 延伸 Todoist / Remember The Milk 的保存查询模式：Todo Pet 的“全部”任务面板可直接选择主窗口已保存的智能视图，复用项目、标签、情境、日期、来源和排序；只做本地投影，不复制任务、不写回飞书 |
 | 2026-08-20 | v1.74 | 延伸 Vikunja / Joplin / Anytype 的本地优先迁移与可读备份：Todo Pet 新增独立 `.todo-pet.json` 档案导出与导入预览，覆盖成长、外观、库存、冒险、小游戏、日记、记忆、主动消息和专注历史；导入可保留本机或覆盖，活动专注、凭据和本地路径永不进入档案 |
 | 2026-08-20 | v1.75 | 延伸 TickTick / Reclaim / Finch 的弹性节奏能力：Todo Pet 将原本固定的喝水、伸展和收尾提示迁移为 PetService 中最多 12 项可配置习惯，支持自定义名称/提示/间隔、完成、稍后、暂停/恢复和移除；旧版 renderer 本地习惯会一次性迁移，习惯随 `.todo-pet.json` 档案备份，不创建任务、不发放奖励、不维护连续签到，也不在专注或会议期间强打断 |
+| 2026-08-20 | v1.76 | 吸收 Sunsama Weekly Objectives、Finch Goal Challenges 与 Amazing Marvin Goals 的方向感：Todo Pet 小窝新增最多 3 项可选本周同行目标，支持完成任务、专注分钟或习惯照顾三类指标；进度从真实任务/专注/习惯事实实时投影，支持编辑、暂停/恢复、移除和档案迁移，不复制任务、不维护第二份计数、不制造连续签到或惩罚，也不写回飞书 |

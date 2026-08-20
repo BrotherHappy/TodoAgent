@@ -5743,6 +5743,7 @@ select {
   background: linear-gradient(90deg, var(--app-brand), #65cbbd);
 }
 .pet-attributes-card,
+.pet-goals-card,
 .pet-habits-card,
 .pet-rewards-card {
   grid-column: 1 / -1;
@@ -5881,6 +5882,144 @@ select {
 }
 .pet-habit-editor .pet-habit-actions {
   grid-column: 1 / -1;
+}
+.pet-goals-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 13px;
+}
+.pet-goal-row {
+  border: 1px solid var(--app-line);
+  border-radius: 15px;
+  padding: 11px 12px;
+  background: var(--app-glass-soft);
+}
+.pet-goal-row.is-complete {
+  border-color: color-mix(in srgb, var(--app-success) 35%, var(--app-line));
+}
+.pet-goal-row.is-disabled,
+.pet-goal-row.is-past {
+  opacity: .66;
+}
+.pet-goal-row-top {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.pet-goal-mark {
+  display: grid;
+  place-items: center;
+  color: var(--app-brand-strong);
+}
+.pet-goal-copy {
+  min-width: 0;
+}
+.pet-goal-copy strong,
+.pet-goal-copy small {
+  display: block;
+}
+.pet-goal-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.pet-goal-copy small,
+.pet-goal-row-bottom > span {
+  margin-top: 3px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.pet-goal-row-top > b {
+  color: var(--app-brand-strong);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pet-goal-row-top > b em {
+  color: var(--app-text-faint);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+}
+.pet-goal-track {
+  height: 7px;
+  margin: 10px 0 8px 32px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--app-line);
+}
+.pet-goal-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--app-brand), #65cbbd);
+  transition: width 180ms ease;
+}
+.pet-goal-row-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-left: 32px;
+}
+.pet-goal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.pet-goal-editor {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) minmax(130px, 1fr) 112px;
+  gap: 8px;
+  margin-top: 13px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--app-brand-soft) 38%, var(--app-surface-raised));
+}
+.pet-goal-editor label {
+  display: grid;
+  gap: 4px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.pet-goal-editor input,
+.pet-goal-editor select {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 9px;
+  padding: 6px 8px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12px;
+}
+.pet-goal-editor-note {
+  align-self: end;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.pet-goal-editor > .pet-goal-actions {
+  grid-column: 1 / -1;
+}
+.pet-goals-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 13px;
+  border: 1px dashed var(--app-line-strong);
+  border-radius: 14px;
+  padding: 13px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.pet-goals-empty svg {
+  flex: 0 0 auto;
+  color: var(--app-brand-strong);
 }
 .pet-evening-review-card {
   grid-column: 1 / -1;
@@ -9162,6 +9301,21 @@ select {
   }
   .pet-habit-editor .pet-habit-actions {
     grid-column: 1;
+  }
+  .pet-goal-editor {
+    grid-template-columns: 1fr;
+  }
+  .pet-goal-editor > .pet-goal-actions {
+    grid-column: 1;
+    justify-content: flex-start;
+  }
+  .pet-goal-row-bottom {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-left: 32px;
+  }
+  .pet-goal-actions {
+    justify-content: flex-start;
   }
   .settings-row {
     grid-template-columns: 1fr;

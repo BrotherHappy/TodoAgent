@@ -201,6 +201,23 @@ export interface PetHabit {
   snoozedUntil?: string;
 }
 
+/** A gentle, optional direction for the current week. Progress is projected
+ * from task/focus/habit facts in the renderer rather than stored as a second
+ * counter, so it can never drift from the real records. */
+export type PetGoalMetric = "tasks-completed" | "focus-minutes" | "habit-checkins";
+
+export interface PetGoal {
+  id: string;
+  title: string;
+  metric: PetGoalMetric;
+  target: number;
+  periodStart: string;
+  periodEnd: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProactiveMessageRecord {
   id: string;
   kind:
@@ -231,6 +248,7 @@ export interface PetState {
   diary: PetDiaryEntry[];
   memories: PetMemoryEntry[];
   habits: PetHabit[];
+  goals: PetGoal[];
   proactiveMessages: ProactiveMessageRecord[];
 }
 
