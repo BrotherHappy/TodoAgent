@@ -920,6 +920,35 @@ export function registerDesktopIpc(
       .parse(input);
     return dependencies.pet.customize(request);
   });
+  handle(DESKTOP_CHANNELS.petCompanionAdd, (_event, input) => {
+    const request = z
+      .object({
+        kind: z.enum(["paper-bird", "cloudlet", "moss-mouse", "moon-moth"]),
+        name: z.string().trim().min(1).max(40).optional(),
+        personality: z.enum(["gentle", "energetic", "calm", "playful", "witty", "quiet"]).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.addCompanion(request);
+  });
+  handle(DESKTOP_CHANNELS.petCompanionUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: z.string().trim().min(1).max(80),
+        patch: z
+          .object({
+            name: z.string().trim().min(1).max(40).optional(),
+            personality: z.enum(["gentle", "energetic", "calm", "playful", "witty", "quiet"]).optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.updateCompanion(request.id, request.patch);
+  });
+  handle(DESKTOP_CHANNELS.petCompanionDelete, (_event, input) =>
+    dependencies.pet.deleteCompanion(z.string().trim().min(1).max(80).parse(input)),
+  );
   handle(DESKTOP_CHANNELS.petInteract, (_event, input) =>
     dependencies.pet.interact(
       input === undefined

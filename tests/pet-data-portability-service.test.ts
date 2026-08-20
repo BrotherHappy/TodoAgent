@@ -41,7 +41,8 @@ async function seededPet(): Promise<{ service: PetServiceType; state: PetPortabl
   const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-portable-"));
   const service = new PetService({ userDataPath: root, initialName: "团团" });
   await service.initialize();
-  await service.customize({ palette: "mint", outfit: "scarf" });
+    await service.customize({ palette: "mint", outfit: "scarf" });
+    await service.addCompanion({ kind: "cloudlet", name: "慢慢", personality: "quiet" });
   await service.addMemory({ kind: "preference", content: "上午适合深度工作" });
   await service.createDiaryFromCapture({
     localDate: "2026-08-20",
@@ -64,6 +65,7 @@ describe("PetDataPortabilityService", () => {
     expect(bundle.data.pet.profile.personality).toBe("gentle");
     expect(bundle.data.pet.habits.map((habit) => habit.id)).toContain("water");
     expect(bundle.data.pet.goals).toEqual([]);
+    expect(bundle.data.pet.companions).toHaveLength(1);
     expect("focus" in bundle.data.pet).toBe(false);
     expect(json).toContain("共同记录");
   });
@@ -79,6 +81,7 @@ describe("PetDataPortabilityService", () => {
     const preview = await portability.previewImport(JSON.stringify(base), "overwrite");
     expect(preview.incoming.habits).toBe(3);
     expect(preview.incoming.goals).toBe(0);
+    expect(preview.incoming.companions).toBe(1);
   });
 
   it("previews overwrite and preserves the running focus when applying", async () => {

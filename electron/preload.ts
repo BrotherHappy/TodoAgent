@@ -214,6 +214,12 @@ const desktopApi: DesktopApi = {
     rename: (name) => ipcRenderer.invoke(DESKTOP_CHANNELS.petRename, name),
     customize: (patch) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petCustomize, patch),
+    addCompanion: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petCompanionAdd, input),
+    updateCompanion: (id, patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petCompanionUpdate, { id, patch }),
+    deleteCompanion: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petCompanionDelete, id),
     interact: (kind) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petInteract, kind),
     dailyAdventure: (localDate) =>

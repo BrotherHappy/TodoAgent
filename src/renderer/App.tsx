@@ -145,6 +145,7 @@ import type {
 import type {
   FocusSessionView,
   PetAdventure,
+  PetCompanionKind,
   PetDiaryEntry,
   PetGoal,
   PetGoalMetric,
@@ -217,6 +218,10 @@ import {
   PetInteractionWheel,
   type FloatingPetGame,
 } from "./PetInteractionWheel";
+import {
+  PetCompanionAvatar,
+  kindLabels as petCompanionKindLabels,
+} from "./PetCompanionAvatar";
 import {
   petInteractionFromPoint,
   type PetAction,
@@ -7878,6 +7883,20 @@ function PetHomePage({
             {snapshot.appearance.decorations.includes("books") && (
               <span className="pet-room-decoration room-books" aria-hidden="true">▥</span>
             )}
+            {snapshot.companions.length > 0 && (
+              <div className="pet-room-companions" aria-label="小窝里的陪伴小伙伴">
+                {snapshot.companions.map((companion) => (
+                  <span className="pet-room-companion-slot" key={companion.id}>
+                    <PetCompanionAvatar
+                      kind={companion.kind}
+                      name={companion.name}
+                      personality={companion.personality}
+                    />
+                    <span>{companion.name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
             <PetCharacter
               name={profile.name}
               mood="happy"
@@ -8010,6 +8029,92 @@ function PetHomePage({
                 );
               })}
             </fieldset>
+            <section className="pet-companion-roster" aria-labelledby="pet-companion-roster-title">
+              <div className="pet-companion-roster-heading">
+                <div>
+                  <h3 id="pet-companion-roster-title">邀请小伙伴</h3>
+                  <p>它们只在小窝里陪你，不复制任务，也不参与同步。</p>
+                </div>
+                <span className="pet-companion-roster-count">{snapshot.companions.length}/3</span>
+              </div>
+              {snapshot.companions.length > 0 && (
+                <div className="pet-companion-list">
+                  {snapshot.companions.map((companion) => (
+                    <div className="pet-companion-card" key={companion.id}>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        aria-label={`让${companion.name}暂时离开小窝`}
+                        title="让它暂时离开小窝"
+                        onClick={() =>
+                          void run(async () => {
+                            await window.desktopApi?.pet.deleteCompanion(companion.id);
+                          }, `${companion.name}先去休息了`)
+                        }
+                      >
+                        <X size={13} />
+                      </button>
+                      <PetCompanionAvatar
+                        kind={companion.kind}
+                        name={companion.name}
+                        personality={companion.personality}
+                        compact
+                      />
+                      <strong>{companion.name}</strong>
+                      <small>{petCompanionKindLabels[companion.kind]}</small>
+                      <select
+                        value={companion.personality}
+                        disabled={busy}
+                        aria-label={`设置${companion.name}的陪伴性格`}
+                        onChange={(event) =>
+                          void run(async () => {
+                            await window.desktopApi?.pet.updateCompanion(companion.id, {
+                              personality: event.target.value as PetPersonality,
+                            });
+                          }, `${companion.name}的节奏已调整`)
+                        }
+                      >
+                        <option value="gentle">温柔</option>
+                        <option value="energetic">元气</option>
+                        <option value="calm">冷静</option>
+                        <option value="playful">活泼</option>
+                        <option value="witty">淘气</option>
+                        <option value="quiet">安静</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {snapshot.companions.length < 3 && (
+                <div className="pet-companion-add" aria-label="可邀请的小伙伴">
+                  {([
+                    ["paper-bird", "纸飞机", "帮你传递下一步"],
+                    ["cloudlet", "云团", "把节奏放慢一点"],
+                    ["moss-mouse", "苔苔", "一起整理小角落"],
+                    ["moon-moth", "月蛾", "安静陪你专注"],
+                  ] as const).map(([kind, label, hint]) => {
+                    const exists = snapshot.companions.some((companion) => companion.kind === kind);
+                    return (
+                      <button
+                        type="button"
+                        key={kind}
+                        disabled={busy || exists}
+                        title={exists ? `${label}已经在小窝里` : hint}
+                        onClick={() =>
+                          void run(async () => {
+                            await window.desktopApi?.pet.addCompanion({
+                              kind: kind as PetCompanionKind,
+                            });
+                          }, `${label}来小窝啦`)
+                        }
+                      >
+                        {exists ? "✓ " : "+ "}{label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           </div>
         </section>
       )}
@@ -11699,6 +11804,7 @@ function SettingsPage({
                   ["小游戏", plan.incoming.miniGames, plan.existing.miniGames],
                   ["弹性习惯", plan.incoming.habits, plan.existing.habits],
                   ["本周同行目标", plan.incoming.goals, plan.existing.goals],
+                  ["小窝伙伴", plan.incoming.companions, plan.existing.companions],
                   ["日记", plan.incoming.diary, plan.existing.diary],
                   ["记忆", plan.incoming.memories, plan.existing.memories],
                   ["互动消息", plan.incoming.proactiveMessages, plan.existing.proactiveMessages],

@@ -45,6 +45,8 @@ import type {
 import type { AppSettings, PublicCredentialState } from "./settings";
 import type {
   PetAdventure,
+  PetCompanion,
+  PetCompanionKind,
   PetCustomizationPatch,
   PetDiaryEntry,
   PetEvent,
@@ -53,6 +55,7 @@ import type {
   PetMemoryEntry,
   PetSnapshot,
   PetMiniGameRecord,
+  PetPersonality,
   ProactiveMessageRecord,
   StartFocusRequest,
   WeatherSnapshot,
@@ -509,6 +512,16 @@ export interface PetDesktopApi {
   snapshot(): Promise<PetSnapshot>;
   rename(name: string): Promise<PetSnapshot>;
   customize(patch: PetCustomizationPatch): Promise<PetSnapshot>;
+  addCompanion(input: {
+    kind: PetCompanionKind;
+    name?: string;
+    personality?: PetPersonality;
+  }): Promise<PetSnapshot>;
+  updateCompanion(
+    id: string,
+    patch: Partial<Pick<PetCompanion, "name" | "personality">>,
+  ): Promise<PetSnapshot>;
+  deleteCompanion(id: string): Promise<boolean>;
   interact(kind?: string): Promise<PetSnapshot>;
   dailyAdventure(localDate?: string): Promise<PetAdventure>;
   completeAdventure(
@@ -591,6 +604,7 @@ export interface PetDataCountsView {
   miniGames: number;
   diary: number;
   memories: number;
+  companions: number;
   proactiveMessages: number;
   focusHistory: number;
 }
@@ -837,6 +851,9 @@ export const DESKTOP_CHANNELS = {
   petSnapshot: "pet:snapshot",
   petRename: "pet:rename",
   petCustomize: "pet:customize",
+  petCompanionAdd: "pet:companion-add",
+  petCompanionUpdate: "pet:companion-update",
+  petCompanionDelete: "pet:companion-delete",
   petInteract: "pet:interact",
   petAdventureDaily: "pet:adventure-daily",
   petAdventureComplete: "pet:adventure-complete",

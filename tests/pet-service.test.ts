@@ -35,6 +35,33 @@ function completedTask(id: string, priority: Task["priority"] = "medium"): Task 
 }
 
 describe("PetService", () => {
+  it("keeps up to three room-only companions and restores their personalities", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-companions-"));
+    const service = new PetService({ userDataPath: root });
+    await service.initialize();
+
+    const added = await service.addCompanion({ kind: "paper-bird" });
+    expect(added.companions).toHaveLength(1);
+    expect(added.companions[0]).toMatchObject({ kind: "paper-bird", name: "纸飞机", personality: "energetic" });
+    const cloud = await service.addCompanion({ kind: "cloudlet", name: "慢慢", personality: "quiet" });
+    await service.addCompanion({ kind: "moss-mouse" });
+    expect(cloud.companions).toHaveLength(2);
+    await expect(service.addCompanion({ kind: "moon-moth" })).rejects.toThrow("PET_COMPANION_LIMIT");
+    await expect(service.addCompanion({ kind: "cloudlet" })).rejects.toThrow("PET_COMPANION_LIMIT");
+
+    const id = service.snapshot().companions[1]!.id;
+    await service.updateCompanion(id, { name: "安静慢慢", personality: "calm" });
+    const restored = new PetService({ userDataPath: root });
+    await restored.initialize();
+    expect(restored.snapshot().companions.find((companion) => companion.id === id)).toMatchObject({
+      name: "安静慢慢",
+      personality: "calm",
+    });
+    expect(await restored.deleteCompanion(id)).toBe(true);
+    expect(restored.snapshot().companions).toHaveLength(2);
+    await expect(restored.addCompanion({ kind: "paper-bird" })).rejects.toThrow("PET_COMPANION_EXISTS");
+  });
+
   it("stores configurable elastic habits without creating rewards or tasks", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-habits-"));
     let now = Date.parse("2026-08-20T08:00:00.000Z");

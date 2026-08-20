@@ -36,6 +36,7 @@ export interface PetDataCounts {
   miniGames: number;
   diary: number;
   memories: number;
+  companions: number;
   proactiveMessages: number;
   focusHistory: number;
 }
@@ -161,6 +162,7 @@ const counts = (state: PetPortableState): PetDataCounts => ({
   miniGames: state.miniGames.length,
   diary: state.diary.length,
   memories: state.memories.length,
+  companions: state.companions.length,
   proactiveMessages: state.proactiveMessages.length,
   focusHistory: state.focusHistory.length,
 });
@@ -210,7 +212,7 @@ const parseBundle = (json: string, maxBytes: number): PetPortableBundle => {
   const pet = expectRecord(data.pet, "$.data.pet");
   assertOnlyKeys(
     pet,
-    ["schemaVersion", "revision", "profile", "focusHistory", "rewards", "inventory", "appearance", "adventures", "miniGames", "diary", "memories", "habits", "goals", "proactiveMessages"],
+    ["schemaVersion", "revision", "profile", "focusHistory", "rewards", "inventory", "appearance", "adventures", "miniGames", "diary", "memories", "habits", "goals", "companions", "proactiveMessages"],
     "$.data.pet",
   );
   if (pet.focus !== undefined) throw new PetDataValidationError("Active focus cannot be imported", "$.data.pet.focus");
@@ -235,6 +237,9 @@ const parseBundle = (json: string, maxBytes: number): PetPortableBundle => {
     if (pet[key] !== undefined && !Array.isArray(pet[key])) {
       throw new PetDataValidationError("Expected an array", `$.data.pet.${key}`);
     }
+  }
+  if (pet.companions !== undefined && !Array.isArray(pet.companions)) {
+    throw new PetDataValidationError("Expected an array", "$.data.pet.companions");
   }
   return {
     format: PET_PORTABLE_DATA_FORMAT,

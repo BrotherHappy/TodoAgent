@@ -1276,6 +1276,9 @@ async function startApplication(): Promise<void> {
       return snapshot;
     },
     customize: (patch) => petService!.customize(patch),
+    addCompanion: (input) => petService!.addCompanion(input),
+    updateCompanion: (id, patch) => petService!.updateCompanion(id, patch),
+    deleteCompanion: (id) => petService!.deleteCompanion(id),
     interact: (kind) => petService!.recordInteraction(kind),
     dailyAdventure: (localDate) => petService!.dailyAdventure(localDate),
     completeAdventure: (adventureId, choiceId) =>

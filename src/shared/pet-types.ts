@@ -79,6 +79,25 @@ export type PetPersonality =
   | "witty"
   | "quiet";
 
+/**
+ * Optional room companions. They are presentation-only helpers: the main
+ * pet remains the single desktop presence and all task facts continue to live
+ * in the task store.
+ */
+export type PetCompanionKind =
+  | "paper-bird"
+  | "cloudlet"
+  | "moss-mouse"
+  | "moon-moth";
+
+export interface PetCompanion {
+  id: string;
+  kind: PetCompanionKind;
+  name: string;
+  personality: PetPersonality;
+  unlockedAt: string;
+}
+
 export interface PetProfile {
   id: string;
   name: string;
@@ -260,6 +279,7 @@ export interface PetState {
   memories: PetMemoryEntry[];
   habits: PetHabit[];
   goals: PetGoal[];
+  companions: PetCompanion[];
   proactiveMessages: ProactiveMessageRecord[];
 }
 

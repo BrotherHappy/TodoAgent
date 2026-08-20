@@ -6846,6 +6846,212 @@ select {
   position: relative;
   z-index: 2;
 }
+.pet-room-companions {
+  position: absolute;
+  z-index: 3;
+  right: 9%;
+  bottom: 12%;
+  left: 9%;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.pet-room-companions .pet-companion-avatar {
+  pointer-events: auto;
+}
+.pet-room-companion-slot {
+  min-width: 86px;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  color: var(--app-text-soft);
+  font-size: 10px;
+  font-weight: 650;
+}
+.pet-room-companion-slot > span:last-child {
+  max-width: 82px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-companion-avatar {
+  --companion-size: 56px;
+  position: relative;
+  width: var(--companion-size);
+  height: calc(var(--companion-size) * 0.95);
+  display: inline-block;
+  vertical-align: middle;
+}
+.pet-companion-avatar.is-compact {
+  --companion-size: 35px;
+}
+.pet-companion-shadow {
+  position: absolute;
+  right: 8%;
+  bottom: 0;
+  left: 8%;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, #3e3a78 24%, transparent);
+  filter: blur(3px);
+}
+.pet-companion-shape {
+  position: absolute;
+  right: 8%;
+  bottom: 8%;
+  left: 8%;
+  height: 74%;
+  display: block;
+  border: 2px solid color-mix(in srgb, var(--companion-accent) 66%, #fff);
+  border-radius: 46% 46% 43% 43%;
+  background: linear-gradient(145deg, var(--companion-light), var(--companion-mid));
+  box-shadow: 0 7px 14px color-mix(in srgb, var(--companion-accent) 22%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  transform-origin: 50% 90%;
+  animation: pet-companion-bob 3.8s ease-in-out infinite;
+}
+.pet-companion-shape b {
+  position: absolute;
+  top: 19%;
+  left: 50%;
+  color: color-mix(in srgb, var(--companion-accent) 82%, #fff);
+  font-size: calc(var(--companion-size) * 0.29);
+  font-weight: 800;
+  transform: translateX(-50%);
+}
+.pet-companion-eye {
+  position: absolute;
+  top: 53%;
+  width: 4px;
+  height: 6px;
+  border-radius: 50%;
+  background: #26264e;
+}
+.pet-companion-eye-left { left: 30%; }
+.pet-companion-eye-right { right: 30%; }
+.pet-companion-ear {
+  position: absolute;
+  top: -19%;
+  width: 33%;
+  height: 37%;
+  border: 2px solid color-mix(in srgb, var(--companion-accent) 66%, #fff);
+  border-radius: 75% 20% 65% 22%;
+  background: var(--companion-light);
+}
+.pet-companion-ear-left { left: 10%; transform: rotate(-24deg); }
+.pet-companion-ear-right { right: 10%; transform: scaleX(-1) rotate(-24deg); }
+.pet-companion-paper-bird {
+  --companion-accent: #6a63de;
+  --companion-light: #e9e7ff;
+  --companion-mid: #aca9f2;
+}
+.pet-companion-cloudlet {
+  --companion-accent: #5ba6c5;
+  --companion-light: #e8f7ff;
+  --companion-mid: #a9dceb;
+}
+.pet-companion-moss-mouse {
+  --companion-accent: #6a9c75;
+  --companion-light: #e6f3df;
+  --companion-mid: #a8c997;
+}
+.pet-companion-moon-moth {
+  --companion-accent: #7567b4;
+  --companion-light: #f0ecff;
+  --companion-mid: #c8bff0;
+}
+.pet-companion-personality-energetic .pet-companion-shape,
+.pet-companion-personality-playful .pet-companion-shape { animation-duration: 2.5s; }
+.pet-companion-personality-calm .pet-companion-shape,
+.pet-companion-personality-quiet .pet-companion-shape { animation-duration: 5.8s; }
+@keyframes pet-companion-bob {
+  0%, 100% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-4px) rotate(1deg); }
+}
+.pet-companion-roster {
+  display: grid;
+  gap: 11px;
+  margin-top: 4px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 17px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--app-brand-soft) 32%, transparent);
+}
+.pet-companion-roster-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pet-companion-roster-heading h3,
+.pet-companion-roster-heading p { margin: 0; }
+.pet-companion-roster-heading h3 { font-size: 14px; }
+.pet-companion-roster-heading p { margin-top: 3px; color: var(--app-text-soft); font-size: 11px; line-height: 1.45; }
+.pet-companion-roster-count { color: var(--app-text-faint); font-size: 11px; white-space: nowrap; }
+.pet-companion-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.pet-companion-card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid var(--app-line);
+  border-radius: 13px;
+  padding: 8px 6px 7px;
+  background: var(--app-surface-raised);
+}
+.pet-companion-card strong,
+.pet-companion-card small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-companion-card strong { font-size: 11px; }
+.pet-companion-card small { color: var(--app-text-faint); font-size: 10px; }
+.pet-companion-card select {
+  width: 100%;
+  min-height: 26px;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+  padding: 3px 5px;
+  color: var(--app-text-soft);
+  background: var(--app-surface-raised);
+  font-size: 10px;
+}
+.pet-companion-card button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  min-height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: var(--app-text-faint);
+  background: transparent;
+}
+.pet-companion-card button:hover,
+.pet-companion-card button:focus-visible { color: var(--app-danger); background: color-mix(in srgb, var(--app-danger) 10%, transparent); }
+.pet-companion-add {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.pet-companion-add button {
+  min-height: 32px;
+  border: 1px dashed var(--app-line-strong);
+  border-radius: 10px;
+  padding: 5px 7px;
+  color: var(--app-text-soft);
+  background: transparent;
+  font-size: 10px;
+}
+.pet-companion-add button:hover,
+.pet-companion-add button:focus-visible { border-color: var(--app-brand); color: var(--app-brand-strong); background: var(--app-brand-soft); }
+@media (prefers-reduced-motion: reduce) {
+  .pet-companion-shape { animation: none; }
+}
 .pet-room-window {
   position: absolute;
   top: 32px;

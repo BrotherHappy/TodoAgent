@@ -12,6 +12,8 @@ import {
   type PetDiaryEntry,
   type PetAdventure,
   type PetCustomizationPatch,
+  type PetCompanion,
+  type PetCompanionKind,
   type PetEvent,
   type PetMemoryEntry,
   type PetHabit,
@@ -66,6 +68,49 @@ function normalizePersonality(value: unknown): PetPersonality {
   return "gentle";
 }
 
+const COMPANION_DEFAULTS: Record<PetCompanionKind, { name: string; personality: PetPersonality }> = {
+  "paper-bird": { name: "纸飞机", personality: "energetic" },
+  cloudlet: { name: "云团", personality: "calm" },
+  "moss-mouse": { name: "苔苔", personality: "gentle" },
+  "moon-moth": { name: "月蛾", personality: "quiet" },
+};
+
+const COMPANION_KINDS = new Set<PetCompanionKind>(Object.keys(COMPANION_DEFAULTS) as PetCompanionKind[]);
+
+function normalizeCompanions(value: unknown, now: number): PetCompanion[] {
+  if (!Array.isArray(value)) return [];
+  const seenIds = new Set<string>();
+  const seenKinds = new Set<PetCompanionKind>();
+  return value
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    .map((entry) => {
+      const kind = COMPANION_KINDS.has(entry.kind as PetCompanionKind)
+        ? (entry.kind as PetCompanionKind)
+        : undefined;
+      if (!kind) return undefined;
+      const defaults = COMPANION_DEFAULTS[kind];
+      const id = typeof entry.id === "string" ? entry.id.trim().slice(0, 80) : "";
+      const name = typeof entry.name === "string" ? entry.name.trim().slice(0, 40) : "";
+      const unlockedAt = typeof entry.unlockedAt === "string" && !Number.isNaN(Date.parse(entry.unlockedAt))
+        ? entry.unlockedAt
+        : isoNow(now);
+      return {
+        id: id || randomUUID(),
+        kind,
+        name: name || defaults.name,
+        personality: normalizePersonality(entry.personality),
+        unlockedAt,
+      } satisfies PetCompanion;
+    })
+    .filter((entry): entry is PetCompanion => {
+      if (!entry || seenIds.has(entry.id) || seenKinds.has(entry.kind)) return false;
+      seenIds.add(entry.id);
+      seenKinds.add(entry.kind);
+      return true;
+    })
+    .slice(0, 3);
+}
+
 export function createDefaultPetState(name = "小序", now = Date.now()): PetState {
   const timestamp = isoNow(now);
   return {
@@ -91,6 +136,7 @@ export function createDefaultPetState(name = "小序", now = Date.now()): PetSta
     memories: [],
     habits: defaultPetHabits(),
     goals: [],
+    companions: [],
     proactiveMessages: [],
   };
 }
@@ -151,7 +197,7 @@ function viewFocus(session: FocusSession, now = Date.now()): FocusSessionView {
   };
 }
 
-function normalizeState(value: unknown, name: string): PetState {
+function normalizeState(value: unknown, name: string, now = Date.now()): PetState {
   if (!value || typeof value !== "object") return createDefaultPetState(name);
   const raw = value as Partial<PetState>;
   if (raw.schemaVersion !== 1 || !raw.profile) return createDefaultPetState(name);
@@ -261,6 +307,7 @@ function normalizeState(value: unknown, name: string): PetState {
           )
           .slice(0, 3)
       : [],
+    companions: normalizeCompanions(raw.companions, now),
     proactiveMessages: Array.isArray(raw.proactiveMessages)
       ? clone(raw.proactiveMessages)
       : [],
@@ -344,7 +391,7 @@ export class PetService {
   async initialize(): Promise<PetSnapshot> {
     try {
       const raw = JSON.parse(await readFile(this.#filePath, "utf8")) as unknown;
-      this.#state = normalizeState(raw, this.#initialName);
+      this.#state = normalizeState(raw, this.#initialName, this.#now());
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       await atomicWrite(this.#filePath, this.#state);
@@ -435,6 +482,82 @@ export class PetService {
       draft.profile.updatedAt = isoNow(now);
       events.push({ type: "customization-changed", at: isoNow(now) });
     });
+  }
+
+  /**
+   * Add one of the small room-only companions. Companions never receive a
+   * copied task list and are intentionally capped so the room stays calm.
+   */
+  async addCompanion(input: {
+    kind: PetCompanionKind;
+    name?: string;
+    personality?: PetPersonality;
+  }): Promise<PetSnapshot> {
+    return this.#mutate((draft, now, events) => {
+      if (!COMPANION_KINDS.has(input.kind)) throw new Error("INVALID_PET_COMPANION_KIND");
+      if (draft.companions.length >= 3) throw new Error("PET_COMPANION_LIMIT");
+      if (draft.companions.some((companion) => companion.kind === input.kind)) {
+        throw new Error("PET_COMPANION_EXISTS");
+      }
+      const defaults = COMPANION_DEFAULTS[input.kind];
+      const name = input.name?.trim().slice(0, 40) || defaults.name;
+      if (!name) throw new Error("EMPTY_PET_COMPANION_NAME");
+      const personality = input.personality ?? defaults.personality;
+      if (!COMPANION_KINDS.has(input.kind) || ![
+        "gentle",
+        "energetic",
+        "calm",
+        "playful",
+        "witty",
+        "quiet",
+      ].includes(personality)) {
+        throw new Error("INVALID_PET_PERSONALITY");
+      }
+      draft.companions.push({
+        id: randomUUID(),
+        kind: input.kind,
+        name,
+        personality,
+        unlockedAt: isoNow(now),
+      });
+      events.push({ type: "customization-changed", at: isoNow(now) });
+    });
+  }
+
+  async updateCompanion(
+    id: string,
+    patch: Partial<Pick<PetCompanion, "name" | "personality">>,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft, now, events) => {
+      const companion = draft.companions.find((entry) => entry.id === id);
+      if (!companion) throw new Error("PET_COMPANION_NOT_FOUND");
+      if (patch.name !== undefined) {
+        const name = patch.name.trim().slice(0, 40);
+        if (!name) throw new Error("EMPTY_PET_COMPANION_NAME");
+        companion.name = name;
+      }
+      if (patch.personality !== undefined) {
+        if (!["gentle", "energetic", "calm", "playful", "witty", "quiet"].includes(patch.personality)) {
+          throw new Error("INVALID_PET_PERSONALITY");
+        }
+        companion.personality = patch.personality;
+      }
+      draft.profile.updatedAt = isoNow(now);
+      events.push({ type: "customization-changed", at: isoNow(now) });
+    });
+  }
+
+  async deleteCompanion(id: string): Promise<boolean> {
+    let deleted = false;
+    await this.#mutate((draft, now, events) => {
+      const next = draft.companions.filter((entry) => entry.id !== id);
+      deleted = next.length !== draft.companions.length;
+      if (!deleted) return;
+      draft.companions = next;
+      draft.profile.updatedAt = isoNow(now);
+      events.push({ type: "customization-changed", at: isoNow(now) });
+    });
+    return deleted;
   }
 
   async dailyAdventure(localDate = isoNow(this.#now()).slice(0, 10)): Promise<PetAdventure> {
