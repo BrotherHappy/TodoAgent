@@ -3928,6 +3928,48 @@ select {
 .quick-body {
   padding: 14px 16px;
 }
+.quick-history-card {
+  display: grid;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--app-line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--app-surface) 76%, var(--app-glass-soft));
+}
+.quick-history-list {
+  display: grid;
+  gap: 6px;
+  max-height: 190px;
+  overflow: auto;
+}
+.quick-history-item {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 8px 9px;
+  text-align: left;
+  color: var(--app-text);
+  background: var(--app-glass-soft);
+  cursor: pointer;
+}
+.quick-history-item:hover,
+.quick-history-item:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 42%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 62%, var(--app-glass-soft));
+}
+.quick-history-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.quick-history-item small {
+  color: var(--app-text-soft);
+  font-size: 10px;
+}
 .chip-row {
   display: flex;
   gap: 7px;

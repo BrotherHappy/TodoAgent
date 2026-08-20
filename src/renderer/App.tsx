@@ -157,6 +157,14 @@ import type {
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { PetWeatherForecast } from "./PetWeatherForecast";
+import { QuickCaptureHistory } from "./QuickCaptureHistory";
+import {
+  clearQuickCaptureHistory,
+  readQuickCaptureHistory,
+  rememberQuickCapture,
+  type QuickCaptureHistoryDestination,
+  type QuickCaptureHistoryItem,
+} from "./quick-capture-history";
 import {
   conversationTitle,
   filterStoredAgentConversations,
@@ -13563,6 +13571,9 @@ type QuickCaptureDestination = "task" | "inbox" | "diary";
 
 function QuickCaptureWindow() {
   const [text, setText] = useState("");
+  const [recentCaptures, setRecentCaptures] = useState<QuickCaptureHistoryItem[]>(
+    () => readQuickCaptureHistory(),
+  );
   const [saving, setSaving] = useState(false);
   const [captureError, setCaptureError] = useState("");
   const [captureDestination, setCaptureDestination] =
@@ -13636,6 +13647,16 @@ function QuickCaptureWindow() {
   const selectedTemplate = taskTemplates.templates.find(
     (template) => template.id === selectedTemplateId,
   );
+  const rememberCurrentCapture = (destination: QuickCaptureHistoryDestination) => {
+    const next = rememberQuickCapture({
+      id: captureIdRef.current,
+      text: text.trim(),
+      title: fields.title,
+      destination,
+      createdAt: new Date().toISOString(),
+    });
+    setRecentCaptures(next);
+  };
   const templatePreview = selectedTemplate && fields.title
     ? previewTaskTemplate(selectedTemplate, fields.title, {
         date: fields.privatePlanAt?.slice(0, 10) ?? fields.date ?? new Date().toISOString().slice(0, 10),
@@ -13690,6 +13711,7 @@ function QuickCaptureWindow() {
           localDate: fields.date ?? new Date().toISOString().slice(0, 10),
           captureId: captureIdRef.current,
         });
+        rememberCurrentCapture("diary");
         await window.desktopApi?.tasks.deleteDraft("quick-capture");
         setText("");
         setSelectedTemplateId("");
@@ -13788,6 +13810,7 @@ function QuickCaptureWindow() {
         }
       }
       await window.desktopApi?.tasks.deleteDraft("quick-capture");
+      rememberCurrentCapture(captureDestination);
       setText("");
       setSelectedTemplateId("");
       captureIdRef.current = `quick-capture-${crypto.randomUUID()}`;
@@ -13982,6 +14005,21 @@ function QuickCaptureWindow() {
                 : "已理解为一个新任务"
               : "输入自然语言即可开始"}
           </p>
+          {!text && (
+            <QuickCaptureHistory
+              items={recentCaptures}
+              onSelect={(item) => {
+                setText(item.text);
+                setCaptureDestination(item.destination);
+                setSelectedTemplateId("");
+                inputRef.current?.focus();
+              }}
+              onClear={() => {
+                clearQuickCaptureHistory();
+                setRecentCaptures([]);
+              }}
+            />
+          )}
           {(voice.interimTranscript || voice.error) && (
             <div
               className={`voice-capture-status ${voice.error ? "has-error" : ""}`}
@@ -16854,6 +16892,15 @@ function FloatingWindow() {
                 <Plus size={16} />
                 <span>快速录入</span>
                 <small>新增待办</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={showQuickCaptureFromFloatingMenu}
+              >
+                <History size={16} />
+                <span>最近捕获</span>
+                <small>打开本机回用记录</small>
               </button>
               <button
                 type="button"
