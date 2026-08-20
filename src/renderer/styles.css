@@ -6943,6 +6943,36 @@ select {
 .pet-room-stage.custom-room-theme .pet-room-decoration {
   color: var(--pet-room-accent);
 }
+.pet-room-seasonal-layer {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pet-room-seasonal-decoration {
+  position: absolute;
+  display: block;
+  color: color-mix(in srgb, var(--app-brand) 78%, white);
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0.76;
+  transform: translate(-50%, -50%);
+  animation: pet-room-seasonal-drift 5.4s ease-in-out infinite;
+}
+.pet-room-seasonal-decoration:nth-child(2) { animation-delay: -1.8s; }
+.pet-room-seasonal-decoration:nth-child(3) { animation-delay: -3.2s; }
+.pet-room-seasonal-spring .pet-room-seasonal-decoration { color: #d56b9c; }
+.pet-room-seasonal-summer .pet-room-seasonal-decoration { color: #cc8a31; }
+.pet-room-seasonal-autumn .pet-room-seasonal-decoration { color: #bc6b42; }
+.pet-room-seasonal-winter .pet-room-seasonal-decoration { color: #7897ca; }
+@keyframes pet-room-seasonal-drift {
+  0%, 100% { transform: translate(-50%, -50%) rotate(-3deg); }
+  50% { transform: translate(-50%, calc(-50% - 4px)) rotate(3deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet-room-seasonal-decoration { animation: none; }
+}
 .pet-room-stage .pet-character,
 .pet-adventure-scene .pet-character {
   --pet-scale: 2.15 !important;

@@ -225,6 +225,7 @@ import { PetCompletionStampsCard } from "./PetCompletionStampsCard";
 import { PetProjectChapters } from "./PetProjectChapters";
 import { PetRoomLayoutControls } from "./PetRoomLayoutControls";
 import { PetRoomThemeEditor } from "./PetRoomThemeEditor";
+import { petRoomSeasonalDecorations } from "./pet-room-season";
 import {
   PET_ROOM_DECORATION_DEFAULTS,
   placementForPetRoomPoint,
@@ -7634,6 +7635,7 @@ function PetHomePage({
 }) {
   const { snapshot, weather, refresh, setWeather } = usePetData();
   const roomThemePacks = useInstalledPetRoomThemePacks();
+  const [seasonalEvents, setSeasonalEvents] = useState(defaultSettings.pet.seasonalEvents);
   const legacyHabitMigrationStarted = useRef(false);
   const [section, setSection] = useState<
     "home" | "room" | "adventure" | "play" | "diary" | "memory"
@@ -7737,6 +7739,12 @@ function PetHomePage({
       markMigrated();
     })().catch(() => undefined);
   }, [refresh, snapshot]);
+  useEffect(() => {
+    if (!window.desktopApi) return undefined;
+    const apply = (settings: AppSettings) => setSeasonalEvents(settings.pet.seasonalEvents);
+    void window.desktopApi.settings.get().then(apply).catch(() => undefined);
+    return window.desktopApi.events.onSettingsChanged(apply);
+  }, []);
   if (!snapshot) {
     return (
       <main className="pet-page loading-page">
@@ -7747,6 +7755,7 @@ function PetHomePage({
   }
   const profile = snapshot.profile;
   const roomAtmosphere = snapshot.appearance.atmosphere ?? "daylight";
+  const roomSeason = seasonalEvents ? petSeasonalEventForDate() : undefined;
   const activeRoomThemePack = roomThemePacks.activePack;
   const roomThemeStyle = activeRoomThemePack
     ? ({
@@ -7980,6 +7989,29 @@ function PetHomePage({
             onPointerCancel={finishRoomDecorationDrag}
           >
             <span className="pet-room-window" aria-hidden="true">☁</span>
+            {roomSeason && (
+              <div
+                className={`pet-room-seasonal-layer pet-room-seasonal-${roomSeason.season}`}
+                aria-label={`${roomSeason.label}装饰`}
+                role="presentation"
+              >
+                {petRoomSeasonalDecorations(roomSeason.season).map((decoration) => (
+                  <span
+                    key={decoration.id}
+                    className="pet-room-seasonal-decoration"
+                    aria-hidden="true"
+                    title={decoration.label}
+                    style={{
+                      left: `${decoration.x}%`,
+                      top: `${decoration.y}%`,
+                      fontSize: `${decoration.size}px`,
+                    }}
+                  >
+                    {decoration.glyph}
+                  </span>
+                ))}
+              </div>
+            )}
             {([
               ["cloud-lamp", "☼", "cloud-lamp"],
               ["plant", "♧", "room-plant"],
