@@ -134,6 +134,7 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { buildTaskAgentPrompt } from "./task-agent-context";
 import {
   FocusEnvironmentSound,
   environmentSoundOptions,
@@ -1418,6 +1419,7 @@ function TaskRow({
   onToggleBulk,
   interactionDisabled = false,
   subtaskProgress,
+  onAskAgent,
 }: {
   task: Task;
   selected: boolean;
@@ -1434,6 +1436,7 @@ function TaskRow({
   onToggleBulk?: () => void;
   interactionDisabled?: boolean;
   subtaskProgress?: SubtaskProgress;
+  onAskAgent: (prompt: string) => void;
 }) {
   const canComplete = canToggleTaskCompletion(task);
   const completionVerb = needsFeishuForCosignCompletion(task)
@@ -1578,6 +1581,18 @@ function TaskRow({
             aria-label={`下移${task.title}`}
           >
             <ChevronDown size={15} />
+          </button>
+        )}
+        {!selectionMode && (
+          <button
+            type="button"
+            className="row-icon-button task-agent-button"
+            disabled={interactionDisabled}
+            onClick={() => onAskAgent(buildTaskAgentPrompt(task))}
+            aria-label={`让 Agent 处理${task.title}`}
+            title="让 Agent 处理此任务"
+          >
+            <MessageCircle size={14} aria-hidden="true" />
           </button>
         )}
         <SourcePill source={task.source.type} />
@@ -2421,6 +2436,7 @@ function TaskListPage({
                     onToggleBulk={() => toggleBulkSelection(task.id)}
                     interactionDisabled={bulkBusy}
                     subtaskProgress={subtaskProgress.get(task.id)}
+                    onAskAgent={onAskAgent}
                     moveUp={
                       canReorder && sectionIndex > 0
                         ? () =>

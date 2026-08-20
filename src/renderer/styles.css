@@ -1225,6 +1225,9 @@ select {
   border-color: var(--app-line);
   background: var(--app-brand-soft);
 }
+.task-agent-button {
+  color: color-mix(in srgb, var(--app-brand-strong) 78%, var(--app-text-faint));
+}
 
 .empty-state {
   min-height: 280px;
