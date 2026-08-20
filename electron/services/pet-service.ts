@@ -16,6 +16,7 @@ import {
   type PetMemoryEntry,
   type PetMiniGameRecord,
   type PetProfile,
+  type PetPortableState,
   type ProactiveMessageRecord,
   type PetReward,
   type PetSnapshot,
@@ -171,6 +172,24 @@ function normalizeState(value: unknown, name: string): PetState {
   };
 }
 
+/**
+ * Normalize a backup payload without ever accepting an active focus session.
+ * The same normalizer is used at startup and during imports so an imported
+ * profile cannot bypass the service's default/shape guards.
+ */
+export function normalizePortablePetState(
+  value: unknown,
+  name = "小序",
+): PetPortableState {
+  const raw = value && typeof value === "object"
+    ? { ...(value as Record<string, unknown>) }
+    : value;
+  if (raw && typeof raw === "object") delete (raw as Record<string, unknown>).focus;
+  const normalized = normalizeState(raw, name);
+  const { focus: _focus, ...portable } = normalized;
+  return portable;
+}
+
 async function atomicWrite(filePath: string, value: PetState): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
@@ -244,6 +263,29 @@ export class PetService {
       ...state,
       focus: focus ? viewFocus(focus, now) : undefined,
     };
+  }
+
+  /** Return the durable pet profile, excluding the currently running focus. */
+  portableSnapshot(): PetPortableState {
+    const { focus: _focus, ...state } = clone(this.#state);
+    return state;
+  }
+
+  /**
+   * Replace only the durable pet profile from a validated backup.  The active
+   * focus session is preserved (or remains absent), and the local revision is
+   * advanced by the normal mutation path rather than trusting an imported
+   * revision number.
+   */
+  async replacePortableSnapshot(input: PetPortableState): Promise<PetSnapshot> {
+    const imported = normalizePortablePetState(input, this.#state.profile.name);
+    return this.#mutate((draft, now) => {
+      const activeFocus = draft.focus;
+      Object.assign(draft, clone(imported));
+      if (activeFocus) draft.focus = activeFocus;
+      else delete draft.focus;
+      draft.profile.updatedAt = isoNow(now);
+    });
   }
 
   async rename(name: string): Promise<PetSnapshot> {

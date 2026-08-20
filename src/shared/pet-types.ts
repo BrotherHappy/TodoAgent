@@ -222,6 +222,13 @@ export interface PetState {
   proactiveMessages: ProactiveMessageRecord[];
 }
 
+/**
+ * Stable, portable portion of a pet profile.  A running focus session is
+ * intentionally excluded: importing a backup must never interrupt the work
+ * that is currently in progress on this device.
+ */
+export type PetPortableState = Omit<PetState, "focus">;
+
 export interface PetSnapshot extends Omit<PetState, "focus"> {
   focus?: FocusSessionView;
 }

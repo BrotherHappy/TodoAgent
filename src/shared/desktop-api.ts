@@ -541,6 +541,61 @@ export interface PetDesktopApi {
     patch: Partial<Pick<PetMemoryEntry, "content" | "enabled">>,
   ): Promise<PetMemoryEntry>;
   deleteMemory(id: string): Promise<boolean>;
+  exportData(): Promise<PetDataExportResultView>;
+  previewDataImport(): Promise<PetDataPreviewResultView>;
+  commitDataImport(
+    previewToken: string,
+    strategy: PetDataImportStrategyView,
+  ): Promise<{ status: "imported"; result: PetDataImportResultView }>;
+  cancelDataImport(previewToken: string): Promise<boolean>;
+}
+
+export type PetDataImportStrategyView = "skip" | "overwrite";
+
+export interface PetDataCountsView {
+  rewards: number;
+  inventory: number;
+  adventures: number;
+  miniGames: number;
+  diary: number;
+  memories: number;
+  proactiveMessages: number;
+  focusHistory: number;
+}
+
+export type PetDataExportResultView =
+  | { status: "cancelled" }
+  | { status: "exported"; filePath: string; bytes: number };
+
+export interface PetDataImportPreviewView {
+  digest: string;
+  strategy: PetDataImportStrategyView;
+  exportedAt: string;
+  redaction: DataRedactionView;
+  incoming: PetDataCountsView;
+  existing: PetDataCountsView;
+  willReplace: boolean;
+  activeFocusPreserved: boolean;
+  warnings: string[];
+}
+
+export type PetDataPreviewResultView =
+  | { status: "cancelled" }
+  | {
+      status: "ready";
+      previewToken: string;
+      expiresAt: string;
+      filePath: string;
+      bytes: number;
+      strategies: Record<PetDataImportStrategyView, PetDataImportPreviewView>;
+    };
+
+export interface PetDataImportResultView {
+  digest: string;
+  strategy: PetDataImportStrategyView;
+  replaced: boolean;
+  imported: PetDataCountsView;
+  activeFocusPreserved: boolean;
 }
 
 export type DataRedactionView = "none" | "private" | "strict";
@@ -770,6 +825,10 @@ export const DESKTOP_CHANNELS = {
   petMemoryAdd: "pet:memory-add",
   petMemoryUpdate: "pet:memory-update",
   petMemoryDelete: "pet:memory-delete",
+  petDataExport: "pet:data-export",
+  petDataPreviewImport: "pet:data-preview-import",
+  petDataCommitImport: "pet:data-commit-import",
+  petDataCancelImport: "pet:data-cancel-import",
   dataExport: "data:export",
   dataMarkdownExport: "data:markdown-export",
   dataPreviewImport: "data:preview-import",

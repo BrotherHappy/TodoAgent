@@ -57,6 +57,7 @@ flowchart LR
 - 飞书写入进入持久同步队列；任务本体立即显示 `pending`，队列跨重启恢复。
 - 模型 API Key、飞书专属 App Secret 和用户 Token 使用 Electron `safeStorage` 加密后保存；普通设置只保存凭据引用，无法使用系统安全存储时不允许持久保存明文。
 - 数据可迁移分为两条路径：`DataPortabilityService.exportJson` 生成可恢复的 JSON（仍按用户选择做脱敏），`exportMarkdown` 只投影任务、项目和清单为人类可读清单，默认 `private` 脱敏并明确不包含草稿、撤销操作、设置、权限审计、凭据、附件本地路径或文件内容；用户可显式开启 `include.operations`，追加只读任务事件摘要（时间、操作类型、任务标识、字段名与撤销标记），不输出 before/after 快照；桌面控制器通过同目录临时文件 + 原子替换写入 `.md` / `.markdown`。
+- Todo Pet 档案由 `PetDataPortabilityService` 使用独立 `.todo-pet.json` 格式迁移，稳定状态通过 `PetService.portableSnapshot` / `replacePortableSnapshot` 读取和写入。导入先生成带 digest 的预览，仅支持“保留本机”或“覆盖本机”；覆盖不信任导入 revision，沿用本机 mutation 队列递增修订号，并保留现有运行中的 focus。备份只包含成长、外观、库存、冒险、小游戏、日记、记忆、主动消息和 focusHistory，不写入凭据、localPath、任务或飞书映射；宠物档案写入独立原子文件，不参与任务/设置/审计事务。
 
 ## 4. 窗口与系统入口
 

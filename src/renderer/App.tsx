@@ -116,6 +116,8 @@ import {
 import { withBossMode } from "../shared/boss-mode";
 import type {
   AgentApprovalView,
+  PetDataImportStrategyView,
+  PetDataPreviewResultView,
   DataImportStrategyView,
   DataPreviewResultView,
   FeishuConfigureRequest,
@@ -332,6 +334,7 @@ interface ToastState {
 }
 
 type ReadyDataPreview = Extract<DataPreviewResultView, { status: "ready" }>;
+type ReadyPetDataPreview = Extract<PetDataPreviewResultView, { status: "ready" }>;
 const floatingAgentDraftId = "floating-agent-prompt";
 const floatingTabStorageKey = "todoAgentFloatingTab";
 const floatingPetOnlyStorageKey = "todoAgentFloatingPetOnly";
@@ -7668,11 +7671,14 @@ function SettingsPage({
   const [feishuSecret, setFeishuSecret] = useState("");
   const [feishuStatus, setFeishuStatus] = useState<FeishuStatusView>();
   const [dataPreview, setDataPreview] = useState<ReadyDataPreview>();
+  const [petDataPreview, setPetDataPreview] = useState<ReadyPetDataPreview>();
   const [modelUsage, setModelUsage] = useState<ModelUsageStatus>();
   const [connectionTest, setConnectionTest] =
     useState<ModelConnectionTestResult>();
   const [importStrategy, setImportStrategy] =
     useState<DataImportStrategyView>("skip");
+  const [petImportStrategy, setPetImportStrategy] =
+    useState<PetDataImportStrategyView>("skip");
   const [clearDataSheet, setClearDataSheet] = useState(false);
   const [disconnectSheet, setDisconnectSheet] = useState(false);
   const [clearSelection, setClearSelection] = useState({
@@ -8047,6 +8053,65 @@ function SettingsPage({
         reason instanceof Error ? reason.message : "导入文件无效",
         "error",
       );
+    } finally {
+      setSaving(false);
+    }
+  };
+  const exportPetData = async () => {
+    if (!window.desktopApi) return;
+    setSaving(true);
+    try {
+      const result = await window.desktopApi.pet.exportData();
+      if (result.status === "exported") {
+        notify(
+          `已导出 Todo Pet 档案（${Math.ceil(result.bytes / 1024)} KB；不包含正在运行的专注）`,
+          "success",
+        );
+      }
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "宠物档案导出失败", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const previewPetDataImport = async () => {
+    if (!window.desktopApi) return;
+    setSaving(true);
+    try {
+      const result = await window.desktopApi.pet.previewDataImport();
+      if (result.status === "ready") {
+        setPetDataPreview(result);
+        setPetImportStrategy("skip");
+      }
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "宠物档案无效", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const cancelPetDataImport = () => {
+    if (petDataPreview) {
+      void window.desktopApi?.pet.cancelDataImport(petDataPreview.previewToken);
+    }
+    setPetDataPreview(undefined);
+  };
+  const commitPetDataImport = async () => {
+    if (!window.desktopApi || !petDataPreview) return;
+    setSaving(true);
+    try {
+      const committed = await window.desktopApi.pet.commitDataImport(
+        petDataPreview.previewToken,
+        petImportStrategy,
+      );
+      notify(
+        committed.result.replaced
+          ? "Todo Pet 档案已导入，当前专注保持不变"
+          : "已保留本机 Todo Pet 档案",
+        "success",
+      );
+      setPetDataPreview(undefined);
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "宠物档案导入失败", "error");
     } finally {
       setSaving(false);
     }
@@ -10535,6 +10600,32 @@ function SettingsPage({
             </div>
             <div className="settings-row">
               <div>
+                <strong>Todo Pet 档案</strong>
+                <p>迁移宠物的成长、外观、库存、冒险、小游戏、日记和记忆；不会带走凭据或正在运行的专注。</p>
+              </div>
+              <div className="settings-row-actions">
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={saving}
+                  onClick={() => void exportPetData()}
+                >
+                  <Download size={15} />
+                  导出宠物档案
+                </button>
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={saving}
+                  onClick={() => void previewPetDataImport()}
+                >
+                  <Upload size={15} />
+                  导入并预览
+                </button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <div>
                 <strong>清除本地数据</strong>
                 <p>不会删除飞书远端任务或系统安全存储中的凭据</p>
               </div>
@@ -10721,6 +10812,95 @@ function SettingsPage({
                     .action === "replace"
                 }
                 onClick={() => void commitImport()}
+              >
+                确认导入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {petDataPreview && (
+        <div className="modal-backdrop">
+          <div
+            className="modal-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pet-import-preview-title"
+          >
+            <div className="modal-header">
+              <span className="feature-icon">
+                <Sparkles size={20} />
+              </span>
+              <div>
+                <h2 id="pet-import-preview-title">导入 Todo Pet 档案</h2>
+                <p>
+                  先预览再提交；预览令牌将在 {formatDateTime(petDataPreview.expiresAt)} 失效。
+                </p>
+              </div>
+            </div>
+            <div className="modal-body">
+              {(() => {
+                const plan = petDataPreview.strategies[petImportStrategy];
+                const rows: Array<[string, number, number]> = [
+                  ["成长奖励", plan.incoming.rewards, plan.existing.rewards],
+                  ["库存物品", plan.incoming.inventory, plan.existing.inventory],
+                  ["冒险记录", plan.incoming.adventures, plan.existing.adventures],
+                  ["小游戏", plan.incoming.miniGames, plan.existing.miniGames],
+                  ["日记", plan.incoming.diary, plan.existing.diary],
+                  ["记忆", plan.incoming.memories, plan.existing.memories],
+                  ["互动消息", plan.incoming.proactiveMessages, plan.existing.proactiveMessages],
+                  ["专注历史", plan.incoming.focusHistory, plan.existing.focusHistory],
+                ];
+                return (
+                  <>
+                    <div className="settings-row">
+                      <div>
+                        <strong>导入策略</strong>
+                        <p>宠物是单一档案；跳过会保留本机，覆盖会替换本机档案。</p>
+                      </div>
+                      <select
+                        className="settings-input"
+                        value={petImportStrategy}
+                        onChange={(event) =>
+                          setPetImportStrategy(event.target.value as PetDataImportStrategyView)
+                        }
+                      >
+                        <option value="skip">保留本机（推荐）</option>
+                        <option value="overwrite">用备份覆盖本机</option>
+                      </select>
+                    </div>
+                    {rows.map(([label, incoming, existing]) => (
+                      <div className="permission-row" key={label}>
+                        <span>{label}</span>
+                        <strong>备份 {incoming} · 本机 {existing}</strong>
+                      </div>
+                    ))}
+                    <div className="warning-note">
+                      <Info size={15} />
+                      当前运行中的专注会保留，不会被导入打断。
+                    </div>
+                    {plan.warnings
+                      .filter((warning) => !warning.includes("当前正在运行"))
+                      .map((warning) => (
+                        <div className="warning-note" key={warning}>
+                          <AlertTriangle size={15} />
+                          {warning}
+                        </div>
+                      ))}
+                  </>
+                );
+              })()}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="soft-button" onClick={cancelPetDataImport}>
+                取消
+              </button>
+              <span className="action-spacer" />
+              <button
+                type="button"
+                className="primary-button"
+                disabled={saving || !petDataPreview.strategies[petImportStrategy].willReplace}
+                onClick={() => void commitPetDataImport()}
               >
                 确认导入
               </button>

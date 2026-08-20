@@ -254,6 +254,16 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryUpdate, { id, patch }),
     deleteMemory: (id) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryDelete, id),
+    exportData: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petDataExport),
+    previewDataImport: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDataPreviewImport),
+    commitDataImport: (previewToken, strategy) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDataCommitImport, {
+        previewToken,
+        strategy,
+      }),
+    cancelDataImport: (previewToken) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDataCancelImport, previewToken),
   },
   data: {
     exportToFile: (request) =>

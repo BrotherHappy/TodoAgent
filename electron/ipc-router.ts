@@ -1083,6 +1083,23 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.petMemoryDelete, (_event, input) =>
     dependencies.pet.deleteMemory(idSchema.parse(input)),
   );
+  handle(DESKTOP_CHANNELS.petDataExport, () => dependencies.pet.exportData());
+  handle(DESKTOP_CHANNELS.petDataPreviewImport, () =>
+    dependencies.pet.previewDataImport(),
+  );
+  handle(DESKTOP_CHANNELS.petDataCommitImport, (_event, input) => {
+    const request = z
+      .object({
+        previewToken: idSchema,
+        strategy: z.enum(["skip", "overwrite"]),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.commitDataImport(request.previewToken, request.strategy);
+  });
+  handle(DESKTOP_CHANNELS.petDataCancelImport, (_event, input) =>
+    dependencies.pet.cancelDataImport(idSchema.parse(input)),
+  );
   handle(DESKTOP_CHANNELS.dataExport, (_event, input) => {
     const request = z
       .object({

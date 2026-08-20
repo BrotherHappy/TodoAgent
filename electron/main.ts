@@ -68,6 +68,7 @@ import {
   type ElectronNotificationRuntime,
 } from "./services/electron-notification-runtime";
 import { DataDesktopController } from "./services/data-desktop-controller";
+import { PetDataDesktopController } from "./services/pet-data-desktop-controller";
 import { DesktopDataRepository } from "./services/desktop-data-repository";
 import { NodeDataDesktopFilePort } from "./services/node-data-desktop-file-port";
 import { PetService } from "./services/pet-service";
@@ -1022,6 +1023,35 @@ async function startApplication(): Promise<void> {
     settings: settingsService,
     auditLog,
   });
+  const petDataController = new PetDataDesktopController({
+    repository: {
+      readPetSnapshot: async () => petService!.portableSnapshot(),
+      replacePetSnapshot: async (state) => {
+        await petService!.replacePortableSnapshot(state);
+      },
+    },
+    files: new NodeDataDesktopFilePort(),
+    dialogs: {
+      chooseExportPath: async ({ defaultFileName }) => {
+        const result = await dialog.showSaveDialog({
+          title: "导出 Todo Pet 档案",
+          defaultPath: path.join(app.getPath("documents"), defaultFileName),
+          filters: [{ name: "Todo Pet 档案", extensions: ["json"] }],
+          properties: ["createDirectory", "showOverwriteConfirmation"],
+        });
+        return result.canceled ? undefined : result.filePath;
+      },
+      chooseImportPath: async () => {
+        const result = await dialog.showOpenDialog({
+          title: "导入 Todo Pet 档案",
+          defaultPath: app.getPath("documents"),
+          filters: [{ name: "Todo Pet 档案", extensions: ["json"] }],
+          properties: ["openFile"],
+        });
+        return result.canceled ? undefined : result.filePaths[0];
+      },
+    },
+  });
   const dataController = new DataDesktopController({
     dataRepository,
     files: new NodeDataDesktopFilePort(),
@@ -1352,6 +1382,17 @@ async function startApplication(): Promise<void> {
     addMemory: (input) => petService!.addMemory(input),
     updateMemory: (id, patch) => petService!.updateMemory(id, patch),
     deleteMemory: (id) => petService!.deleteMemory(id),
+    exportData: () => petDataController.exportToFile(),
+    previewDataImport: () => petDataController.previewImport(),
+    commitDataImport: async (previewToken, strategy) => {
+      const result = await petDataController.commitImport(previewToken, strategy);
+      windows?.broadcast(DESKTOP_CHANNELS.eventPet, {
+        type: "state-changed",
+        at: new Date().toISOString(),
+      });
+      return result;
+    },
+    cancelDataImport: async (previewToken) => petDataController.cancelPreview(previewToken),
   };
   let weatherSettingsKey = JSON.stringify(settingsService.get().weather);
 
