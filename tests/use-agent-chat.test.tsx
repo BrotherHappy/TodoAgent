@@ -92,6 +92,7 @@ function installAgentApi(
 
 afterEach(() => {
   delete window.desktopApi;
+  window.localStorage.clear();
 });
 
 describe("useAgentChat", () => {
@@ -466,5 +467,57 @@ describe("useAgentChat", () => {
     expect(result.current.messages.at(-1)?.text).not.toContain(
       "Error invoking remote method",
     );
+  });
+
+  it("restores the short-term conversation locally without changing the sent history contract", async () => {
+    const harness = installAgentApi(async (request) => ({
+      runId: request.runId!,
+      state: "completed",
+      assistantText: "这是本机可恢复的回答",
+    }));
+    const first = renderHook(() =>
+      useAgentChat({ initialMessage: "你好", persistConversation: true }),
+    );
+    await act(async () => {
+      await first.result.current.send("记住这段会话");
+    });
+    await waitFor(() =>
+      expect(window.localStorage.getItem("todo-agent:agent-conversation:v1")).not.toBeNull(),
+    );
+    expect(harness.send.mock.calls[0][0].history).toEqual([
+      { role: "assistant", content: "你好" },
+    ]);
+    first.unmount();
+
+    const second = renderHook(() =>
+      useAgentChat({ initialMessage: "新的欢迎语", persistConversation: true }),
+    );
+    expect(second.result.current.messages.map((message) => message.text)).toEqual([
+      "你好",
+      "记住这段会话",
+      "这是本机可恢复的回答",
+    ]);
+  });
+
+  it("starts a new conversation and clears the local transcript on request", async () => {
+    installAgentApi(async (request) => ({
+      runId: request.runId!,
+      state: "completed",
+      assistantText: "完成",
+    }));
+    const { result } = renderHook(() =>
+      useAgentChat({ initialMessage: "你好", persistConversation: true }),
+    );
+    await act(async () => {
+      await result.current.send("旧会话");
+    });
+    const oldConversationId = result.current.conversationId;
+    act(() => result.current.newConversation());
+    expect(result.current.conversationId).not.toBe(oldConversationId);
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].text).toBe("你好");
+    act(() => result.current.clearConversation());
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].role).toBe("assistant");
   });
 });

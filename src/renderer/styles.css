@@ -7136,6 +7136,21 @@ select {
   gap: 12px;
   margin-bottom: 22px;
 }
+.agent-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.agent-heading-actions .icon-button {
+  width: 32px;
+  height: 32px;
+}
+.agent-history-badge {
+  color: var(--app-text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
 .agent-heading p {
   color: var(--app-text-soft);
   margin-top: 4px;
@@ -7373,6 +7388,12 @@ select {
   align-items: center;
   margin: 8px 0;
   color: var(--app-text-soft);
+}
+.context-line-muted {
+  align-items: flex-start;
+  color: var(--app-text-faint);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .modal-backdrop {
@@ -9468,6 +9489,15 @@ select {
   .agent-thread {
     overflow: visible;
     padding: 18px 14px;
+  }
+  .agent-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .agent-heading-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
   }
   .agent-context {
     overflow: visible;

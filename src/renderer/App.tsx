@@ -5670,6 +5670,7 @@ function AgentPage({
   const chat = useAgentChat({
     initialMessage: `我可以查询、创建和整理任务。当前有 ${controller.tasks.length} 项任务在这个视图里。`,
     onFallback: fallback,
+    persistConversation: true,
   });
   const {
     messages,
@@ -5685,6 +5686,10 @@ function AgentPage({
     respondToApproval,
     appendAssistant,
     refreshStatus,
+    hasStoredConversation,
+    newConversation,
+    clearConversation,
+    exportConversation,
   } = chat;
   const agentThreadRef = useRef<HTMLElement>(null);
   const chatFollowsOutputRef = useRef(true);
@@ -5699,6 +5704,22 @@ function AgentPage({
   const submitAgentMessage = (): void => {
     chatFollowsOutputRef.current = true;
     void send();
+  };
+  const downloadConversation = (): void => {
+    const content = exportConversation();
+    if (typeof URL.createObjectURL !== "function") {
+      notify("当前环境暂不支持导出文件", "error");
+      return;
+    }
+    const url = URL.createObjectURL(
+      new Blob([content], { type: "text/markdown;charset=utf-8" }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `todo-agent-conversation-${new Date().toISOString().slice(0, 10)}.md`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    notify("对话已导出为 Markdown", "success");
   };
   useEffect(() => {
     if (!initialPrompt) return;
@@ -5759,6 +5780,43 @@ function AgentPage({
           <div>
             <h1>任务助理</h1>
             <p>任务优先；所有工具调用都经过权限引擎 · {runState}</p>
+          </div>
+          <div className="agent-heading-actions">
+            {hasStoredConversation && (
+              <span className="agent-history-badge">已恢复本机对话</span>
+            )}
+            <button
+              type="button"
+              className="soft-button"
+              disabled={isSending}
+              onClick={newConversation}
+              title="开始新的本机会话；当前会话将不再作为恢复记录"
+            >
+              <Plus size={14} /> 新对话
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="导出当前 Agent 对话"
+              title="导出当前 Agent 对话为 Markdown"
+              disabled={isSending}
+              onClick={downloadConversation}
+            >
+              <Download size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="清除本机 Agent 对话并开始新会话"
+              title="清除本机 Agent 对话并开始新会话"
+              disabled={isSending}
+              onClick={() => {
+                clearConversation();
+                notify("本机对话已清除", "success");
+              }}
+            >
+              <Trash2 size={16} />
+            </button>
           </div>
         </div>
         {messages.map((message, index) => (
@@ -5889,6 +5947,10 @@ function AgentPage({
           <div className="context-line">
             <EyeOff size={15} />
             默认不包含附件内容
+          </div>
+          <div className="context-line context-line-muted">
+            <Info size={15} />
+            对话仅保存在本机；是否发送历史由“聊天历史”范围控制
           </div>
         </div>
         <div className="context-block">
