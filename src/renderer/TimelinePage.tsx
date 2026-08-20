@@ -625,6 +625,51 @@ export function TimelinePage({
             ) : (
               <p className="timeline-focus-empty">完成一段专注后，这里会记录你的投入，而不是只看勾选数量。</p>
             )}
+            <div className="timeline-time-accounting" aria-labelledby="timeline-time-accounting-title">
+              <div className="timeline-time-accounting-heading">
+                <div>
+                  <h3 id="timeline-time-accounting-title">估时复盘</h3>
+                  <p>把预计时长和实际投入放在一起看，帮助下一次估得更准。</p>
+                </div>
+                <small>本地只读</small>
+              </div>
+              {focusInsights.timeAccounting.estimatedTaskCount > 0 ? (
+                <>
+                  <div className="timeline-time-accounting-metrics">
+                    <div><strong>{focusInsights.timeAccounting.estimatedMinutes}</strong><span>预计分钟</span></div>
+                    <div><strong>{focusInsights.timeAccounting.actualMinutes}</strong><span>实际分钟</span></div>
+                    <div>
+                      <strong className={focusInsights.timeAccounting.deltaMinutes > 0 ? "is-over" : focusInsights.timeAccounting.deltaMinutes < 0 ? "is-under" : ""}>
+                        {focusInsights.timeAccounting.deltaMinutes > 0 ? "+" : ""}{focusInsights.timeAccounting.deltaMinutes}
+                      </strong>
+                      <span>偏差分钟</span>
+                    </div>
+                  </div>
+                  {focusInsights.timeAccounting.topVariances.length > 0 ? (
+                    <div className="timeline-time-accounting-list">
+                      {focusInsights.timeAccounting.topVariances.map((item) => (
+                        <button
+                          type="button"
+                          key={item.taskId}
+                          onClick={() => onSelect(item.taskId)}
+                          aria-label={`${item.title}，预计 ${item.estimatedMinutes} 分钟，实际 ${item.actualMinutes} 分钟`}
+                        >
+                          <span><strong>{item.title}</strong><small>预计 {item.estimatedMinutes}′ · 实际 {item.actualMinutes}′</small></span>
+                          <em className={item.deltaMinutes > 0 ? "is-over" : "is-under"}>
+                            {item.deltaMinutes > 0 ? "+" : ""}{item.deltaMinutes}′
+                          </em>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="timeline-time-accounting-empty">完成一项有预计时长的任务后，这里会显示估时偏差。</p>
+                  )}
+                  <small className="timeline-time-accounting-note">只统计本周有计划或投入、且填写了预计时长的任务；不会修改任务或飞书。</small>
+                </>
+              ) : (
+                <p className="timeline-time-accounting-empty">给任务填写预计时长，再完成一段专注，就能看到你的实际节奏。</p>
+              )}
+            </div>
           </section>
 
           <section className="timeline-project-health" aria-labelledby="timeline-project-health-title">

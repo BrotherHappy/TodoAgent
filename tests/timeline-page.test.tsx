@@ -156,6 +156,35 @@ describe("TimelinePage", () => {
     expect(screen.getByText(date)).toBeVisible();
   });
 
+  it("shows estimated-versus-actual review and links back to a task", () => {
+    const onSelect = vi.fn();
+    render(
+      <TimelinePage
+        {...props({
+          onSelect,
+          tasks: [
+            makeTask("准备演示", {
+              plannedDate: date,
+              estimatedMinutes: 30,
+              focusSessions: [{
+                id: "focus-review",
+                startedAt: localIsoAt(date, 9 * 60),
+                endedAt: localIsoAt(date, 9 * 60 + 45),
+                elapsedSeconds: 2_700,
+              }],
+            }),
+          ],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "周" }));
+    expect(screen.getByRole("heading", { name: "估时复盘" })).toBeVisible();
+    expect(screen.getByText("预计分钟")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /准备演示，预计 30 分钟，实际 45 分钟/u }));
+    expect(onSelect).toHaveBeenCalledWith("准备演示");
+  });
+
   it("surfaces calendar load in the week overview", () => {
     render(
       <TimelinePage

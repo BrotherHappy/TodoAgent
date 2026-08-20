@@ -109,6 +109,7 @@ flowchart LR
 - `TimelinePage` 在周视图复用 `calendarEventsForDate` / `calendarBusyBlocksForDate` 对 Monday-first 七天做只读聚合，按日期和整周显示事件数、忙碌分钟；这些数字只来自 renderer 内存缓存，点击日期仍走既有日视图，不创建 operation、不写 Task 或外部日历。
 - `src/renderer/morning-rollover.ts` 从全部开放任务投影较早日期的未完成私人 Today 计划，按优先级、截止时间和稳定顺序最多返回 3 项；`MorningBrief` 只提供建议与已有 `moveToToday` / 导航入口，用户确认后才写入私人 `plannedDate`，不创建新任务、不改变截止日期，也不扩展 Feishu payload。
 - `src/renderer/focus-insights.ts` 从任务 `focusSessions` 及兼容的聚合专注字段投影一周节奏；`TimelinePage` 只读展示每日柱状图、总投入、专注段、平均时长和投入最多任务，不修改 `Task`、operation 或 Feishu payload。
+- 同一 `focus-insights.ts` 还以任务 `estimatedMinutes` 和本周实际专注秒数投影 `timeAccounting`：汇总预计/实际分钟、偏差和最多 4 项偏差任务；仅纳入本周有计划或投入、且填写预计时长的未删除任务，`TimelinePage` 提供回到原任务的只读复盘入口，不创建 operation、不改变宠物档案或 Feishu payload。
 - `src/renderer/pet-task-drop-zones.ts` 只定义“专注 / 完成 / 稍后”三种任务搬运目标；`FloatingWindow` 在任务卡原生拖拽期间显示目标区，放下后复用现有 `startPetFocus`、`toggleTaskFromPet` 或 `heldTaskId` 气泡，不创建第二份任务。目标区只负责交互投影，权限、错误处理、撤销与飞书同步仍由原任务控制器和服务承接。
 - Todo Pet 动作包：渲染进程只接受版本化 JSON 声明，经过字段白名单、动作白名单、长度和唯一性校验后写入本地设置；动作包只能引用内置 `PetIdleAction`，不执行脚本、网络请求、文件读写或动态代码。
 - 工作流模板：渲染进程只保存版本化模板 JSON；模板步骤仅允许任务标题、备注、标签、优先级、预计时长和有限的相对日期，变量只支持 `title/date/now`。快速捕获先生成确定性预览，再逐项写入本地或飞书；不会执行模板脚本、后台定时器或隐式外部调用。Quick Capture 解析 `@情境` 与 `情境：情境` 为本地 contexts，并把解析结果作为可编辑 chip 展示；同时把 `预计 45 分钟`、`用时 1 小时`、`30m/1h` 标准化为 5–720 分钟的本地 `estimatedMinutes`，把 `每天`、`每个工作日`、`每周一/三/五`、`每月15日` 和 `每隔 2 周` 转成受限的本地 `RecurrenceRule`，均在保存前显示 chip。解析不触发定位或后台监听；模板批量创建仍使用各步骤自己的估时定义，快速捕获循环只写入非模板本地任务。

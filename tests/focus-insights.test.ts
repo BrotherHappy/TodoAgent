@@ -117,5 +117,84 @@ describe("focus insights", () => {
     expect(result.averageSessionMinutes).toBe(0);
     expect(result.topTasks).toEqual([]);
     expect(result.days).toHaveLength(7);
+    expect(result.timeAccounting).toEqual({
+      estimatedMinutes: 0,
+      actualMinutes: 0,
+      deltaMinutes: 0,
+      deltaPercent: 0,
+      estimatedTaskCount: 0,
+      trackedTaskCount: 0,
+      topVariances: [],
+    });
+  });
+
+  it("compares estimated minutes with actual focus for the same week", () => {
+    const result = buildFocusInsights(
+      [
+        task("写作", {
+          plannedDate: "2026-08-17",
+          estimatedMinutes: 30,
+          focusSessions: [{
+            id: "s4",
+            startedAt: "2026-08-17T09:00:00.000Z",
+            endedAt: "2026-08-17T09:45:00.000Z",
+            elapsedSeconds: 2_700,
+          }],
+        }),
+        task("调研", {
+          plannedDate: "2026-08-18",
+          estimatedMinutes: 60,
+          focusSessions: [{
+            id: "s5",
+            startedAt: "2026-08-18T10:00:00.000Z",
+            endedAt: "2026-08-18T10:30:00.000Z",
+            elapsedSeconds: 1_800,
+          }],
+        }),
+        task("待开始", {
+          plannedDate: "2026-08-19",
+          estimatedMinutes: 20,
+        }),
+      ],
+      "2026-08-19",
+    );
+
+    expect(result.timeAccounting.estimatedMinutes).toBe(110);
+    expect(result.timeAccounting.actualMinutes).toBe(75);
+    expect(result.timeAccounting.deltaMinutes).toBe(-35);
+    expect(result.timeAccounting.deltaPercent).toBe(-32);
+    expect(result.timeAccounting.estimatedTaskCount).toBe(3);
+    expect(result.timeAccounting.trackedTaskCount).toBe(2);
+    expect(result.timeAccounting.topVariances.map((item) => [item.title, item.deltaMinutes])).toEqual([
+      ["调研", -30],
+      ["写作", 15],
+    ]);
+  });
+
+  it("does not include deleted tasks or focus outside the selected week", () => {
+    const result = buildFocusInsights(
+      [
+        task("上周", {
+          plannedDate: "2026-08-10",
+          estimatedMinutes: 50,
+          focusSessions: [{
+            id: "s6",
+            startedAt: "2026-08-10T10:00:00.000Z",
+            endedAt: "2026-08-10T10:30:00.000Z",
+            elapsedSeconds: 1_800,
+          }],
+        }),
+        task("已删除", {
+          plannedDate: "2026-08-18",
+          estimatedMinutes: 40,
+          deletedAt: "2026-08-18T12:00:00.000Z",
+          actualMinutes: 40,
+        }),
+      ],
+      "2026-08-19",
+    );
+
+    expect(result.timeAccounting.estimatedMinutes).toBe(0);
+    expect(result.timeAccounting.topVariances).toEqual([]);
   });
 });
