@@ -1,6 +1,13 @@
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, Sparkles } from "lucide-react";
-import { useMemo, useState, type DragEvent } from "react";
+import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, Sparkles, Upload } from "lucide-react";
+import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import type { Task, UpdateTaskInput } from "../shared/models";
+import {
+  calendarBusyBlocksForDate,
+  calendarEventsForDate,
+  mergeCalendarEvents,
+  parseIcsCalendar,
+  type CalendarEvent,
+} from "../shared/calendar-events";
 import {
   addLocalDays,
   formatTimelineDate,
@@ -38,6 +45,8 @@ export interface TimelinePageProps {
   onMove: (taskId: string, patch: UpdateTaskInput) => Promise<string | undefined>;
   onUndo: (operationId: string) => void;
   notify: (message: string, kind?: ToastKind, action?: { label: string; run: () => void }) => void;
+  calendarEvents?: readonly CalendarEvent[];
+  onCalendarEventsChange?: (events: CalendarEvent[]) => void;
 }
 
 const priorityClass = (task: Task): string =>
@@ -69,6 +78,8 @@ export function TimelinePage({
   onMove,
   onUndo,
   notify,
+  calendarEvents = [],
+  onCalendarEventsChange,
 }: TimelinePageProps) {
   const [date, setDate] = useState(() => localDateKey());
   const [viewMode, setViewMode] = useState<"day" | "week" | "board">("day");
@@ -76,6 +87,7 @@ export function TimelinePage({
   const [draggingId, setDraggingId] = useState<string>();
   const [movingId, setMovingId] = useState<string>();
   const [announcement, setAnnouncement] = useState("");
+  const calendarInputRef = useRef<HTMLInputElement>(null);
   const [weeklyCapacityHours, setWeeklyCapacityHours] = useState(() => {
     try {
       const stored = Number(localStorage.getItem("todo-agent:weekly-capacity-hours"));
@@ -130,6 +142,14 @@ export function TimelinePage({
     });
     return map;
   }, [scheduled]);
+  const dayCalendarEvents = useMemo(
+    () => calendarEventsForDate(calendarEvents, date),
+    [calendarEvents, date],
+  );
+  const dayCalendarBlocks = useMemo(
+    () => calendarBusyBlocksForDate(calendarEvents, date),
+    [calendarEvents, date],
+  );
 
   const moveToSlot = async (taskId: string, minute: number) => {
     if (movingId) return;
@@ -230,6 +250,24 @@ export function TimelinePage({
       localStorage.setItem("todo-agent:work-cycle-weeks", String(next));
     } catch {
       // A read-only storage area should not make the timeline unusable.
+    }
+  };
+
+  const importCalendar = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !onCalendarEventsChange) return;
+    try {
+      const text = await file.text();
+      const imported = parseIcsCalendar(text, file.name.replace(/\.ics$/iu, "") || "本地日历");
+      if (!imported.length) {
+        notify("没有从这个 .ics 文件中读到有效的日历事件", "error");
+        return;
+      }
+      onCalendarEventsChange(mergeCalendarEvents(calendarEvents, imported));
+      notify(`已导入 ${imported.length} 个日历事件，规划会自动避开忙碌时段`, "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "暂时无法读取日历文件", "error");
     }
   };
 
@@ -608,6 +646,68 @@ export function TimelinePage({
         </>
       ) : (
         <>
+          <section className="timeline-calendar-agenda" aria-labelledby="timeline-calendar-title">
+            <div className="timeline-section-heading timeline-calendar-heading">
+              <div>
+                <h2 id="timeline-calendar-title"><CalendarClock size={17} /> 今日议程</h2>
+                <p>只读显示日历事件；今日规划会避开这些时间，不会写回日历。</p>
+              </div>
+              <div className="timeline-calendar-actions">
+                <span>{dayCalendarEvents.length ? `${dayCalendarEvents.length} 个事件` : "暂无事件"}</span>
+                {onCalendarEventsChange && (
+                  <>
+                    <input
+                      ref={calendarInputRef}
+                      className="sr-only"
+                      type="file"
+                      accept=".ics,text/calendar"
+                      aria-label="选择日历文件"
+                      onChange={(event) => void importCalendar(event)}
+                    />
+                    <button type="button" className="soft-button" onClick={() => calendarInputRef.current?.click()}>
+                      <Upload size={14} /> 导入 .ics
+                    </button>
+                    {calendarEvents.length > 0 && (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => {
+                          const previous = [...calendarEvents];
+                          onCalendarEventsChange([]);
+                          notify("已清空本地日历事件", "info", {
+                            label: "撤销",
+                            run: () => onCalendarEventsChange(previous),
+                          });
+                        }}
+                      >
+                        清空
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+            {dayCalendarBlocks.length ? (
+              <div className="timeline-calendar-event-list">
+                {dayCalendarBlocks.map((block) => (
+                  <div className="timeline-calendar-event" key={block.id}>
+                    <span className="timeline-calendar-event-time">
+                      {block.startMinutes === 0 && block.endMinutes >= 1_440
+                        ? "全天"
+                        : `${formatTimelineDate(date)} · ${String(Math.floor(block.startMinutes / 60)).padStart(2, "0")}:${String(block.startMinutes % 60).padStart(2, "0")}–${String(Math.floor(block.endMinutes / 60)).padStart(2, "0")}:${String(block.endMinutes % 60).padStart(2, "0")}`}
+                    </span>
+                    <strong>{block.title}</strong>
+                    <small>{block.sourceName}</small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="timeline-calendar-empty">
+                <CalendarDays size={16} aria-hidden="true" />
+                <span>导入日历 .ics 后，会议会和任务一起出现在这里。</span>
+              </div>
+            )}
+          </section>
           <section className="timeline-board" aria-label={`${date} 的时间线`}>
             <div className="timeline-board-hint">拖动任务卡到时间格即可安排；时间块只保存为本地计划，不会改写飞书截止日期。</div>
             {slots.map((slot) => {

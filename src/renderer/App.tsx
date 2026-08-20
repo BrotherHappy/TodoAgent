@@ -96,6 +96,7 @@ import type {
 } from "../shared/models";
 import type { AuditRecord } from "../shared/agent-types";
 import type { QuickCaptureResult } from "../shared/quick-capture";
+import type { CalendarEvent } from "../shared/calendar-events";
 import {
   buildDropContextPreview,
   type DropContextPreview,
@@ -155,6 +156,7 @@ import {
 } from "./CommandPalette";
 import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
+import { readCalendarEvents, writeCalendarEvents } from "./calendar-store";
 import {
   localDateTimeInputToIso,
   toLocalDateTimeInput,
@@ -11006,6 +11008,7 @@ function MainWindow() {
   const [dailyPlanTasks, setDailyPlanTasks] = useState<Task[]>([]);
   const [dailyPlanLoading, setDailyPlanLoading] = useState(false);
   const [dailyPlanError, setDailyPlanError] = useState<string>();
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => readCalendarEvents());
   const [activeReminder, setActiveReminder] = useState<ReminderDelivery>();
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastRouteRef = useRef(route);
@@ -11047,6 +11050,10 @@ function MainWindow() {
     (preset?: MorningKickoffPreset) => openDailyPlan(dateKey(), preset),
     [openDailyPlan],
   );
+  const updateCalendarEvents = useCallback((events: CalendarEvent[]) => {
+    setCalendarEvents(events);
+    writeCalendarEvents(events);
+  }, []);
   useEffect(() => {
     const stored = readMainNavigationState(window.history.state);
     if (stored) {
@@ -11489,6 +11496,8 @@ function MainWindow() {
                   void timelineController.undo(operationId);
                 }}
                 notify={notify}
+                calendarEvents={calendarEvents}
+                onCalendarEventsChange={updateCalendarEvents}
               />
             </div>
           )}
@@ -11622,6 +11631,7 @@ function MainWindow() {
             onRetry={loadDailyPlan}
             initialCapacityMinutes={dailyPlanPreset?.capacityMinutes}
             initialTaskIds={dailyPlanPreset?.taskIds}
+            calendarEvents={calendarEvents}
             onClose={() => {
               setDailyPlanOpen(false);
               setDailyPlanPreset(undefined);

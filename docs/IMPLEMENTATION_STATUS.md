@@ -47,6 +47,8 @@
 
 Boss Mode 补充：v1.67 吸收 Desktop Goose / Shimeji / Weyrdlets 的安全桌面入口，在 `src/shared/boss-mode.ts` 统一把会议模式与宠物隐藏合并为一次设置更新；宠物右键菜单和系统托盘共用同一开关，退出 Boss Mode 会重新显示宠物，任务、专注、飞书同步和系统安全通知不受影响。
 
+日历议程补充：v1.68 吸收 Structured / Any.do / Sunsama / Morgen 的任务与日历同屏模式，新增 `src/shared/calendar-events.ts` 与 `src/renderer/calendar-store.ts`。时间线日视图可从本机选择 `.ics` 文件，解析并合并最多 500 个事件，显示当天来源、时间、全天/跨午夜裁剪结果；用户可以清空并通过通知撤销。`DailyPlanSheet` 将当前可用时段内的日历忙碌分钟从容量扣除，并把会议作为只读保留区安排任务，所有内容只存在本地，不写回外部日历、飞书或任务共享字段。
+
 任务行 Agent 入口补充：v1.59 新增 `src/renderer/task-agent-context.ts`，任务列表行可将标题、稳定 ID、来源和状态带入 Agent 草稿；入口只导航和预填，不自动发送、不绕过权限，批量选择时隐藏，后续仍沿用任务详情查询、影响预览、确认、审计和撤销。
 
 批量 Agent 助手补充：v1.60 复用同一 helper 增加批量选择工具栏入口，最多内嵌 20 项所选任务，超出部分只保留数量提示；草稿要求 Agent 先逐项查询、解释目标和影响，不明确时先追问，任何完成、删除、改期或同步都不能绕过既有确认链。

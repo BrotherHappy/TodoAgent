@@ -65,6 +65,27 @@ describe("TimelinePage", () => {
     expect(screen.getByText("待安排 1 项")).toBeVisible();
   });
 
+  it("shows read-only calendar events alongside the day timeline", () => {
+    render(
+      <TimelinePage
+        {...props({
+          calendarEvents: [{
+            id: "calendar-1",
+            summary: "产品同步会",
+            startAt: localIsoAt(date, 10 * 60),
+            endAt: localIsoAt(date, 11 * 60),
+            allDay: false,
+            sourceName: "工作日历",
+          }],
+        })}
+      />,
+    );
+    const agenda = screen.getByRole("region", { name: "今日议程" });
+    expect(within(agenda).getByText("产品同步会")).toBeVisible();
+    expect(within(agenda).getByText("工作日历")).toBeVisible();
+    expect(within(agenda).getByText("1 个事件")).toBeVisible();
+  });
+
   it("moves a task to a time slot with a local time block and offers undo", async () => {
     const onMove = vi.fn(async () => "operation-2");
     const notify = vi.fn();

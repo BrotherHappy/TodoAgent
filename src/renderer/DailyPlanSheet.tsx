@@ -37,6 +37,10 @@ import type {
   Task,
   TaskId,
 } from "../shared/models";
+import {
+  calendarBusyMinutesForDate,
+  type CalendarEvent,
+} from "../shared/calendar-events";
 
 const CAPACITY_OPTIONS = [60, 120, 240, 360] as const;
 const STANDARD_ESTIMATES = [15, 30, 45, 60, 90, 120] as const;
@@ -77,6 +81,8 @@ export interface DailyPlanSheetProps {
   /** Optional values collected by the morning kickoff flow. */
   initialCapacityMinutes?: number;
   initialTaskIds?: TaskId[];
+  /** Read-only local calendar reservations used for capacity and preview. */
+  calendarEvents?: readonly CalendarEvent[];
 }
 
 function formatMinutes(minutes: number): string {
@@ -139,6 +145,7 @@ export function DailyPlanSheet({
   targetLabel,
   initialCapacityMinutes,
   initialTaskIds,
+  calendarEvents = [],
 }: DailyPlanSheetProps) {
   const targetName = targetLabel?.trim() || "今天";
   // Keep the established Chinese noun in accessible labels and action copy
@@ -209,17 +216,31 @@ export function DailyPlanSheet({
     },
     [availableEnd, availableStart, bufferMinutes, minimumBlockMinutes],
   );
+  const calendarBusyMinutes = useMemo(
+    () =>
+      calendarBusyMinutesForDate(
+        calendarEvents,
+        date,
+        plannerConstraints.availableStartMinutes,
+        plannerConstraints.availableEndMinutes,
+      ),
+    [calendarEvents, date, plannerConstraints],
+  );
+  const calendarAdjustedCapacityMinutes = Math.max(
+    0,
+    planningCapacityMinutes - calendarBusyMinutes,
+  );
 
   const suggestion = useMemo(
     () =>
       suggestDailyPlan(tasks, {
         date,
-        capacityMinutes: planningCapacityMinutes,
+        capacityMinutes: calendarAdjustedCapacityMinutes,
         defaultEstimateMinutes: 30,
         maxSuggestedItems: 7,
         constraints: plannerConstraints,
       }),
-    [date, plannerConstraints, planningCapacityMinutes, tasks],
+    [calendarAdjustedCapacityMinutes, date, plannerConstraints, tasks],
   );
   const itemById = useMemo(
     () => new Map(suggestion.items.map((item) => [item.task.id, item])),
@@ -393,9 +414,10 @@ export function DailyPlanSheet({
           availableStartMinutes: plannerConstraints.availableStartMinutes,
           availableEndMinutes: plannerConstraints.availableEndMinutes,
           bufferMinutes: plannerConstraints.bufferMinutes,
+          calendarEvents,
         },
       ),
-    [date, durationOverrides, plannerConstraints, selectedItems],
+    [calendarEvents, date, durationOverrides, plannerConstraints, selectedItems],
   );
   const multiDayPreview = useMemo(
     () =>
@@ -598,7 +620,7 @@ export function DailyPlanSheet({
                 disabled={saving}
                 onClick={() =>
                   onAskAgent(
-                    `请把我已经确认的${targetName}任务安排成可执行的时间块。按${activePlanMode.label}，可用时间约 ${formatMinutes(planningCapacityMinutes)}。先展示方案，不要直接修改任务或日历。\n${taskNames}`,
+                    `请把我已经确认的${targetName}任务安排成可执行的时间块。按${activePlanMode.label}，扣除日历占用后可用时间约 ${formatMinutes(calendarAdjustedCapacityMinutes)}。先展示方案，不要直接修改任务或日历。\n${taskNames}`,
                   )
                 }
               >
@@ -789,7 +811,7 @@ export function DailyPlanSheet({
               >
                 {overloadMinutes
                   ? `已超过${activePlanMode.label}容量约 ${formatMinutes(overloadMinutes)}。必须事项不会被隐藏。`
-                  : `${activePlanMode.description}，可用时段 ${availableStart}–${availableEnd}，扣除 ${bufferMinutes} 分钟缓冲后可安排 ${formatMinutes(suggestion.effectiveCapacityMinutes)}，还剩约 ${formatMinutes(suggestion.effectiveCapacityMinutes - totalMinutes)}。${assumedCount ? `其中 ${assumedCount} 项使用暂估时长。` : "所有事项都已填写预计时长。"}`}
+                  : `${activePlanMode.description}，可用时段 ${availableStart}–${availableEnd}，扣除 ${bufferMinutes} 分钟缓冲后可安排 ${formatMinutes(suggestion.effectiveCapacityMinutes)}${calendarBusyMinutes ? `，日历已占用 ${formatMinutes(calendarBusyMinutes)}` : ""}，还剩约 ${formatMinutes(suggestion.effectiveCapacityMinutes - totalMinutes)}。${assumedCount ? `其中 ${assumedCount} 项使用暂估时长。` : "所有事项都已填写预计时长。"}`}
               </div>
               </div>
 
@@ -802,8 +824,17 @@ export function DailyPlanSheet({
                       </h3>
                       <p>只读预览：确认后仍只写入 {targetName} 私人计划，时间块可在时间线继续调整。</p>
                     </div>
-                    <span className="daily-plan-preview-badge">可解释</span>
+                    <span className="daily-plan-preview-badge">{calendarBusyMinutes ? `已避开 ${formatMinutes(calendarBusyMinutes)} 日历` : "可解释"}</span>
                   </div>
+                  {schedulePreview.busyBlocks.length > 0 && (
+                    <div className="daily-plan-calendar-busy" role="status">
+                      <CalendarClock size={14} aria-hidden="true" />
+                      <span>
+                        日历忙碌时段仅作只读占位：{schedulePreview.busyBlocks.slice(0, 4).map((block) => `${formatClock(block.startMinutes)}–${formatClock(block.endMinutes)} ${block.title}`).join("、")}
+                        {schedulePreview.busyBlocks.length > 4 ? "等" : ""}
+                      </span>
+                    </div>
+                  )}
                   <div className="daily-plan-schedule-list">
                     {schedulePreview.slots.map((slot) => (
                       <div className={`daily-plan-schedule-row ${slot.conflict ? "is-conflict" : ""}`} key={slot.taskId}>
@@ -815,6 +846,7 @@ export function DailyPlanSheet({
                           {slot.source === "existing-block" ? "已有时间块" : "建议安排"}
                           {slot.conflict === "outside-window" ? " · 超出可用时段" : ""}
                           {slot.conflict === "overlap" ? " · 与已有时间块冲突" : ""}
+                          {slot.conflict === "calendar" ? " · 与日历事件冲突" : ""}
                         </small>
                       </div>
                     ))}

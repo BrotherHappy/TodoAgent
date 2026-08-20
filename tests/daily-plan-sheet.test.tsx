@@ -114,6 +114,31 @@ describe("DailyPlanSheet", () => {
     ).toBeEnabled();
   });
 
+  it("shows calendar reservations and reduces the suggested capacity", async () => {
+    const at = (minutes: number): string => {
+      const value = new Date(2026, 7, 19, 0, 0, 0, 0);
+      value.setMinutes(minutes);
+      return value.toISOString();
+    };
+    render(
+      <DailyPlanSheet
+        {...makeProps({
+          calendarEvents: [{
+            id: "calendar-1",
+            summary: "客户会议",
+            startAt: at(10 * 60),
+            endAt: at(11 * 60),
+            allDay: false,
+            sourceName: "工作日历",
+          }],
+        })}
+      />,
+    );
+    expect(await screen.findByText(/日历已占用 1 小时/u)).toBeVisible();
+    expect(screen.getByText(/客户会议/u)).toBeVisible();
+    expect(screen.getByText(/已避开 1 小时 日历/u)).toBeVisible();
+  });
+
   it("keeps fixed and retained work while seeding priorities from morning kickoff", async () => {
     render(
       <DailyPlanSheet

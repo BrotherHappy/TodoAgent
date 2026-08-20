@@ -96,4 +96,52 @@ describe("daily schedule preview", () => {
     expect(formatDailyScheduleTime(9 * 60 + 5)).toBe("09:05");
     expect(formatDailyScheduleTime(2_000)).toBe("23:59");
   });
+
+  it("keeps imported calendar events separate and schedules flexible work around them", () => {
+    const result = buildDailySchedule(
+      [input("task", "准备材料", 60)],
+      {
+        date,
+        availableStartMinutes: 9 * 60,
+        availableEndMinutes: 13 * 60,
+        bufferMinutes: 15,
+        calendarEvents: [{
+          id: "calendar-1",
+          summary: "团队同步",
+          startAt: at(600),
+          endAt: at(660),
+          allDay: false,
+          sourceName: "工作日历",
+        }],
+      },
+    );
+    expect(result.busyBlocks.map((block) => [block.title, block.startMinutes, block.endMinutes])).toEqual([
+      ["团队同步", 600, 660],
+    ]);
+    expect(result.slots.map((slot) => [slot.taskId, slot.startMinutes, slot.endMinutes])).toEqual([
+      ["task", 675, 735],
+    ]);
+    expect(result.calendarBusyMinutes).toBe(60);
+  });
+
+  it("marks an existing task block that collides with a calendar event", () => {
+    const result = buildDailySchedule(
+      [input("fixed", "被占用的任务", 60, { timeBlock: { startAt: at(600), endAt: at(660) } })],
+      {
+        date,
+        availableStartMinutes: 9 * 60,
+        availableEndMinutes: 13 * 60,
+        bufferMinutes: 15,
+        calendarEvents: [{
+          id: "calendar-2",
+          summary: "外部会议",
+          startAt: at(630),
+          endAt: at(690),
+          allDay: false,
+          sourceName: "工作日历",
+        }],
+      },
+    );
+    expect(result.slots[0]?.conflict).toBe("calendar");
+  });
 });

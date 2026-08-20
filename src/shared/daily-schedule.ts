@@ -1,10 +1,16 @@
 import type { Task } from "./models";
+import {
+  calendarBusyBlocksForDate,
+  type CalendarBusyBlock,
+  type CalendarEvent,
+} from "./calendar-events";
 
 export type DailyScheduleSlotSource = "existing-block" | "suggested";
 export type DailyScheduleConflict =
   | "outside-window"
   | "overlap"
-  | "buffer";
+  | "buffer"
+  | "calendar";
 export type DailyScheduleUnscheduledReason =
   | "no-room"
   | "fixed-outside-window"
@@ -20,6 +26,8 @@ export interface DailyScheduleOptions {
   availableStartMinutes: number;
   availableEndMinutes: number;
   bufferMinutes: number;
+  /** Read-only reservations imported from a local calendar. */
+  calendarEvents?: readonly CalendarEvent[];
 }
 
 export interface DailyScheduleSlot {
@@ -41,9 +49,12 @@ export interface DailyScheduleUnscheduled {
 
 export interface DailyScheduleResult {
   slots: DailyScheduleSlot[];
+  /** Calendar reservations are rendered separately from task slots. */
+  busyBlocks: CalendarBusyBlock[];
   unscheduled: DailyScheduleUnscheduled[];
   scheduledMinutes: number;
   effectiveWindowMinutes: number;
+  calendarBusyMinutes: number;
 }
 
 interface Interval {
@@ -133,6 +144,13 @@ export function buildDailySchedule(
   const unscheduled: DailyScheduleUnscheduled[] = [];
   const fixedIntervals: Interval[] = [];
   const flexible: DailyScheduleInput[] = [];
+  const busyBlocks = calendarBusyBlocksForDate(options.calendarEvents ?? [], options.date);
+  const calendarIntervals: Interval[] = busyBlocks.map((block) => ({
+    start: block.startMinutes,
+    end: block.endMinutes,
+    taskId: `calendar:${block.id}`,
+  }));
+  const reservedIntervals = [...calendarIntervals];
 
   for (const input of unique.values()) {
     const estimate = Math.max(1, Math.round(input.estimatedMinutes));
@@ -141,16 +159,21 @@ export function buildDailySchedule(
       flexible.push({ ...input, estimatedMinutes: estimate });
       continue;
     }
-    const conflict: DailyScheduleConflict | undefined =
-      fixed.start < options.availableStartMinutes || fixed.end > options.availableEndMinutes
-        ? "outside-window"
-        : fixedIntervals.some(
-            (interval) => fixed.start < interval.end && fixed.end > interval.start,
-          )
+    const outsideWindow =
+      fixed.start < options.availableStartMinutes || fixed.end > options.availableEndMinutes;
+    const overlapsCalendar = calendarIntervals.some(
+      (interval) => fixed.start < interval.end && fixed.end > interval.start,
+    );
+    const overlapsTask = fixedIntervals.some(
+      (interval) => fixed.start < interval.end && fixed.end > interval.start,
+    );
+    const conflict: DailyScheduleConflict | undefined = outsideWindow
+      ? "outside-window"
+      : overlapsCalendar
+        ? "calendar"
+        : overlapsTask
           ? "overlap"
-          : fixed.start < options.availableStartMinutes || fixed.end > options.availableEndMinutes
-            ? "outside-window"
-            : undefined;
+          : undefined;
     slots.push({
       taskId: input.task.id,
       taskTitle: input.task.title,
@@ -160,18 +183,20 @@ export function buildDailySchedule(
       source: "existing-block",
       conflict,
     });
-    if (!conflict || conflict === "overlap") {
-      fixedIntervals.push({ start: fixed.start, end: fixed.end, taskId: input.task.id });
+    if (fixed.end > options.availableStartMinutes && fixed.start < options.availableEndMinutes) {
+      const interval = { start: fixed.start, end: fixed.end, taskId: input.task.id };
+      fixedIntervals.push(interval);
+      reservedIntervals.push(interval);
     }
   }
 
-  fixedIntervals.sort((left, right) => left.start - right.start || left.end - right.end);
+  reservedIntervals.sort((left, right) => left.start - right.start || left.end - right.end);
   let cursor = options.availableStartMinutes;
   for (const input of flexible) {
     const estimate = Math.max(1, Math.round(input.estimatedMinutes));
     let candidate = cursor;
     let placed = false;
-    for (const interval of fixedIntervals.sort((left, right) => left.start - right.start)) {
+    for (const interval of reservedIntervals) {
       const latestBeforeFixed = interval.start - options.bufferMinutes;
       if (candidate < interval.start && candidate + estimate <= latestBeforeFixed) {
         placed = true;
@@ -200,7 +225,10 @@ export function buildDailySchedule(
       source: "suggested",
     };
     slots.push(slot);
-    fixedIntervals.push({ start: slot.startMinutes, end: slot.endMinutes, taskId: slot.taskId });
+    const interval = { start: slot.startMinutes, end: slot.endMinutes, taskId: slot.taskId };
+    fixedIntervals.push(interval);
+    reservedIntervals.push(interval);
+    reservedIntervals.sort((left, right) => left.start - right.start || left.end - right.end);
     cursor = slot.endMinutes + options.bufferMinutes;
   }
 
@@ -211,9 +239,14 @@ export function buildDailySchedule(
   );
   return {
     slots: sortedSlots,
+    busyBlocks,
     unscheduled,
     scheduledMinutes,
     effectiveWindowMinutes,
+    calendarBusyMinutes: busyBlocks.reduce(
+      (total, block) => total + Math.max(0, block.endMinutes - block.startMinutes),
+      0,
+    ),
   };
 }
 
