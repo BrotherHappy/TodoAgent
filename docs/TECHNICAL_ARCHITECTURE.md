@@ -100,6 +100,7 @@ flowchart LR
 - Boss Mode 复用 `src/shared/boss-mode.ts` 的纯设置投影：一次 `settings.replace` 同时将 `pet.meetingMode` 置为 `true`、隐藏 `floating.enabled`，退出时反向恢复；宠物右键菜单和系统托盘调用同一投影，托盘的退出入口不依赖悬浮窗口存在。该模式只抑制宠物主动消息，不取消任务、专注、飞书同步或系统安全通知，也不新增任务字段或 IPC。
 - 本地日历由 `src/shared/calendar-events.ts` 提供 provider-neutral 的 `CalendarEvent` / `CalendarBusyBlock`，解析器只接受上限 2 MiB 的 `.ics` 文本，展开折行、过滤取消/透明事件、处理本地/UTC/TZID、全天和跨午夜边界，并以稳定 ID 去重；`src/renderer/calendar-store.ts` 仅将最多 500 条事件写入 renderer 本地缓存。`TimelinePage` 显示当天只读议程，`DailyPlanSheet` 用 `calendarBusyMinutesForDate` 扣除可用容量，并把忙碌块加入只读保留区；导入、清空和撤销不新增任务、IPC、飞书字段或外部日历写入。
 - `src/renderer/morning-calendar.ts` 从同一日历缓存投影 Today 早报所需的当天事件、裁剪后的忙碌块和占用分钟数；`MorningBrief` 只渲染脱离 provider 的摘要，打开时间线只触发已有导航，不把日历内容扩展到 AI 请求或任务控制器。
+- `src/renderer/morning-rollover.ts` 从全部开放任务投影较早日期的未完成私人 Today 计划，按优先级、截止时间和稳定顺序最多返回 3 项；`MorningBrief` 只提供建议与已有 `moveToToday` / 导航入口，用户确认后才写入私人 `plannedDate`，不创建新任务、不改变截止日期，也不扩展 Feishu payload。
 - `src/renderer/focus-insights.ts` 从任务 `focusSessions` 及兼容的聚合专注字段投影一周节奏；`TimelinePage` 只读展示每日柱状图、总投入、专注段、平均时长和投入最多任务，不修改 `Task`、operation 或 Feishu payload。
 - `src/renderer/pet-task-drop-zones.ts` 只定义“专注 / 完成 / 稍后”三种任务搬运目标；`FloatingWindow` 在任务卡原生拖拽期间显示目标区，放下后复用现有 `startPetFocus`、`toggleTaskFromPet` 或 `heldTaskId` 气泡，不创建第二份任务。目标区只负责交互投影，权限、错误处理、撤销与飞书同步仍由原任务控制器和服务承接。
 - Todo Pet 动作包：渲染进程只接受版本化 JSON 声明，经过字段白名单、动作白名单、长度和唯一性校验后写入本地设置；动作包只能引用内置 `PetIdleAction`，不执行脚本、网络请求、文件读写或动态代码。

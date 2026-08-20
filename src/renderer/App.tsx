@@ -159,6 +159,7 @@ import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
 import { readCalendarEvents, writeCalendarEvents } from "./calendar-store";
 import { buildMorningCalendarSummary } from "./morning-calendar";
+import { suggestMorningRollover } from "./morning-rollover";
 import {
   localDateTimeInputToIso,
   toLocalDateTimeInput,
@@ -1256,13 +1257,19 @@ function MorningBrief({
   onPlanToday,
   calendarEvents = [],
   onOpenTimeline,
+  onOpenAll,
 }: {
   controller: TaskController;
   planningTasks?: Task[];
-  notify: (message: string, kind?: ToastKind) => void;
+  notify: (
+    message: string,
+    kind?: ToastKind,
+    action?: ToastState["action"],
+  ) => void;
   onPlanToday: (preset?: MorningKickoffPreset) => void;
   calendarEvents?: readonly CalendarEvent[];
   onOpenTimeline?: () => void;
+  onOpenAll?: () => void;
 }) {
   const formatBriefMinutes = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
@@ -1297,6 +1304,12 @@ function MorningBrief({
     () => buildMorningCalendarSummary(calendarEvents, today),
     [calendarEvents, today],
   );
+  const rolloverSuggestions = useMemo(
+    () => suggestMorningRollover(planningTasks ?? controller.tasks, today),
+    [controller.tasks, planningTasks, today],
+  );
+  const [rolloverDismissed, setRolloverDismissed] = useState(false);
+  const [rolloverBusyId, setRolloverBusyId] = useState<string>();
   const localSummary =
     openTasks.length === 0
       ? "今天还没有安排。可以先写下一件最重要的小事。"
@@ -1410,6 +1423,61 @@ function MorningBrief({
             ))}
             {todayCalendar.blocks.length > 4 && <small className="brief-calendar-more">还有 {todayCalendar.blocks.length - 4} 个事件</small>}
           </div>
+        </section>
+      )}
+      {rolloverSuggestions.length > 0 && !rolloverDismissed && (
+        <section className="brief-rollover" aria-label="接上之前的计划">
+          <div className="brief-rollover-heading">
+            <div>
+              <strong><RotateCcw size={14} /> 接上之前的计划</strong>
+              <small>
+                {rolloverSuggestions.length} 项之前安排但还没完成；你可以只挑想继续的。
+              </small>
+            </div>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setRolloverDismissed(true)}
+            >
+              稍后再看
+            </button>
+          </div>
+          <div className="brief-rollover-list">
+            {rolloverSuggestions.map((suggestion) => (
+              <div className="brief-rollover-row" key={suggestion.task.id}>
+                <div>
+                  <strong>{suggestion.task.title}</strong>
+                  <small>{suggestion.reason}{suggestion.task.dueAt ? " · 有截止时间" : ""}</small>
+                </div>
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={rolloverBusyId === suggestion.task.id}
+                  onClick={() => {
+                    setRolloverBusyId(suggestion.task.id);
+                    void controller.moveToToday(suggestion.task.id)
+                      .then((operationId) => {
+                        notify(`已把“${suggestion.task.title}”安排到今天`, "success", operationId
+                          ? { label: "撤销", run: () => void controller.undo(operationId) }
+                          : undefined);
+                      })
+                      .catch((reason) => {
+                        notify(reason instanceof Error ? reason.message : "暂时无法安排到今天", "error");
+                      })
+                      .finally(() => setRolloverBusyId(undefined));
+                  }}
+                >
+                  <CalendarDays size={14} />
+                  {rolloverBusyId === suggestion.task.id ? "安排中…" : "安排今天"}
+                </button>
+              </div>
+            ))}
+          </div>
+          {onOpenAll && (
+            <button type="button" className="ghost-button brief-rollover-all" onClick={onOpenAll}>
+              打开全部任务查看
+            </button>
+          )}
         </section>
       )}
       <div className="brief-actions">
@@ -1720,6 +1788,7 @@ function TaskListPage({
   onSourceChange,
   calendarEvents = [],
   onOpenTimeline,
+  onOpenAll,
 }: {
   route: TaskView;
   controller: TaskController;
@@ -1739,6 +1808,7 @@ function TaskListPage({
   onSourceChange: (source?: TaskSourceType) => void;
   calendarEvents?: readonly CalendarEvent[];
   onOpenTimeline?: () => void;
+  onOpenAll?: () => void;
 }) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [inboxTriageOpen, setInboxTriageOpen] = useState(false);
@@ -2378,6 +2448,7 @@ function TaskListPage({
           onPlanToday={onPlanToday}
           calendarEvents={calendarEvents}
           onOpenTimeline={onOpenTimeline}
+          onOpenAll={onOpenAll}
         />
       )}
       {bulkMode && (
@@ -11506,6 +11577,7 @@ function MainWindow() {
                 onSourceChange={(source) => navigate(taskView, source, { replace: true })}
                 calendarEvents={calendarEvents}
                 onOpenTimeline={() => navigate("timeline")}
+                onOpenAll={() => navigateTaskCollection("all")}
               />
               <TaskInspector
                 task={controller.selected}

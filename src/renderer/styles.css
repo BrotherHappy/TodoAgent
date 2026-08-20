@@ -1059,6 +1059,83 @@ select {
   color: var(--app-text-faint);
   font-size: 10px;
 }
+.brief-rollover {
+  margin-top: 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 17%, var(--app-line));
+  border-radius: 14px;
+  padding: 10px 11px;
+  background: color-mix(in srgb, var(--app-glass-soft) 86%, var(--app-brand-soft));
+}
+.brief-rollover-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.brief-rollover-heading strong,
+.brief-rollover-heading small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.brief-rollover-heading strong {
+  color: var(--app-text);
+  font-size: 12px;
+}
+.brief-rollover-heading small {
+  margin-top: 3px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.brief-rollover-heading .ghost-button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.brief-rollover-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.brief-rollover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--app-line) 70%, transparent);
+  padding-top: 6px;
+}
+.brief-rollover-row > div {
+  min-width: 0;
+}
+.brief-rollover-row strong,
+.brief-rollover-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brief-rollover-row strong {
+  color: var(--app-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.brief-rollover-row small {
+  margin-top: 2px;
+  color: var(--app-text-soft);
+  font-size: 10px;
+}
+.brief-rollover-row .soft-button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.brief-rollover-all {
+  margin-top: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+}
 .brief-actions {
   display: flex;
   gap: 8px;
@@ -9024,6 +9101,12 @@ select {
   }
   .brief-calendar-heading {
     display: grid;
+  }
+  .brief-rollover-heading {
+    display: grid;
+  }
+  .brief-rollover-row {
+    align-items: flex-start;
   }
   .brief-calendar-row {
     grid-template-columns: 1fr auto;

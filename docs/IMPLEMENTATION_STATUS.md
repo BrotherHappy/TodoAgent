@@ -51,6 +51,8 @@ Boss Mode 补充：v1.67 吸收 Desktop Goose / Shimeji / Weyrdlets 的安全桌
 
 晨间日历摘要补充：v1.69 新增 `src/renderer/morning-calendar.ts`，Today 的晨间简报从同一缓存显示当天事件、事件数量和占用总时长，并提供打开时间线入口；无事件时不显示空卡片。该投影不调用模型、不创建任务、不写入外部日历。
 
+之前计划建议补充：v1.70 新增 `src/renderer/morning-rollover.ts`，Today 晨间简报从全部开放任务中找出较早日期的未完成私人 Today 计划，最多显示 3 项并提供“安排今天”、打开全部任务和稍后再看。安排动作复用既有 `moveToToday`、同步队列和撤销；默认不自动 rollover，不改变截止日期、共享字段或飞书 payload。
+
 任务行 Agent 入口补充：v1.59 新增 `src/renderer/task-agent-context.ts`，任务列表行可将标题、稳定 ID、来源和状态带入 Agent 草稿；入口只导航和预填，不自动发送、不绕过权限，批量选择时隐藏，后续仍沿用任务详情查询、影响预览、确认、审计和撤销。
 
 批量 Agent 助手补充：v1.60 复用同一 helper 增加批量选择工具栏入口，最多内嵌 20 项所选任务，超出部分只保留数量提示；草稿要求 Agent 先逐项查询、解释目标和影响，不明确时先追问，任何完成、删除、改期或同步都不能绕过既有确认链。
