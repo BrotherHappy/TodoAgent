@@ -186,6 +186,31 @@ describe("PetService", () => {
     expect(service.snapshot().diary).toHaveLength(1);
   });
 
+  it("stores quick-capture notes as local diary entries and deduplicates retries", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-capture-diary-"));
+    const service = new PetService({ userDataPath: root });
+    await service.initialize();
+
+    const first = await service.createDiaryFromCapture({
+      localDate: "2026-08-15",
+      title: "灵感：给宠物加一个小窝",
+      content: "把想法先记下来，晚点再拆成任务。",
+      captureId: "capture-1",
+    });
+    const second = await service.createDiaryFromCapture({
+      localDate: "2026-08-15",
+      title: "灵感：给宠物加一个小窝（重试）",
+      content: "把想法先记下来，晚点再拆成任务。",
+      captureId: "capture-1",
+    });
+
+    expect(second.id).toBe(first.id);
+    expect(second.title).toContain("重试");
+    expect(second.taskIds).toBeUndefined();
+    expect(second.generation).toBe("user");
+    expect(service.snapshot().diary).toHaveLength(1);
+  });
+
   it("keeps diary task links local, unique and current when facts are regenerated", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-journal-links-"));
     const service = new PetService({ userDataPath: root });

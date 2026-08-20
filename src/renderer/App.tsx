@@ -11552,10 +11552,15 @@ function captureFields(text: string) {
   return { source, date, title, contexts, estimatedMinutes, recurrence };
 }
 
+type QuickCaptureDestination = "task" | "inbox" | "diary";
+
 function QuickCaptureWindow() {
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [captureError, setCaptureError] = useState("");
+  const [captureDestination, setCaptureDestination] =
+    useState<QuickCaptureDestination>("task");
+  const captureIdRef = useRef(`quick-capture-${crypto.randomUUID()}`);
   const [clipboardContext, setClipboardContext] = useState<{
     text: string;
     characters: number;
@@ -11669,29 +11674,51 @@ function QuickCaptureWindow() {
     setSaving(true);
     setCaptureError("");
     try {
+      if (captureDestination === "diary") {
+        const createDiaryFromCapture = window.desktopApi?.pet.createDiaryFromCapture;
+        if (!createDiaryFromCapture) throw new Error("当前版本暂不支持写入日记，请先更新应用");
+        await createDiaryFromCapture({
+          title: fields.title,
+          content: text.trim(),
+          localDate: fields.date ?? new Date().toISOString().slice(0, 10),
+          captureId: captureIdRef.current,
+        });
+        await window.desktopApi?.tasks.deleteDraft("quick-capture");
+        setText("");
+        setSelectedTemplateId("");
+        captureIdRef.current = `quick-capture-${crypto.randomUUID()}`;
+        if (openAfterSave) await window.desktopApi?.shell.showMain("home");
+        window.setTimeout(() => {
+          void window.desktopApi?.shell.hideCurrentWindow();
+        }, 260);
+        return;
+      }
       const feishu =
-        source === "feishu"
+        captureDestination === "task" && source === "feishu"
           ? await window.desktopApi?.feishu.status()
           : undefined;
-      const blockedFeishuMessage = feishuCreationBlockedMessage(source, feishu);
+      const effectiveSource = captureDestination === "inbox" ? "local" : source;
+      const blockedFeishuMessage = feishuCreationBlockedMessage(effectiveSource, feishu);
       if (blockedFeishuMessage) throw new Error(blockedFeishuMessage);
       const priorities: TaskPriority[] = ["low", "medium", "high", "urgent"];
       const baseDate =
-        fields.privatePlanAt?.slice(0, 10) ??
-        (!fields.dueAt ? fields.date : undefined) ??
-        new Date().toISOString().slice(0, 10);
+        captureDestination === "inbox"
+          ? undefined
+          : fields.privatePlanAt?.slice(0, 10) ??
+            (!fields.dueAt ? fields.date : undefined) ??
+            new Date().toISOString().slice(0, 10);
       const baseInput = {
         source:
-          source === "feishu"
+          effectiveSource === "feishu"
             ? { type: "feishu" as const, accountId: feishu?.accountId }
             : { type: "local" as const },
-        projectId: fields.project,
+        projectId: captureDestination === "inbox" ? undefined : fields.project,
         contexts: fields.contexts,
-        sync: source === "feishu" ? { status: "pending" as const } : { status: "local" as const },
+        sync: effectiveSource === "feishu" ? { status: "pending" as const } : { status: "local" as const },
       };
       const templateInputs = selectedTemplate
         ? buildTaskTemplateInputs(selectedTemplate, fields.title, {
-            date: baseDate,
+            date: baseDate ?? new Date().toISOString().slice(0, 10),
             dueAt: fields.dueAt,
             tags: fields.tags,
             priority: priorities[fields.priority] ?? "medium",
@@ -11718,17 +11745,37 @@ function QuickCaptureWindow() {
                 : [],
             },
           ];
+      const destinationInputs = templateInputs.map((input) =>
+        captureDestination === "inbox"
+          ? {
+              ...input,
+              plannedDate: undefined,
+              dueAt: undefined,
+              reminders: [],
+              recurrence: undefined,
+            }
+          : input,
+      );
       let firstResult: Awaited<ReturnType<typeof controller.create>>;
       let createdCount = 0;
-      for (const input of templateInputs) {
+      for (const input of destinationInputs) {
         try {
-          const result = await controller.create({ ...baseInput, ...input });
+          const result = await controller.create({
+            ...baseInput,
+            ...input,
+            source: effectiveSource === "feishu"
+              ? { type: "feishu" as const, accountId: feishu?.accountId }
+              : { type: "local" as const },
+            sync: effectiveSource === "feishu"
+              ? { status: "pending" as const }
+              : { status: "local" as const },
+          });
           firstResult ??= result;
           createdCount += 1;
         } catch (reason) {
           const detail = reason instanceof Error ? reason.message : "未知错误";
           if (selectedTemplate && createdCount > 0) {
-            throw new Error(`模板已创建 ${createdCount}/${templateInputs.length} 项，剩余步骤未创建：${detail}`);
+            throw new Error(`模板已创建 ${createdCount}/${destinationInputs.length} 项，剩余步骤未创建：${detail}`);
           }
           throw reason;
         }
@@ -11736,6 +11783,7 @@ function QuickCaptureWindow() {
       await window.desktopApi?.tasks.deleteDraft("quick-capture");
       setText("");
       setSelectedTemplateId("");
+      captureIdRef.current = `quick-capture-${crypto.randomUUID()}`;
       if (openAfterSave) {
         await window.desktopApi?.shell.showMain(
           firstResult?.task.id ? `task:${firstResult.task.id}` : "today",
@@ -11985,6 +12033,7 @@ function QuickCaptureWindow() {
               <select
                 aria-label="工作流模板选择"
                 value={selectedTemplateId}
+                disabled={captureDestination === "diary"}
                 onChange={(event) => setSelectedTemplateId(event.target.value)}
               >
                 <option value="">不使用模板</option>
@@ -12032,8 +12081,53 @@ function QuickCaptureWindow() {
                   {fields.recurrence ? (fields.source === "feishu" ? " · 循环仅本地" : " · 循环") : ""}
                 </small>
               </div>
-              <SourcePill source={fields.source} />
+              <SourcePill
+                source={captureDestination === "task" ? fields.source : "local"}
+              />
             </div>
+          )}
+          {text && (
+            <section className="quick-destination" aria-label="快速捕获保存去向">
+              <div className="quick-destination-heading">
+                <strong>保存到哪里？</strong>
+                <small>
+                  {captureDestination === "task"
+                    ? "按上面的解析创建任务"
+                    : captureDestination === "inbox"
+                      ? "暂存为本地任务，不安排日期"
+                      : "写入 Todo Pet 日记，不创建任务"}
+                </small>
+              </div>
+              <div className="quick-destination-options" role="group" aria-label="保存去向">
+                <button
+                  type="button"
+                  className={captureDestination === "task" ? "is-selected" : ""}
+                  aria-pressed={captureDestination === "task"}
+                  onClick={() => setCaptureDestination("task")}
+                >
+                  <Check size={14} /> 任务
+                </button>
+                <button
+                  type="button"
+                  className={captureDestination === "inbox" ? "is-selected" : ""}
+                  aria-pressed={captureDestination === "inbox"}
+                  onClick={() => setCaptureDestination("inbox")}
+                >
+                  <Inbox size={14} /> 暂存
+                </button>
+                <button
+                  type="button"
+                  className={captureDestination === "diary" ? "is-selected" : ""}
+                  aria-pressed={captureDestination === "diary"}
+                  onClick={() => {
+                    setCaptureDestination("diary");
+                    setSelectedTemplateId("");
+                  }}
+                >
+                  <FileText size={14} /> 日记
+                </button>
+              </div>
+            </section>
           )}
           {clipboardContext && (
             <section className="context-capture-card" aria-label="剪贴板上下文预览">
@@ -12131,27 +12225,53 @@ function QuickCaptureWindow() {
         </div>
         <div className="quick-footer">
           <span>
-            {fields.source === "feishu"
-              ? "将创建到飞书；私人计划仍只保存在本地"
-              : "只保存在当前设备"}
+            {captureDestination === "diary"
+              ? "只保存在当前设备，不会创建任务或同步飞书"
+              : captureDestination === "inbox"
+                ? "只保存在当前设备，稍后再安排日期"
+                : fields.source === "feishu"
+                  ? "将创建到飞书；私人计划仍只保存在本地"
+                  : "只保存在当前设备"}
           </span>
           <span className="footer-spacer" />
-          <button
-            type="button"
-            className="soft-button"
-            onClick={() => void save("local")}
-            disabled={!text || saving}
-          >
-            保存到本地
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void save("feishu")}
-            disabled={!text || saving}
-          >
-            创建到飞书
-          </button>
+          {captureDestination === "diary" ? (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void save("local")}
+              disabled={!text || saving}
+            >
+              <FileText size={15} /> 写入日记
+            </button>
+          ) : captureDestination === "inbox" ? (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void save("local")}
+              disabled={!text || saving}
+            >
+              <Inbox size={15} /> 保存到暂存
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="soft-button"
+                onClick={() => void save("local")}
+                disabled={!text || saving}
+              >
+                保存到本地
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void save("feishu")}
+                disabled={!text || saving}
+              >
+                创建到飞书
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

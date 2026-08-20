@@ -161,6 +161,8 @@ export interface PetDiaryEntry {
   localDate: string;
   title: string;
   content: string;
+  /** Optional id supplied by a capture flow so retrying the same save is idempotent. */
+  captureId?: string;
   /**
    * Local links back to the task records that shaped this entry. The links
    * are intentionally private to Todo Agent: they are navigation metadata,

@@ -522,6 +522,12 @@ export interface PetDesktopApi {
   refreshWeather(force?: boolean): Promise<WeatherSnapshot | undefined>;
   generateDiary(userNote?: string): Promise<PetDiaryEntry>;
   createDiaryFromTask(taskId: string, userNote?: string): Promise<PetDiaryEntry>;
+  createDiaryFromCapture(input: {
+    title: string;
+    content: string;
+    localDate?: string;
+    captureId?: string;
+  }): Promise<PetDiaryEntry>;
   updateDiary(
     id: string,
     patch: Pick<PetDiaryEntry, "title" | "content">,
@@ -758,6 +764,7 @@ export const DESKTOP_CHANNELS = {
   petWeatherRefresh: "pet:weather-refresh",
   petDiaryGenerate: "pet:diary-generate",
   petDiaryFromTask: "pet:diary-from-task",
+  petDiaryFromCapture: "pet:diary-from-capture",
   petDiaryUpdate: "pet:diary-update",
   petDiaryDelete: "pet:diary-delete",
   petMemoryAdd: "pet:memory-add",

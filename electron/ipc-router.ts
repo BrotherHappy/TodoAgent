@@ -1025,6 +1025,18 @@ export function registerDesktopIpc(
       .parse(input);
     return dependencies.pet.createDiaryFromTask(request.taskId, request.userNote);
   });
+  handle(DESKTOP_CHANNELS.petDiaryFromCapture, (_event, input) => {
+    const request = z
+      .object({
+        title: z.string().trim().min(1).max(200),
+        content: z.string().trim().min(1).max(50_000),
+        localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+        captureId: z.string().trim().min(1).max(200).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.createDiaryFromCapture(request);
+  });
   handle(DESKTOP_CHANNELS.petDiaryUpdate, (_event, input) => {
     const request = z
       .object({

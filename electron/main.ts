@@ -1337,6 +1337,7 @@ async function startApplication(): Promise<void> {
         userNote,
       });
     },
+    createDiaryFromCapture: (input) => petService!.createDiaryFromCapture(input),
     updateDiary: (id, patch) => petService!.updateDiary(id, patch),
     deleteDiary: (id) => petService!.deleteDiary(id),
     addMemory: (input) => petService!.addMemory(input),

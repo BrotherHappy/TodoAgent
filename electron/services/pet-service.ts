@@ -204,6 +204,13 @@ export interface DiaryTaskFacts {
   userNote?: string;
 }
 
+export interface DiaryCaptureFacts {
+  localDate?: string;
+  title: string;
+  content: string;
+  captureId?: string;
+}
+
 export class PetService {
   readonly #filePath: string;
   readonly #now: () => number;
@@ -706,6 +713,48 @@ export class PetService {
         focusSeconds: focusRounds.reduce((sum, record) => sum + record.actualSeconds, 0),
         rewardIds: [],
         userEdited: existing?.userEdited ?? false,
+        createdAt: existing?.createdAt ?? isoNow(now),
+        updatedAt: isoNow(now),
+      };
+      draft.diary = [
+        ...draft.diary.filter((entry) => entry.id !== result.id),
+        result,
+      ].sort((left, right) => right.localDate.localeCompare(left.localDate));
+    });
+    return clone(result);
+  }
+
+  /**
+   * Persist a user-authored capture as a diary entry. This intentionally has
+   * no taskIds and never touches the task store or a remote provider. A
+   * caller-supplied captureId makes retries idempotent without exposing any
+   * diary snapshot or provider metadata to the renderer.
+   */
+  async createDiaryFromCapture(facts: DiaryCaptureFacts): Promise<PetDiaryEntry> {
+    let result!: PetDiaryEntry;
+    await this.#mutate((draft, now) => {
+      const title = facts.title.trim().slice(0, 200);
+      const content = facts.content.trim().slice(0, 50_000);
+      if (!title || !content) throw new Error("DIARY_CAPTURE_EMPTY");
+      const localDate = facts.localDate && /^\d{4}-\d{2}-\d{2}$/u.test(facts.localDate)
+        ? facts.localDate
+        : isoNow(now).slice(0, 10);
+      const captureId = facts.captureId?.trim().slice(0, 200) || undefined;
+      const existing = captureId
+        ? draft.diary.find((entry) => entry.captureId === captureId)
+        : undefined;
+      result = {
+        id: existing?.id ?? randomUUID(),
+        localDate,
+        title,
+        content,
+        ...(captureId ? { captureId } : {}),
+        generation: "user",
+        completedTaskCount: 0,
+        focusRounds: 0,
+        focusSeconds: 0,
+        rewardIds: [],
+        userEdited: false,
         createdAt: existing?.createdAt ?? isoNow(now),
         updatedAt: isoNow(now),
       };

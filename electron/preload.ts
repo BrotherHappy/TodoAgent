@@ -242,6 +242,8 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryGenerate, userNote),
     createDiaryFromTask: (taskId, userNote) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryFromTask, { taskId, userNote }),
+    createDiaryFromCapture: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryFromCapture, input),
     updateDiary: (id, patch) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryUpdate, { id, patch }),
     deleteDiary: (id) =>
