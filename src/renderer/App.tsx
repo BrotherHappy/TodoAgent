@@ -169,6 +169,8 @@ import {
   type ProjectReminderSelection,
 } from "./project-reminder-policy";
 import { filterTasksForPetView } from "./pet-smart-view";
+import { PetReviewSession } from "./PetReviewSession";
+import type { PetReviewAction } from "./pet-review-session";
 import {
   FOCUS_SHIELD_DISMISS_MS,
   FOCUS_SHIELD_POLL_INTERVAL_MS,
@@ -7241,12 +7243,27 @@ function WeeklyCheckinCard({
 function PetReviewCard({
   tasks,
   onNavigate,
+  onNavigateTask,
+  onReviewAction,
 }: {
   tasks: readonly Task[];
   onNavigate: (route: MainRoute) => void;
+  onNavigateTask: (task: Task) => void;
+  onReviewAction: (task: Task, action: PetReviewAction) => Promise<void>;
 }) {
   const review = useMemo(() => buildPetReviewSummary(tasks), [tasks]);
+  const [sessionTasks, setSessionTasks] = useState<Task[]>();
   const buckets = [review.overdue, review.blocked, review.unplanned];
+  if (sessionTasks) {
+    return (
+      <PetReviewSession
+        tasks={sessionTasks}
+        onAction={onReviewAction}
+        onOpenTask={onNavigateTask}
+        onClose={() => setSessionTasks(undefined)}
+      />
+    );
+  }
   return (
     <section className={`pet-review-card ${review.clear ? "is-clear" : ""}`} aria-label="宠物回顾">
       <div className="pet-section-heading">
@@ -7254,7 +7271,17 @@ function PetReviewCard({
           <h2>宠物回顾</h2>
           <p>{review.clear ? "没有催促，只把值得看一眼的事情留在这里。" : review.headline}</p>
         </div>
-        <span className="pet-habit-badge">只读</span>
+        {review.clear ? (
+          <span className="pet-habit-badge">已清爽</span>
+        ) : (
+          <button
+            type="button"
+            className="soft-button"
+            onClick={() => setSessionTasks(review.tasks)}
+          >
+            <RotateCcw size={14} /> 开始回顾
+          </button>
+        )}
       </div>
       {review.clear ? (
         <div className="pet-review-clear">
@@ -7299,12 +7326,14 @@ function PetHomePage({
   onNavigate,
   onNavigateTask,
   onPlanTomorrow,
+  onReviewAction,
 }: {
   notify: (message: string, kind?: ToastKind) => void;
   tasks: readonly Task[];
   onNavigate: (route: MainRoute) => void;
   onNavigateTask: (task: Task) => void;
   onPlanTomorrow: () => void;
+  onReviewAction: (task: Task, action: PetReviewAction) => Promise<void>;
 }) {
   const { snapshot, weather, refresh, setWeather } = usePetData();
   const legacyHabitMigrationStarted = useRef(false);
@@ -7526,7 +7555,12 @@ function PetHomePage({
             onPlanTomorrow={onPlanTomorrow}
           />
           <WeeklyCheckinCard tasks={tasks} notify={notify} />
-          <PetReviewCard tasks={tasks} onNavigate={onNavigate} />
+          <PetReviewCard
+            tasks={tasks}
+            onNavigate={onNavigate}
+            onNavigateTask={onNavigateTask}
+            onReviewAction={onReviewAction}
+          />
           <section className="pet-rewards-card">
             <div className="pet-section-heading">
               <div>
@@ -12370,6 +12404,15 @@ function MainWindow() {
                   navigateTaskCollection(
                     task.status === "completed" ? "completed" : "all",
                   );
+                }}
+                onReviewAction={async (task, action) => {
+                  if (action === "complete") {
+                    await timelineController.toggleComplete(task);
+                  } else if (action === "today") {
+                    await timelineController.moveToToday(task.id);
+                  } else {
+                    await timelineController.startFocus(task.id);
+                  }
                 }}
               />
             </div>

@@ -75,7 +75,7 @@ flowchart LR
 - `src/shared/multi-day-schedule.ts` 在当天排不下时生成未来 5 个工作日的只读顺延投影：保留固定时间块、跳过周末弹性容量、在截止日期后停止候选，并返回 `past-deadline` / `no-capacity` / `horizon` 原因。它只接受当前任务快照和规划约束，不写 `plannedDate` / `timeBlock`，不创建 IPC 或 operation，UI 也不把预览结果当成已保存事实。
 - 日终回顾的“安排明天”复用 `DailyPlanSheet`，由 renderer 传入目标日期与相对标签；规划数据仍读取同一 open/completed 快照，确认后调用现有 `tasks:apply-today-plan` 原子事务。TaskService 允许今天或未来本地日期、拒绝已经过去的日期；事务只改 `plannedDate`、`privateOrder` 和用户确认的 `estimatedMinutes`，operation 仍可整体撤销，Feishu adapter 不会收到这些私人字段。
 - `src/renderer/InboxTriageSheet.tsx` 是暂存的渐进式整理视图：队列由当前 controller 快照中“开放且没有 `plannedDate` / `projectId` / `listId`”的任务投影，并用本地 `processedIds` 管理本轮“稍后”与已处理项；今天/明天调用 `tasks.update` 的私人 `plannedDate`，完成调用 `toggleComplete`，打开详情只选择原任务，因而不会复制 Inbox 数据或绕过普通同步/权限路径。
-- Todo Pet 回顾由 src/renderer/pet-review.ts 纯函数生成逾期、依赖阻塞与待排时间三类去重队列；分类点击只调用现有导航，不新增任务副本或隐式写操作。
+- Todo Pet 回顾由 `src/renderer/pet-review.ts` 纯函数生成逾期、依赖阻塞与待排时间三类去重队列；`src/renderer/pet-review-session.ts` 将用户主动开始的会话快照成稳定顺序并附带原因，`PetReviewSession` 逐项调用既有 TaskController 的完成、安排今天或开始专注方法。会话是临时 UI 状态，不新增任务副本、operation 协议或隐式写操作；错误留在当前项，稍后只推进会话指针。
 - 任务依赖由 TaskService 在新增和编辑时做有向图循环校验；renderer 的任务详情使用原生多选维护前置任务，缺失的远端 ID 不被静默丢弃而继续作为 blocked 信号。依赖字段属于私人计划层，飞书任务的依赖编辑不会进入共享写回载荷。
 - `src/renderer/dependency-chain.ts` 从当前任务快照投影前置 / 当前 / 后续关系、缺失 ID 和循环信号；TaskInspector 只提供可点击导航，不修改 Task、operation 或 Feishu payload。
 - 任务详情链接复用 Task.links 私人字段；渲染层添加前以 URL 构造器限制为 http/https，打开仍经过白名单 shell.openExternal，删除通过普通任务更新记录撤销操作，不进入飞书共享写回。
