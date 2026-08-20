@@ -103,6 +103,10 @@ import type { AuditRecord, ModelPricing } from "../shared/agent-types";
 import type { QuickCaptureResult } from "../shared/quick-capture";
 import type { CalendarEvent } from "../shared/calendar-events";
 import {
+  buildCalendarFollowUpDraft,
+  type CalendarFollowUpDraft,
+} from "../shared/calendar-follow-up";
+import {
   buildDropContextPreview,
   type DropContextPreview,
 } from "../shared/drop-context";
@@ -5264,17 +5268,23 @@ function NewTaskSheet({
   projects = [],
   lists = [],
   notify,
+  initialTitle = "",
+  initialNotes = "",
+  initialPlannedDate,
 }: {
   onClose: () => void;
   controller: TaskController;
   projects?: TaskProject[];
   lists?: TaskList[];
   notify: (message: string, kind?: ToastKind) => void;
+  initialTitle?: string;
+  initialNotes?: string;
+  initialPlannedDate?: string;
 }) {
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
+  const [title, setTitle] = useState(initialTitle);
+  const [notes, setNotes] = useState(initialNotes);
   const [source, setSource] = useState<TaskSourceType>("local");
-  const [plannedDate, setPlannedDate] = useState(dateKey());
+  const [plannedDate, setPlannedDate] = useState(initialPlannedDate ?? dateKey());
   const [startAt, setStartAt] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [reminderAt, setReminderAt] = useState("");
@@ -12196,6 +12206,7 @@ function MainWindow() {
   const projectState = useProjects();
   const listState = useLists();
   const [newTask, setNewTask] = useState(false);
+  const [newTaskPreset, setNewTaskPreset] = useState<CalendarFollowUpDraft>();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [dailyPlanOpen, setDailyPlanOpen] = useState(false);
   const [dailyPlanDate, setDailyPlanDate] = useState(() => dateKey());
@@ -12696,6 +12707,10 @@ function MainWindow() {
                 notify={notify}
                 calendarEvents={calendarEvents}
                 onCalendarEventsChange={updateCalendarEvents}
+                onCreateFollowUp={(event) => {
+                  setNewTaskPreset(buildCalendarFollowUpDraft(event, dateKey()));
+                  setNewTask(true);
+                }}
               />
             </div>
           )}
@@ -12815,11 +12830,17 @@ function MainWindow() {
         </div>
         {newTask && (
           <NewTaskSheet
-            onClose={() => setNewTask(false)}
+            onClose={() => {
+              setNewTask(false);
+              setNewTaskPreset(undefined);
+            }}
             controller={controller}
             projects={projectState.projects}
             lists={listState.lists}
             notify={notify}
+            initialTitle={newTaskPreset?.title}
+            initialNotes={newTaskPreset?.notes}
+            initialPlannedDate={newTaskPreset?.plannedDate}
           />
         )}
         {commandPaletteOpen && (

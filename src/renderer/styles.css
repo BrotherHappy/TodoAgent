@@ -1808,6 +1808,34 @@ select {
 .timeline-calendar-event small {
   text-align: right;
 }
+.timeline-calendar-event-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.timeline-calendar-follow-up {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 55%, transparent);
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.timeline-calendar-follow-up:hover {
+  border-color: var(--app-brand);
+  background: var(--app-brand-soft);
+}
+.timeline-calendar-follow-up:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 2px;
+}
 .timeline-calendar-empty {
   display: flex;
   align-items: center;

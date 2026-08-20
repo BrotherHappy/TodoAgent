@@ -65,18 +65,21 @@ describe("TimelinePage", () => {
     expect(screen.getByText("待安排 1 项")).toBeVisible();
   });
 
-  it("shows read-only calendar events alongside the day timeline", () => {
+  it("shows read-only calendar events and offers a follow-up draft", () => {
+    const onCreateFollowUp = vi.fn();
+    const event = {
+      id: "calendar-1",
+      summary: "产品同步会",
+      startAt: localIsoAt(date, 10 * 60),
+      endAt: localIsoAt(date, 11 * 60),
+      allDay: false,
+      sourceName: "工作日历",
+    };
     render(
       <TimelinePage
         {...props({
-          calendarEvents: [{
-            id: "calendar-1",
-            summary: "产品同步会",
-            startAt: localIsoAt(date, 10 * 60),
-            endAt: localIsoAt(date, 11 * 60),
-            allDay: false,
-            sourceName: "工作日历",
-          }],
+          calendarEvents: [event],
+          onCreateFollowUp,
         })}
       />,
     );
@@ -84,6 +87,8 @@ describe("TimelinePage", () => {
     expect(within(agenda).getByText("产品同步会")).toBeVisible();
     expect(within(agenda).getByText("工作日历")).toBeVisible();
     expect(within(agenda).getByText("1 个事件")).toBeVisible();
+    fireEvent.click(within(agenda).getByRole("button", { name: "为“产品同步会”创建跟进任务" }));
+    expect(onCreateFollowUp).toHaveBeenCalledWith(event);
   });
 
   it("moves a task to a time slot with a local time block and offers undo", async () => {

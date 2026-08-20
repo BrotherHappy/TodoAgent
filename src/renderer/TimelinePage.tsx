@@ -1,4 +1,4 @@
-import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, Sparkles, Upload } from "lucide-react";
+import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, Plus, Sparkles, Upload } from "lucide-react";
 import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import type { Task, UpdateTaskInput } from "../shared/models";
 import {
@@ -47,6 +47,7 @@ export interface TimelinePageProps {
   notify: (message: string, kind?: ToastKind, action?: { label: string; run: () => void }) => void;
   calendarEvents?: readonly CalendarEvent[];
   onCalendarEventsChange?: (events: CalendarEvent[]) => void;
+  onCreateFollowUp?: (event: CalendarEvent) => void;
 }
 
 const priorityClass = (task: Task): string =>
@@ -90,6 +91,7 @@ export function TimelinePage({
   notify,
   calendarEvents = [],
   onCalendarEventsChange,
+  onCreateFollowUp,
 }: TimelinePageProps) {
   const [date, setDate] = useState(() => localDateKey());
   const [viewMode, setViewMode] = useState<"day" | "week" | "board">("day");
@@ -732,17 +734,33 @@ export function TimelinePage({
             </div>
             {dayCalendarBlocks.length ? (
               <div className="timeline-calendar-event-list">
-                {dayCalendarBlocks.map((block) => (
-                  <div className="timeline-calendar-event" key={block.id}>
-                    <span className="timeline-calendar-event-time">
-                      {block.startMinutes === 0 && block.endMinutes >= 1_440
-                        ? "全天"
-                        : `${formatTimelineDate(date)} · ${String(Math.floor(block.startMinutes / 60)).padStart(2, "0")}:${String(block.startMinutes % 60).padStart(2, "0")}–${String(Math.floor(block.endMinutes / 60)).padStart(2, "0")}:${String(block.endMinutes % 60).padStart(2, "0")}`}
-                    </span>
-                    <strong>{block.title}</strong>
-                    <small>{block.sourceName}</small>
-                  </div>
-                ))}
+                {dayCalendarBlocks.map((block) => {
+                  const sourceEvent = dayCalendarEvents.find((event) => event.id === block.id);
+                  return (
+                    <div className="timeline-calendar-event" key={block.id}>
+                      <span className="timeline-calendar-event-time">
+                        {block.startMinutes === 0 && block.endMinutes >= 1_440
+                          ? "全天"
+                          : `${formatTimelineDate(date)} · ${String(Math.floor(block.startMinutes / 60)).padStart(2, "0")}:${String(block.startMinutes % 60).padStart(2, "0")}–${String(Math.floor(block.endMinutes / 60)).padStart(2, "0")}:${String(block.endMinutes % 60).padStart(2, "0")}`}
+                      </span>
+                      <strong>{block.title}</strong>
+                      <div className="timeline-calendar-event-meta">
+                        <small>{block.sourceName}</small>
+                        {onCreateFollowUp && sourceEvent && (
+                          <button
+                            type="button"
+                            className="timeline-calendar-follow-up"
+                            aria-label={`为“${sourceEvent.summary}”创建跟进任务`}
+                            title="创建会后跟进任务"
+                            onClick={() => onCreateFollowUp(sourceEvent)}
+                          >
+                            <Plus size={12} aria-hidden="true" /> 跟进
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="timeline-calendar-empty">
