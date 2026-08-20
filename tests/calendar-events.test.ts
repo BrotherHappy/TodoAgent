@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calendarBusyBlocksForDate,
+  calendarBusyBlocksForSlot,
   calendarBusyMinutesForDate,
   calendarEventsForDate,
   mergeCalendarEvents,
@@ -61,6 +62,9 @@ END:VCALENDAR`);
     ]);
     expect(calendarBusyMinutesForDate(events, "2026-08-20", 9 * 60, 18 * 60)).toBe(0);
     expect(calendarBusyMinutesForDate(events, "2026-08-20", 0, 120)).toBe(60);
+    const blocks = calendarBusyBlocksForDate(events, "2026-08-20");
+    expect(calendarBusyBlocksForSlot(blocks, 0).map((block) => block.id)).toEqual([blocks[0]?.id, blocks[1]?.id]);
+    expect(calendarBusyBlocksForSlot(blocks, 30).map((block) => block.id)).toEqual([blocks[1]?.id]);
   });
 
   it("merges repeat imports idempotently and caps invalid records", () => {

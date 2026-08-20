@@ -3,6 +3,7 @@ import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "rea
 import type { Task, UpdateTaskInput } from "../shared/models";
 import {
   calendarBusyBlocksForDate,
+  calendarBusyBlocksForSlot,
   calendarEventsForDate,
   mergeCalendarEvents,
   parseIcsCalendar,
@@ -831,15 +832,31 @@ export function TimelinePage({
             <div className="timeline-board-hint">拖动任务卡到时间格即可安排；时间块只保存为本地计划，不会改写飞书截止日期。</div>
             {slots.map((slot) => {
               const placements = bySlot.get(slot.minute) ?? [];
+              const busyBlocks = calendarBusyBlocksForSlot(dayCalendarBlocks, slot.minute);
               return (
                 <div className="timeline-row" key={slot.minute}>
                   <span className="timeline-time-label">{slot.label}</span>
                   <div
-                    className={`timeline-slot ${draggingId ? "is-drop-target" : ""}`}
+                    className={`timeline-slot ${draggingId ? "is-drop-target" : ""} ${busyBlocks.length ? "has-calendar-busy" : ""}`}
                     onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }}
                     onDrop={(event) => onDrop(event, slot.minute)}
                     data-slot-minute={slot.minute}
                   >
+                    {busyBlocks.filter((block) => !block.allDay || slot.minute === 0).map((block) => {
+                      const startsHere = block.startMinutes >= slot.minute && block.startMinutes < slot.minute + 30;
+                      return (
+                        <span
+                          className={`timeline-calendar-slot-busy ${block.allDay ? "is-all-day" : ""}`}
+                          key={`${block.id}-${slot.minute}`}
+                          title={`${block.title} · ${block.sourceName}`}
+                          aria-label={startsHere ? `日历占用：${block.title}` : undefined}
+                          aria-hidden={startsHere ? undefined : "true"}
+                          data-calendar-busy={block.id}
+                        >
+                          {startsHere && <small>{block.title}</small>}
+                        </span>
+                      );
+                    })}
                     {placements.map((placement) => (
                       <button
                         type="button"

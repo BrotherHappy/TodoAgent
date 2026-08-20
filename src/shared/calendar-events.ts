@@ -26,6 +26,19 @@ export interface CalendarBusyBlock {
   allDay: boolean;
 }
 
+/** Return the calendar blocks that intersect one timeline slot. */
+export function calendarBusyBlocksForSlot(
+  blocks: readonly CalendarBusyBlock[],
+  startMinutes: number,
+  slotMinutes = 30,
+): CalendarBusyBlock[] {
+  if (!Number.isFinite(startMinutes) || !Number.isFinite(slotMinutes) || slotMinutes <= 0) return [];
+  const endMinutes = startMinutes + slotMinutes;
+  return blocks.filter(
+    (block) => block.startMinutes < endMinutes && block.endMinutes > startMinutes,
+  );
+}
+
 const MAX_ICS_BYTES = 2 * 1024 * 1024;
 const MAX_EVENTS = 500;
 const MAX_DESCRIPTION_CHARS = 4_000;

@@ -111,6 +111,20 @@ describe("TimelinePage", () => {
     expect(onExtractActionItems).toHaveBeenCalledWith(event);
   });
 
+  it("projects calendar busy blocks onto the half-hour timeline", () => {
+    const event = {
+      id: "calendar-busy",
+      summary: "评审会议",
+      startAt: localIsoAt(date, 10 * 60),
+      endAt: localIsoAt(date, 11 * 60),
+      allDay: false,
+      sourceName: "工作日历",
+    };
+    render(<TimelinePage {...props({ calendarEvents: [event] })} />);
+    expect(screen.getByLabelText("日历占用：评审会议")).toBeVisible();
+    expect(document.querySelectorAll('[data-calendar-busy="calendar-busy"]').length).toBe(2);
+  });
+
   it("moves a task to a time slot with a local time block and offers undo", async () => {
     const onMove = vi.fn(async () => "operation-2");
     const notify = vi.fn();

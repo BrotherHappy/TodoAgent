@@ -1892,6 +1892,7 @@ select {
   text-align: right;
 }
 .timeline-slot {
+  position: relative;
   min-height: 48px;
   display: flex;
   align-items: center;
@@ -1902,6 +1903,34 @@ select {
   transition:
     background 150ms ease,
     border-color 150ms ease;
+}
+.timeline-slot.has-calendar-busy {
+  border-top-color: color-mix(in srgb, var(--app-brand) 28%, var(--app-line));
+}
+.timeline-calendar-slot-busy {
+  position: absolute;
+  inset: 3px 4px;
+  z-index: 0;
+  display: block;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 32%, var(--app-line));
+  border-left: 3px solid var(--app-brand);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--app-brand-soft) 44%, transparent);
+  pointer-events: none;
+}
+.timeline-calendar-slot-busy.is-all-day {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--app-brand-soft) 30%, transparent);
+}
+.timeline-calendar-slot-busy small {
+  display: block;
+  overflow: hidden;
+  padding: 4px 7px;
+  color: var(--app-brand-strong);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .timeline-row:first-of-type .timeline-slot {
   border-top-style: solid;
@@ -1917,6 +1946,8 @@ select {
 }
 .timeline-task-card,
 .timeline-unscheduled-card {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   display: flex;
   align-items: center;
