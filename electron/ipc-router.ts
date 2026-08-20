@@ -1101,6 +1101,7 @@ export function registerDesktopIpc(
             tasks: z.boolean().optional(),
             projects: z.boolean().optional(),
             lists: z.boolean().optional(),
+            operations: z.boolean().optional(),
           })
           .strict()
           .optional(),

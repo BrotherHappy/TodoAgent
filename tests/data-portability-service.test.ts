@@ -184,6 +184,50 @@ describe('DataPortabilityService export safety', () => {
     expect(markdown).toContain('[文档](https://example.com/docs)');
   });
 
+  it('optionally renders a readable event summary without exporting snapshots', async () => {
+    const before = makeTask('task-event', '整理旧标题', {
+      privateNotes: '绝不应出现在事件摘要中',
+      attachments: [{
+        id: 'attachment-event',
+        name: 'secret.txt',
+        mimeType: 'text/plain',
+        localPath: '/Users/secret/secret.txt',
+      }],
+    });
+    const after = {
+      ...before,
+      title: '整理新标题',
+      status: 'completed' as const,
+      completedAt: '2026-08-09T13:00:00.000Z',
+      updatedAt: '2026-08-09T13:00:00.000Z',
+    };
+    const operation: TaskOperation = {
+      id: 'operation-event',
+      kind: 'complete',
+      createdAt: '2026-08-09T13:00:00.000Z',
+      changes: [{ taskId: before.id, before, after }],
+    };
+    const source = new MemoryPortabilityRepository(
+      snapshot([after], [], [operation]),
+    );
+
+    const defaultMarkdown = await serviceFor(source).exportMarkdown();
+    expect(defaultMarkdown).not.toContain('任务事件日志');
+
+    const markdown = await serviceFor(source).exportMarkdown({
+      include: { operations: true },
+    });
+    expect(markdown).toContain('## 任务事件日志');
+    expect(markdown).toContain('标记完成');
+    expect(markdown).toContain('整理新标题');
+    expect(markdown).toContain('字段：标题、状态、完成时间');
+    expect(markdown).not.toContain('"before"');
+    expect(markdown).not.toContain('"after"');
+    expect(markdown).not.toContain('整理旧标题');
+    expect(markdown).not.toContain('绝不应出现在事件摘要中');
+    expect(markdown).not.toContain('/Users/secret/secret.txt');
+  });
+
   it('round-trips local list entities and remaps copied list references', async () => {
     const list = makeList('list-1', '学习');
     const task = makeTask('task-list', '清单任务', { listId: list.id });

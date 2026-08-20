@@ -76,10 +76,11 @@ export interface DataExportOptions {
 
 /** Options for the human-readable Markdown export.  Markdown intentionally
  * has a smaller surface than the lossless JSON bundle: it contains tasks and
- * their project/list context, but never drafts, undo history, settings or
- * permission-audit records. */
+ * their project/list context, and can optionally include a safe, snapshot-free
+ * task event timeline. Drafts, settings and permission-audit records are
+ * never included. */
 export interface DataMarkdownExportOptions {
-  include?: Pick<Partial<PortableDataSelection>, 'tasks' | 'projects' | 'lists'>;
+  include?: Pick<Partial<PortableDataSelection>, 'tasks' | 'projects' | 'lists' | 'operations'>;
   redaction?: ExportRedaction;
 }
 
@@ -1548,6 +1549,144 @@ const renderMarkdownTask = (
   return lines.join('\n');
 };
 
+const markdownOperationLabels: Record<TaskOperation['kind'], string> = {
+  create: '创建任务',
+  update: '更新任务',
+  complete: '标记完成',
+  reopen: '重新打开',
+  bulk: '批量操作',
+  'move-to-today': '移到今天',
+  focus: '专注记录',
+  'reorder-today': '调整今日顺序',
+  'plan-today': '安排今日计划',
+  trash: '移入回收站',
+  restore: '恢复任务',
+  purge: '永久删除',
+};
+
+/**
+ * Keep the event export useful without turning it into a second backup format.
+ * These are the same user-facing fields used by the task inspector history;
+ * internal timestamps, sync bookkeeping and provider metadata stay omitted.
+ */
+const markdownHistoryFields = [
+  'title',
+  'notes',
+  'privateNotes',
+  'status',
+  'completedAt',
+  'priority',
+  'projectId',
+  'listId',
+  'sectionId',
+  'tags',
+  'contexts',
+  'parentId',
+  'dependencyIds',
+  'assigneeIds',
+  'followerIds',
+  'attachments',
+  'links',
+  'customFields',
+  'plannedDate',
+  'startAt',
+  'startAtIsAllDay',
+  'dueAt',
+  'dueAtIsAllDay',
+  'timeBlock',
+  'reminders',
+  'recurrence',
+  'recurrenceSeriesId',
+  'recurrenceIndex',
+  'estimatedMinutes',
+  'actualMinutes',
+  'focusElapsedSeconds',
+  'focusSessions',
+  'privateOrder',
+  'completionMode',
+  'currentUserRole',
+  'currentUserCompleted',
+] as const;
+
+const markdownHistoryFieldLabels: Record<string, string> = {
+  task: '任务记录',
+  title: '标题',
+  notes: '备注',
+  privateNotes: '私人备注',
+  status: '状态',
+  completedAt: '完成时间',
+  priority: '优先级',
+  projectId: '项目',
+  listId: '清单',
+  sectionId: '分组',
+  tags: '标签',
+  contexts: '情境',
+  parentId: '父任务',
+  dependencyIds: '依赖',
+  assigneeIds: '负责人',
+  followerIds: '关注人',
+  attachments: '附件',
+  links: '链接',
+  customFields: '自定义字段',
+  plannedDate: '计划日期',
+  startAt: '开始时间',
+  startAtIsAllDay: '全天开始',
+  dueAt: '截止时间',
+  dueAtIsAllDay: '全天截止',
+  timeBlock: '时间块',
+  reminders: '提醒',
+  recurrence: '循环规则',
+  recurrenceSeriesId: '循环系列',
+  recurrenceIndex: '循环序号',
+  estimatedMinutes: '预计时长',
+  actualMinutes: '实际时长',
+  focusElapsedSeconds: '专注时长',
+  focusSessions: '专注次数',
+  privateOrder: '排序',
+  completionMode: '完成方式',
+  currentUserRole: '我的角色',
+  currentUserCompleted: '我的完成状态',
+};
+
+const markdownChangedFields = (before: Task | null, after: Task | null): string[] => {
+  if (before === null || after === null) return ['task'];
+  const beforeRecord = before as unknown as Record<string, unknown>;
+  const afterRecord = after as unknown as Record<string, unknown>;
+  return markdownHistoryFields.filter((field) =>
+    JSON.stringify(beforeRecord[field]) !== JSON.stringify(afterRecord[field]),
+  );
+};
+
+const renderMarkdownOperations = (
+  operations: readonly TaskOperation[],
+): string[] => {
+  const lines = ['## 任务事件日志', '', '> 仅包含时间、操作类型、任务标识和字段摘要；不包含 before/after 快照。', ''];
+  const ordered = [...operations].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+  );
+  if (ordered.length === 0) {
+    lines.push('暂无任务事件。', '');
+    return lines;
+  }
+  ordered.forEach((operation) => {
+    operation.changes.forEach((change) => {
+      const task = change.after ?? change.before;
+      const title = task?.title && task.title !== REDACTED
+        ? markdownInline(task.title)
+        : `任务 ${markdownInline(change.taskId)}`;
+      const fields = markdownChangedFields(change.before, change.after)
+        .map((field) => markdownHistoryFieldLabels[field] ?? field);
+      const fieldSummary = fields.length > 0 ? ` · 字段：${fields.join('、')}` : '';
+      const undone = operation.undoneAt === undefined ? '' : ' · 已撤销';
+      lines.push(
+        `- ${markdownDate(operation.createdAt) ?? operation.createdAt} · ${markdownOperationLabels[operation.kind] ?? operation.kind} · **${title}**（${change.taskId}）${fieldSummary}${undone}`,
+      );
+    });
+  });
+  lines.push('');
+  return lines;
+};
+
 const renderMarkdownExport = (bundle: PortableDataBundle): string => {
   const tasks = [...(bundle.data.tasks ?? [])].sort(markdownTaskSort);
   const projects = new Map((bundle.data.projects ?? []).map((project) => [project.id, project]));
@@ -1596,7 +1735,18 @@ const renderMarkdownExport = (bundle: PortableDataBundle): string => {
       lines.push('');
     });
   }
-  lines.push('---', '', '此文件由 Todo Agent 生成；凭据、访问令牌、本地文件路径和导入用审计链不会写入 Markdown。', '');
+  if (bundle.data.operations !== undefined) {
+    lines.push(...renderMarkdownOperations(bundle.data.operations));
+  }
+  lines.push(
+    '---',
+    '',
+    '此文件由 Todo Agent 生成；凭据、访问令牌、本地文件路径和导入用审计链不会写入 Markdown。',
+    ...(bundle.data.operations === undefined
+      ? []
+      : ['事件日志只含摘要，不包含任务快照。']),
+    '',
+  );
   return lines.join('\n');
 };
 
@@ -1788,7 +1938,7 @@ export class DataPortabilityService {
         projects: options.include?.projects ?? true,
         lists: options.include?.lists ?? true,
         drafts: false,
-        operations: false,
+        operations: options.include?.operations ?? false,
         settings: false,
         permissionAudit: false,
       },

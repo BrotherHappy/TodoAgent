@@ -7484,6 +7484,7 @@ function SettingsPage({
     operations: true,
     resetSettings: false,
   });
+  const [markdownIncludesHistory, setMarkdownIncludesHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const activeAiProvider =
     appSettings.ai.routing === "local-only"
@@ -7814,11 +7815,16 @@ function SettingsPage({
     try {
       const result = await window.desktopApi.data.exportMarkdownToFile({
         redaction: "private",
-        include: { tasks: true, projects: true, lists: true },
+        include: {
+          tasks: true,
+          projects: true,
+          lists: true,
+          operations: markdownIncludesHistory,
+        },
       });
       if (result.status === "exported")
         notify(
-          `已导出可读 Markdown（${Math.ceil(result.bytes / 1024)} KB）`,
+          `已导出可读 Markdown${markdownIncludesHistory ? "（含事件摘要）" : ""}（${Math.ceil(result.bytes / 1024)} KB）`,
           "success",
         );
     } catch (reason) {
@@ -10223,9 +10229,17 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>导出备份</strong>
-                <p>JSON 备份默认隐去私人备注、草稿、位置与所有凭据引用</p>
+                <p>JSON 备份默认隐去私人备注、草稿、位置与所有凭据引用；Markdown 可选附带任务事件摘要</p>
               </div>
               <div className="settings-row-actions">
+                <div className="markdown-export-history-option">
+                  <Switch
+                    checked={markdownIncludesHistory}
+                    onChange={setMarkdownIncludesHistory}
+                    label="Markdown 包含任务事件摘要"
+                  />
+                  <span>包含事件摘要</span>
+                </div>
                 <button
                   type="button"
                   className="soft-button"
