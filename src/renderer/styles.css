@@ -759,7 +759,7 @@ select {
   z-index: 20;
   top: calc(100% + 9px);
   right: 0;
-  width: 212px;
+  width: min(320px, calc(100vw - 32px));
   border: 1px solid var(--app-line-strong);
   border-radius: 16px;
   padding: 12px;
@@ -771,6 +771,59 @@ select {
   display: block;
   margin: 1px 2px 9px;
   font-size: 13px;
+}
+.filter-assist {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 11px;
+  padding: 0 0 11px;
+  border-bottom: 1px solid var(--app-line);
+}
+.filter-assist > label {
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.filter-assist-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.filter-assist-row .settings-input {
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 8px;
+}
+.filter-assist-row .soft-button,
+.filter-assist-preview .primary-button {
+  min-height: 32px;
+  padding: 5px 9px;
+}
+.filter-assist > small {
+  color: var(--app-text-faint);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.filter-assist-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  margin-top: 2px;
+  border-radius: 10px;
+  padding: 7px 8px;
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.filter-assist-preview > span {
+  min-width: 0;
+}
+.filter-assist-error {
+  margin: 0;
+  color: var(--app-danger);
+  font-size: 11px;
+  line-height: 1.45;
 }
 .filter-options {
   display: grid;

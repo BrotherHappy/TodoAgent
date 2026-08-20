@@ -216,6 +216,10 @@ import {
   type SmartViewSort,
 } from "./smart-views";
 import {
+  parseSmartViewQuery,
+  type SmartViewQueryResult,
+} from "./smart-view-query";
+import {
   buildSubtaskProgress,
   subtaskProgressLabel,
   type SubtaskProgress,
@@ -1658,6 +1662,9 @@ function TaskListPage({
   const [smartViews, setSmartViews] = useState<SmartViewDefinition[]>(() => readSmartViews());
   const [activeSmartViewId, setActiveSmartViewId] = useState<string>();
   const [smartViewName, setSmartViewName] = useState("");
+  const [smartViewQuery, setSmartViewQuery] = useState("");
+  const [smartViewQueryResult, setSmartViewQueryResult] =
+    useState<SmartViewQueryResult>();
   // A sidebar destination represents a different collection, not a compound
   // search. Secondary filters belong to the current collection so they cannot
   // make the next page look empty while its sidebar count is non-zero.
@@ -1674,6 +1681,8 @@ function TaskListPage({
     setBulkSelection(new Set());
     setBulkPreview(undefined);
     setInboxTriageOpen(false);
+    setSmartViewQuery("");
+    setSmartViewQueryResult(undefined);
   }, [navigationKey]);
   const applySmartView = (view: SmartViewDefinition) => {
     setPriorityFilter(view.priority);
@@ -1718,6 +1727,31 @@ function TaskListPage({
     writeSmartViews(next);
     if (activeSmartViewId === id) setActiveSmartViewId(undefined);
     notify("已删除保存的视图", "info");
+  };
+  const parseSmartViewQueryForPreview = () => {
+    const result = parseSmartViewQuery(smartViewQuery, {
+      projects: projectOptions,
+      tags: tagOptions,
+      contexts: contextOptions,
+    });
+    setSmartViewQueryResult(result);
+    if (result.kind === "error") notify(result.value.message, "error");
+  };
+  const applySmartViewQuery = () => {
+    if (smartViewQueryResult?.kind !== "suggestion") return;
+    const { filters } = smartViewQueryResult.value;
+    setPriorityFilter(filters.priority);
+    setProjectFilter(filters.projectId);
+    setTagFilter(filters.tag);
+    setContextFilter(filters.context);
+    setDateFilter(filters.dateFilter);
+    setSortFilter(filters.sort);
+    onSourceChange(filters.sourceType);
+    setActiveSmartViewId(undefined);
+    setSmartViewQuery("");
+    setSmartViewQueryResult(undefined);
+    setFilterOpen(false);
+    notify(`已套用筛选：${smartViewQueryResult.value.summary.join(" · ")}`, "success");
   };
   const dateLabel = new Intl.DateTimeFormat("zh-CN", {
     weekday: "long",
@@ -1994,6 +2028,59 @@ function TaskListPage({
                 aria-label="任务筛选"
               >
                 <strong>按优先级筛选</strong>
+                <div className="filter-assist">
+                  <label htmlFor="smart-view-query">一句话筛选</label>
+                  <div className="filter-assist-row">
+                    <input
+                      id="smart-view-query"
+                      className="settings-input"
+                      value={smartViewQuery}
+                      onChange={(event) => {
+                        setSmartViewQuery(event.target.value);
+                        setSmartViewQueryResult(undefined);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          parseSmartViewQueryForPreview();
+                        }
+                      }}
+                      placeholder="例如：本周高优先级的飞书任务"
+                      maxLength={120}
+                      aria-describedby="smart-view-query-hint"
+                    />
+                    <button
+                      type="button"
+                      className="soft-button"
+                      disabled={!smartViewQuery.trim()}
+                      onClick={parseSmartViewQueryForPreview}
+                    >
+                      解析
+                    </button>
+                  </div>
+                  <small id="smart-view-query-hint">
+                    只生成筛选预览，不修改任务；支持日期、优先级、来源、项目、标签和情境。
+                  </small>
+                  {smartViewQueryResult?.kind === "suggestion" && (
+                    <div className="filter-assist-preview" role="status">
+                      <span>
+                        将筛选：{smartViewQueryResult.value.summary.join(" · ")}
+                      </span>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={applySmartViewQuery}
+                      >
+                        套用
+                      </button>
+                    </div>
+                  )}
+                  {smartViewQueryResult?.kind === "error" && (
+                    <p className="filter-assist-error" role="alert">
+                      {smartViewQueryResult.value.message}
+                    </p>
+                  )}
+                </div>
                 <div className="filter-options">
                   {(
                     ["all", "urgent", "high", "medium", "low", "none"] as const
