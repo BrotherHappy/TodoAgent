@@ -134,7 +134,10 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
-import { buildTaskAgentPrompt } from "./task-agent-context";
+import {
+  buildBulkTaskAgentPrompt,
+  buildTaskAgentPrompt,
+} from "./task-agent-context";
 import {
   FocusEnvironmentSound,
   environmentSoundOptions,
@@ -2214,6 +2217,18 @@ function TaskListPage({
                 disabled={bulkBusy || selectedBulkTasks.length === 0}
               >
                 清除选择
+              </button>
+              <button
+                type="button"
+                className="ghost-button task-agent-bulk-button"
+                onClick={() =>
+                  onAskAgent(buildBulkTaskAgentPrompt(selectedBulkTasks))
+                }
+                disabled={bulkBusy || selectedBulkTasks.length === 0}
+                title="先让 Agent 查看所选任务并给出方案"
+              >
+                <MessageCircle size={14} aria-hidden="true" />
+                让 Agent 处理所选
               </button>
             </div>
           </div>
