@@ -141,6 +141,7 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { buildAgentQuickSuggestions } from "./agent-quick-suggestions";
 import {
   buildBulkTaskAgentPrompt,
   buildTaskAgentPrompt,
@@ -5705,6 +5706,10 @@ function AgentPage({
     chatFollowsOutputRef.current = true;
     void send();
   };
+  const submitAgentSuggestion = (prompt: string): void => {
+    chatFollowsOutputRef.current = true;
+    void send(prompt);
+  };
   const downloadConversation = (): void => {
     const content = exportConversation();
     if (typeof URL.createObjectURL !== "function") {
@@ -5729,6 +5734,7 @@ function AgentPage({
   const affected = controller.tasks
     .filter((task) => task.source.type === "feishu" && task.status === "open")
     .slice(0, 3);
+  const agentQuickSuggestions = buildAgentQuickSuggestions(controller.tasks);
   const execute = async () => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -5842,6 +5848,23 @@ function AgentPage({
             )}
           </div>
         ))}
+        {!isSending && !input.trim() && messages.at(-1)?.role === "assistant" && (
+          <div className="agent-quick-suggestions" role="group" aria-label="快捷提问">
+            <span>可以先从这里开始</span>
+            <div>
+              {agentQuickSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.label}
+                  type="button"
+                  className="agent-quick-suggestion"
+                  onClick={() => submitAgentSuggestion(suggestion.prompt)}
+                >
+                  {suggestion.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {proposal && (
           <div className="action-preview">
             <div className="preview-header">

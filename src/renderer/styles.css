@@ -7151,6 +7151,37 @@ select {
   font-size: 11px;
   white-space: nowrap;
 }
+.agent-quick-suggestions {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 12px;
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.agent-quick-suggestions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.agent-quick-suggestion {
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  border-radius: 999px;
+  padding: 5px 11px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 62%, var(--app-surface));
+  font-size: 12px;
+  transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+}
+.agent-quick-suggestion:hover {
+  border-color: color-mix(in srgb, var(--app-brand) 48%, var(--app-line));
+  background: var(--app-brand-soft);
+  transform: translateY(-1px);
+}
+.agent-quick-suggestion:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 2px;
+}
 .agent-heading p {
   color: var(--app-text-soft);
   margin-top: 4px;
