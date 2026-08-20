@@ -65,6 +65,19 @@ describe("TimelinePage", () => {
     expect(screen.getByText("待安排 1 项")).toBeVisible();
   });
 
+  it("shows the live clock line and offers a jump-to-now action", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 19, 10, 17));
+    try {
+      render(<TimelinePage {...props()} />);
+      expect(screen.getByRole("status", { name: "现在 10:17" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "滚动到现在 10:17" })).toBeVisible();
+      expect(document.querySelector('[data-now-indicator="true"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows read-only calendar events and offers a follow-up draft", () => {
     const onCreateFollowUp = vi.fn();
     const event = {

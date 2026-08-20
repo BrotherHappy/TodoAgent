@@ -1694,6 +1694,12 @@ select {
   align-items: center;
   gap: 6px;
 }
+.timeline-now-button {
+  color: var(--app-brand-strong);
+  border-color: color-mix(in srgb, var(--app-brand) 32%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 62%, transparent);
+  font-variant-numeric: tabular-nums;
+}
 .timeline-view-toggle {
   display: inline-flex;
   align-items: center;
@@ -1874,9 +1880,31 @@ select {
   background: color-mix(in srgb, var(--app-glass-strong) 46%, transparent);
 }
 .timeline-board-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin: 1px 4px 10px;
   color: var(--app-text-faint);
   font-size: 12px;
+}
+.timeline-now-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: var(--app-brand-strong);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.timeline-now-legend i {
+  width: 18px;
+  height: 2px;
+  display: inline-block;
+  border-radius: 999px;
+  background: var(--app-brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-brand) 12%, transparent);
 }
 .timeline-row {
   min-height: 55px;
@@ -1938,6 +1966,41 @@ select {
 .timeline-slot.is-drop-target {
   border-color: color-mix(in srgb, var(--app-brand) 45%, var(--app-line));
   background: var(--app-brand-soft);
+}
+.timeline-now-indicator {
+  position: absolute;
+  right: 4px;
+  left: 0;
+  z-index: 4;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--app-brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-brand) 12%, transparent);
+  pointer-events: none;
+}
+.timeline-now-indicator::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--app-brand);
+  transform: translateY(-50%);
+}
+.timeline-now-indicator b {
+  position: absolute;
+  top: -10px;
+  right: 0;
+  border-radius: 5px;
+  padding: 2px 5px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 92%, var(--app-surface-raised));
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  white-space: nowrap;
 }
 .timeline-slot-placeholder {
   color: var(--app-text-faint);
@@ -10343,6 +10406,10 @@ select {
   .timeline-heading {
     align-items: flex-start;
   }
+  .timeline-date-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
   .timeline-date-actions .soft-button {
     min-height: 32px;
     padding-inline: 8px;
@@ -10355,6 +10422,11 @@ select {
   .timeline-unscheduled {
     border-radius: 17px;
     padding: 9px;
+  }
+  .timeline-board-hint {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
   }
   .timeline-week-board {
     overflow-x: auto;

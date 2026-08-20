@@ -21,6 +21,13 @@ export interface TimelineSlot {
   startAt: string;
 }
 
+export interface TimelineNowIndicator {
+  minute: number;
+  slotMinute: number;
+  offsetRatio: number;
+  label: string;
+}
+
 export interface WeeklyReviewSummary {
   weekStart: string;
   weekEnd: string;
@@ -183,6 +190,29 @@ export const timelineSlots = (dateKey: string): TimelineSlot[] => {
       };
     },
   );
+};
+
+/**
+ * Project the local clock onto the compact workday timeline. The indicator is
+ * intentionally absent outside the visible 08:00–22:00 surface and on other
+ * dates, so a historical/future day never pretends to have a live state.
+ */
+export const timelineNowIndicator = (
+  dateKey: string,
+  now = new Date(),
+): TimelineNowIndicator | undefined => {
+  if (localDateKey(now) !== dateKey) return undefined;
+  const minute = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+  const start = TIMELINE_START_HOUR * 60;
+  const end = TIMELINE_END_HOUR * 60;
+  if (minute < start || minute >= end) return undefined;
+  const slotMinute = Math.floor(minute / TIMELINE_SLOT_MINUTES) * TIMELINE_SLOT_MINUTES;
+  return {
+    minute,
+    slotMinute,
+    offsetRatio: (minute - slotMinute) / TIMELINE_SLOT_MINUTES,
+    label: formatClock(Math.floor(minute)),
+  };
 };
 
 const localMinuteOnDate = (value: string, dateKey: string): number | undefined => {

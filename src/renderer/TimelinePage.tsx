@@ -1,5 +1,5 @@
 import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, ListChecks, Plus, Sparkles, Upload } from "lucide-react";
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import type { Task, UpdateTaskInput } from "../shared/models";
 import {
   calendarBusyBlocksForDate,
@@ -12,11 +12,13 @@ import {
 import {
   addLocalDays,
   formatTimelineDate,
+  formatClock,
   localDateKey,
   localIsoAt,
   scheduledTimelineTasks,
   tasksForWeekDay,
   timelineSlots,
+  timelineNowIndicator,
   unscheduledTimelineTasks,
   weekDateKeys,
   weeklyReviewSummary,
@@ -102,6 +104,9 @@ export function TimelinePage({
   const [draggingId, setDraggingId] = useState<string>();
   const [movingId, setMovingId] = useState<string>();
   const [announcement, setAnnouncement] = useState("");
+  const [now, setNow] = useState(() => new Date());
+  const nowIndicatorRef = useRef<HTMLSpanElement>(null);
+  const autoScrolledKeyRef = useRef<string | undefined>(undefined);
   const calendarInputRef = useRef<HTMLInputElement>(null);
   const [weeklyCapacityHours, setWeeklyCapacityHours] = useState(() => {
     try {
@@ -119,6 +124,8 @@ export function TimelinePage({
     }
   });
   const slots = useMemo(() => timelineSlots(date), [date]);
+  const nowIndicator = useMemo(() => timelineNowIndicator(date, now), [date, now]);
+  const isToday = date === localDateKey(now);
   const scheduled = useMemo(() => scheduledTimelineTasks(tasks, date), [date, tasks]);
   const unscheduled = useMemo(() => unscheduledTimelineTasks(tasks, date), [date, tasks]);
   const weekDates = useMemo(() => weekDateKeys(date), [date]);
@@ -188,6 +195,25 @@ export function TimelinePage({
     (total, day) => total + day.busyMinutes,
     0,
   );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const key = `${viewMode}:${date}`;
+    if (viewMode !== "day" || !isToday || !nowIndicator || autoScrolledKeyRef.current === key) return;
+    autoScrolledKeyRef.current = key;
+    const frame = window.requestAnimationFrame(() => {
+      nowIndicatorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [date, isToday, nowIndicator, viewMode]);
+
+  const scrollToNow = () => {
+    nowIndicatorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  };
 
   const moveToSlot = async (taskId: string, minute: number) => {
     if (movingId) return;
@@ -332,6 +358,16 @@ export function TimelinePage({
           <button type="button" className="soft-button" onClick={() => setDate(localDateKey())}>
             <CalendarDays size={15} /> 今天
           </button>
+          {viewMode === "day" && isToday && nowIndicator && (
+            <button
+              type="button"
+              className="soft-button timeline-now-button"
+              onClick={scrollToNow}
+              aria-label={`滚动到现在 ${nowIndicator.label}`}
+            >
+              <Clock3 size={14} /> 现在 {nowIndicator.label}
+            </button>
+          )}
           <div className="timeline-view-toggle" role="group" aria-label="时间线视图">
             <button type="button" className={viewMode === "day" ? "active" : ""} onClick={() => setViewMode("day")}>日</button>
             <button type="button" className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>周</button>
@@ -829,10 +865,14 @@ export function TimelinePage({
             )}
           </section>
           <section className="timeline-board" aria-label={`${date} 的时间线`}>
-            <div className="timeline-board-hint">拖动任务卡到时间格即可安排；时间块只保存为本地计划，不会改写飞书截止日期。</div>
+            <div className="timeline-board-hint">
+              <span>拖动任务卡到时间格即可安排；时间块只保存为本地计划，不会改写飞书截止日期。</span>
+              {isToday && nowIndicator && <span className="timeline-now-legend"><i aria-hidden="true" />现在 {formatClock(Math.floor(nowIndicator.minute))}</span>}
+            </div>
             {slots.map((slot) => {
               const placements = bySlot.get(slot.minute) ?? [];
               const busyBlocks = calendarBusyBlocksForSlot(dayCalendarBlocks, slot.minute);
+              const showsNow = nowIndicator?.slotMinute === slot.minute;
               return (
                 <div className="timeline-row" key={slot.minute}>
                   <span className="timeline-time-label">{slot.label}</span>
@@ -857,6 +897,18 @@ export function TimelinePage({
                         </span>
                       );
                     })}
+                    {showsNow && nowIndicator && (
+                      <span
+                        ref={nowIndicatorRef}
+                        className="timeline-now-indicator"
+                        style={{ top: `${Math.min(99, Math.max(1, nowIndicator.offsetRatio * 100))}%` }}
+                        role="status"
+                        aria-label={`现在 ${nowIndicator.label}`}
+                        data-now-indicator="true"
+                      >
+                        <b>{nowIndicator.label}</b>
+                      </span>
+                    )}
                     {placements.map((placement) => (
                       <button
                         type="button"

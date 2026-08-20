@@ -8,6 +8,7 @@ import {
   tasksForWeekDay,
   taskTimelinePlacement,
   timelineSlots,
+  timelineNowIndicator,
   unscheduledTimelineTasks,
   weekDateKeys,
   weeklyReviewSummary,
@@ -44,6 +45,20 @@ describe("timeline-utils", () => {
     expect(timelineSlots("2026-08-19")[0]?.label).toBe("08:00");
     expect(addLocalDays("2026-08-19", 1)).toBe("2026-08-20");
     expect(addLocalDays("2026-08-19", -1)).toBe("2026-08-18");
+  });
+
+  it("projects the live clock only onto the selected visible workday", () => {
+    const now = new Date(2026, 7, 19, 10, 17, 30);
+    const indicator = timelineNowIndicator("2026-08-19", now);
+    expect(indicator).toMatchObject({
+      minute: 617.5,
+      slotMinute: 600,
+      label: "10:17",
+    });
+    expect(indicator?.offsetRatio).toBeCloseTo(17.5 / 30);
+    expect(timelineNowIndicator("2026-08-18", now)).toBeUndefined();
+    expect(timelineNowIndicator("2026-08-19", new Date(2026, 7, 19, 7, 59))).toBeUndefined();
+    expect(timelineNowIndicator("2026-08-19", new Date(2026, 7, 19, 22, 0))).toBeUndefined();
   });
 
   it("places time blocks and derives an end from a start plus estimate", () => {
