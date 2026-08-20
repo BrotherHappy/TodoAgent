@@ -3331,6 +3331,84 @@ select {
 .pet-interaction-trigger:hover {
   background: color-mix(in srgb, var(--app-brand-soft) 88%, var(--floating-surface-strong));
 }
+.pet-task-drop-zones {
+  position: absolute;
+  z-index: 14;
+  left: 0;
+  bottom: 3px;
+  width: min(330px, calc(100% - 6px));
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 38%, var(--floating-line));
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--floating-surface-strong) 93%, var(--app-brand-soft));
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--app-brand) 20%, transparent);
+  pointer-events: auto;
+  animation: pet-drop-zones-arrive 160ms ease-out both;
+}
+.pet-task-drop-zones-hint {
+  position: absolute;
+  top: -20px;
+  left: 9px;
+  color: var(--app-brand-strong);
+  font-size: 10px;
+  font-weight: 700;
+}
+.pet-task-drop-zone {
+  min-width: 0;
+  min-height: 42px;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+  padding: 5px 4px;
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-surface-raised) 78%, transparent);
+  cursor: copy;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+.pet-task-drop-zone span {
+  font-size: 12px;
+  font-weight: 700;
+}
+.pet-task-drop-zone small {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--app-text-faint);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-task-drop-zone:hover,
+.pet-task-drop-zone:focus-visible,
+.pet-task-drop-zone.is-active {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--app-brand) 65%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.pet-task-drop-zone.is-complete.is-active {
+  border-color: color-mix(in srgb, var(--app-success) 65%, var(--app-line));
+  color: var(--app-success);
+  background: var(--app-success-soft);
+}
+.pet-task-drop-zone.is-later.is-active {
+  border-color: color-mix(in srgb, var(--app-warning) 65%, var(--app-line));
+  color: var(--app-warning);
+  background: var(--app-warning-soft);
+}
+@keyframes pet-drop-zones-arrive {
+  from { opacity: 0; transform: translateY(5px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet-task-drop-zones { animation: none; }
+  .pet-task-drop-zone { transition: none; }
+}
 .pet-shell.has-interaction-wheel .pet-compact {
   height: 228px;
   max-height: none;

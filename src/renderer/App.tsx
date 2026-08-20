@@ -167,6 +167,11 @@ import {
   type JumpRopeScore,
 } from "./pet-jump-rope";
 import {
+  getPetTaskDropTarget,
+  petTaskDropTargets,
+  type PetTaskDropTargetId,
+} from "./pet-task-drop-zones";
+import {
   buildPetProactiveSuggestion,
   proactiveBudgetAvailable,
   shouldSuppressPetProactive,
@@ -12256,6 +12261,9 @@ function FloatingWindow() {
   const [heldTaskBubbleCollapsed, setHeldTaskBubbleCollapsed] = useState(false);
   const [heldTaskId, setHeldTaskId] = useState<string>();
   const [taskDropActive, setTaskDropActive] = useState(false);
+  const [draggedTaskId, setDraggedTaskId] = useState<string>();
+  const [activeTaskDropTarget, setActiveTaskDropTarget] =
+    useState<PetTaskDropTargetId>();
   const [petDropActive, setPetDropActive] = useState(false);
   const [petDropPreview, setPetDropPreview] = useState<DropContextPreview>();
   const [selectedTextPreview, setSelectedTextPreview] = useState<{
@@ -13096,6 +13104,49 @@ function FloatingWindow() {
       }
     });
   }
+  function controllerForPetTask(task: Task): TaskController {
+    return todayController.tasks.some((candidate) => candidate.id === task.id)
+      ? todayController
+      : allController;
+  }
+  async function handlePetTaskDrop(
+    targetId: PetTaskDropTargetId,
+    taskId: string,
+  ): Promise<void> {
+    const target = getPetTaskDropTarget(targetId);
+    const task = [...allController.tasks, ...todayController.tasks].find(
+      (candidate) => candidate.id === taskId,
+    );
+    setTaskDropActive(false);
+    setActiveTaskDropTarget(undefined);
+    setDraggedTaskId(undefined);
+    if (!target || !task) {
+      petBehavior.act("task-plan", "这张任务卡跑得太快啦，再试一次。", 3_000);
+      return;
+    }
+    try {
+      if (target.id === "focus") {
+        startPetFocus("pomodoro", petSettings.focus.focusMinutes, task);
+        petBehavior.act("focus", "收到，搬到专注里一起做。", 3_000);
+        setHeldTaskId(undefined);
+        return;
+      }
+      if (target.id === "complete") {
+        await toggleTaskFromPet(controllerForPetTask(task), task);
+        setHeldTaskId(undefined);
+        return;
+      }
+      setHeldTaskId(task.id);
+      petBehavior.act("task-plan", "先放在手边，等你准备好再继续。", 3_000);
+    } catch (reason) {
+      setHeldTaskId(task.id);
+      petBehavior.act(
+        "sync-error",
+        reason instanceof Error ? reason.message : "这张任务卡暂时搬不动。",
+        4_000,
+      );
+    }
+  }
   function dismissPetReaction(): void {
     proactiveMessageRef.current = undefined;
     setProactiveTask(undefined);
@@ -13529,6 +13580,50 @@ function FloatingWindow() {
               season={petSeason}
             />
           </button>
+          {taskDropActive && draggedTaskId && (
+            <div
+              className="pet-task-drop-zones no-drag"
+              role="group"
+              aria-label="把任务交给宠物"
+            >
+              <span className="pet-task-drop-zones-hint">把任务交给我</span>
+              {petTaskDropTargets.map((target) => (
+                <button
+                  type="button"
+                  key={target.id}
+                  className={`pet-task-drop-zone ${activeTaskDropTarget === target.id ? "is-active" : ""} is-${target.id}`}
+                  data-drop-target={target.id}
+                  aria-label={`${target.label}：${target.hint}`}
+                  title={target.hint}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setActiveTaskDropTarget(target.id);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    setActiveTaskDropTarget(target.id);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      setActiveTaskDropTarget(undefined);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const taskId =
+                      event.dataTransfer.getData("application/x-todo-agent-task") ||
+                      draggedTaskId;
+                    if (taskId) void handlePetTaskDrop(target.id, taskId);
+                  }}
+                >
+                  <span>{target.label}</span>
+                  <small>{target.hint}</small>
+                </button>
+              ))}
+            </div>
+          )}
           {interactionWheelOpen && (
             <PetInteractionWheel
               petName={petName}
@@ -14076,9 +14171,16 @@ function FloatingWindow() {
                     onDragStart={(event) => {
                       event.dataTransfer.setData("application/x-todo-agent-task", task.id);
                       event.dataTransfer.effectAllowed = "move";
+                      setDraggedTaskId(task.id);
+                      setTaskDropActive(true);
+                      setActiveTaskDropTarget(undefined);
                       petBehavior.act("task-carry", "把任务拖到我身上，我来接住。", 8_000);
                     }}
-                    onDragEnd={() => setTaskDropActive(false)}
+                    onDragEnd={() => {
+                      setTaskDropActive(false);
+                      setDraggedTaskId(undefined);
+                      setActiveTaskDropTarget(undefined);
+                    }}
                   >
                     <input
                       className="task-checkbox"
