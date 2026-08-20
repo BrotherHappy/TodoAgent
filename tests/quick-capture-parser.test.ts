@@ -30,6 +30,18 @@ describe('parseQuickCapture', () => {
     expect(result.chips.some((chip) => chip.id === 'source' && chip.confidence === 'inferred')).toBe(true);
   });
 
+  it('parses Todoist-style p1-p4 priority tokens and removes them from the title', () => {
+    expect(parseQuickCapture('整理周报 p1', reference)).toMatchObject({
+      title: '整理周报',
+      priority: 3,
+    });
+    expect(parseQuickCapture('整理周报 p2', reference).priority).toBe(2);
+    expect(parseQuickCapture('整理周报 p3', reference).chips).toContainEqual(
+      expect.objectContaining({ id: 'priority', label: 'P3 · 中优先级' }),
+    );
+    expect(parseQuickCapture('整理周报 p4', reference).priority).toBe(0);
+  });
+
   it('extracts manual contexts from Smart Add syntax without requesting location', () => {
     const result = parseQuickCapture('明天去办公室整理访谈笔记 @办公室 情境：深度工作', reference);
     expect(result.contexts).toEqual(['办公室', '深度工作']);

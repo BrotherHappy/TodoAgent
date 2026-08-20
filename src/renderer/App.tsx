@@ -13095,12 +13095,54 @@ function FloatingWindow() {
       floatingCreateRef.current = true;
       setCreatingFloatingTask(true);
       try {
-        await todayController.create({
-          title: text,
-          plannedDate: dateKey(),
+        let parsed: QuickCaptureResult | undefined;
+        try {
+          parsed = await window.desktopApi?.capture.parse(text);
+        } catch {
+          // A parser failure should never block a plain title capture.
+        }
+        const priorities: TaskPriority[] = [
+          "low",
+          "medium",
+          "high",
+          "urgent",
+        ];
+        const title = parsed?.title?.trim() || text;
+        const plannedDate =
+          temporalDateKey(parsed?.privatePlanAt) ?? dateKey();
+        const createController = tab === "all" ? allController : todayController;
+        await createController.create({
+          title,
+          plannedDate,
+          dueAt: parsed?.dueAt,
+          tags: parsed?.tags,
+          contexts: parsed?.contexts,
+          estimatedMinutes: parsed?.estimatedMinutes,
+          recurrence: parsed?.recurrence,
+          priority: priorities[parsed?.priority ?? 1] ?? "medium",
+          reminders: parsed?.reminderAt
+            ? [
+                {
+                  id: crypto.randomUUID(),
+                  at: parsed.reminderAt,
+                  enabled: true,
+                  source: "local" as const,
+                },
+              ]
+            : [],
+          // The pet panel is deliberately local-only. A phrase such as
+          // “存到飞书” can still be parsed for its title, but must not turn a
+          // compact gesture into an implicit remote write.
           source: { type: "local" },
         });
         setInput("");
+        petBehavior.act("celebrate", `记下啦：${title}`, 2_400);
+      } catch (reason) {
+        petBehavior.act(
+          "sync-error",
+          reason instanceof Error ? reason.message : "新增任务失败，请再试一次。",
+          4_000,
+        );
       } finally {
         floatingCreateRef.current = false;
         setCreatingFloatingTask(false);
@@ -14960,7 +15002,7 @@ function FloatingWindow() {
                         void submit();
                       }
                     }}
-                    placeholder="新增一个本地任务…"
+                    placeholder="新增任务，例如：明天整理周报 p1 #工作 45m"
                     aria-label="新增本地任务"
                   />
                 ) : (

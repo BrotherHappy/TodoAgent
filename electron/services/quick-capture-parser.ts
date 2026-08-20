@@ -14,6 +14,7 @@ const recurrenceMonthlyPattern = /每(?:隔\s*)?(\d+)?\s*个?月(?:\s*(\d{1,2})\
 const workdayPattern = /工作日/u;
 const reminderPattern = /提前\s*(\d+|半)\s*(分钟|小时|天)(?:提醒)?/u;
 const directReminderPattern = /(?:在)?(.{0,16})(?:提醒我|提醒一下)/u;
+const priorityTokenPattern = /(?:^|\s)p([1-4])(?=\s|$)/iu;
 
 function reminderOffsetMs(match: RegExpMatchArray | null): number | undefined {
   if (!match) return undefined;
@@ -113,6 +114,7 @@ function normalizeTitle(value: string): string {
     .replace(/(?:存|创建|同步|放|添加)到飞书(?:任务)?/gu, '')
     .replace(/(?:存|创建|放|添加)到本地(?:任务)?/gu, '')
     .replace(/(?:并)?提前\s*(?:\d+|半)\s*(?:分钟|小时|天)(?:提醒)?/gu, '')
+    .replace(priorityTokenPattern, ' ')
     .replace(/(?:提醒我|提醒一下)/gu, '')
     .replace(projectPattern, '')
     .replace(contextPattern, '')
@@ -138,13 +140,22 @@ function dateLabel(date: Date): string {
 export function parseQuickCapture(text: string, now = new Date()): QuickCaptureResult {
   const originalText = text.trim();
   const source = /飞书/u.test(originalText) ? 'feishu' : 'local';
-  const priority: QuickCaptureResult['priority'] = /(?:!!!|紧急|最高优先级)/u.test(originalText)
+  const priorityToken = originalText.match(priorityTokenPattern)?.[1];
+  const priority: QuickCaptureResult['priority'] = priorityToken === '1'
     ? 3
-    : /(?:!!|高优先级|重要)/u.test(originalText)
+    : priorityToken === '2'
       ? 2
-      : /(?:低优先级|稍后有空)/u.test(originalText)
-        ? 0
-        : 1;
+      : priorityToken === '3'
+        ? 1
+        : priorityToken === '4'
+          ? 0
+          : /(?:!!!|紧急|最高优先级)/u.test(originalText)
+            ? 3
+            : /(?:!!|高优先级|重要)/u.test(originalText)
+              ? 2
+              : /(?:低优先级|稍后有空)/u.test(originalText)
+                ? 0
+                : 1;
   const project = originalText.match(projectPattern)?.[1];
   const tags = [...originalText.matchAll(hashTagPattern)].map((match) => match[1]);
   const contextMatch = originalText.match(contextPattern);
@@ -204,7 +215,7 @@ export function parseQuickCapture(text: string, now = new Date()): QuickCaptureR
   contexts.forEach((context) => chips.push({ id: 'context', label: `情境 · ${context}`, value: context, confidence: 'certain' }));
   if (estimatedMinutes !== undefined) chips.push({ id: 'duration', label: `预计 ${estimatedMinutes} 分钟`, value: String(estimatedMinutes), confidence: 'certain' });
   if (recurrence.rule) chips.push({ id: 'recurrence', label: `循环 · ${recurrence.label ?? '已设置'}`, value: JSON.stringify(recurrence.rule), confidence: 'certain' });
-  if (priority !== 1) chips.push({ id: 'priority', label: priority === 3 ? '紧急' : priority === 2 ? '高优先级' : '低优先级', value: String(priority), confidence: 'certain' });
+  if (priority !== 1 || priorityToken !== undefined) chips.push({ id: 'priority', label: priorityToken === '1' ? 'P1 · 紧急' : priorityToken === '2' ? 'P2 · 高优先级' : priorityToken === '3' ? 'P3 · 中优先级' : priorityToken === '4' ? 'P4 · 低优先级' : priority === 3 ? '紧急' : priority === 2 ? '高优先级' : '低优先级', value: String(priority), confidence: 'certain' });
   chips.push({ id: 'source', label: source === 'feishu' ? '飞书' : '本地', value: source, confidence: /飞书|本地/u.test(originalText) ? 'certain' : 'inferred' });
 
   return {
