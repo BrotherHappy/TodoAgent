@@ -6791,11 +6791,24 @@ select {
   background: color-mix(in srgb, var(--app-brand-soft) 72%, transparent);
   font-size: 11px;
 }
-.pet-season-chip {
+.pet-utility-chips {
   position: absolute;
   top: -7px;
   right: 7px;
   z-index: 4;
+  max-width: calc(100% - 14px);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  pointer-events: none;
+}
+.pet-utility-chips > * {
+  pointer-events: auto;
+}
+.pet-season-chip,
+.pet-weather-chip {
+  min-width: 0;
   border: 1px solid color-mix(in srgb, var(--app-brand) 32%, var(--app-line));
   border-radius: 999px;
   padding: 4px 8px;
@@ -6804,7 +6817,67 @@ select {
   box-shadow: 0 5px 14px rgba(53, 48, 132, 0.13);
   font-size: 10px;
   white-space: nowrap;
-  pointer-events: auto;
+}
+.pet-weather-chip {
+  max-width: min(230px, 42vw);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 5px;
+  color: var(--app-text-soft);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+.pet-weather-chip:hover,
+.pet-weather-chip:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 58%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 76%, var(--app-surface-raised));
+  transform: translateY(-1px);
+}
+.pet-weather-chip.is-severe {
+  border-color: color-mix(in srgb, var(--app-warning) 58%, var(--app-line));
+  color: var(--app-warning);
+  background: color-mix(in srgb, var(--app-warning-soft) 72%, var(--app-surface-raised));
+}
+.pet-weather-chip-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 72%, transparent);
+  font-size: 12px;
+}
+.pet-weather-chip.is-severe .pet-weather-chip-icon {
+  color: var(--app-warning);
+  background: color-mix(in srgb, var(--app-warning-soft) 82%, transparent);
+}
+.pet-weather-chip-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.pet-weather-chip-copy strong,
+.pet-weather-chip-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-weather-chip-copy strong {
+  font-size: 10px;
+  font-weight: 720;
+}
+.pet-weather-chip-copy small {
+  color: var(--app-text-faint);
+  font-size: 9px;
+}
+.pet-weather-chip:hover .pet-weather-chip-copy small,
+.pet-weather-chip:focus-visible .pet-weather-chip-copy small {
+  color: var(--app-text-soft);
 }
 .pet-diary-task-link {
   cursor: pointer;

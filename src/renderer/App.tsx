@@ -323,6 +323,7 @@ import { feishuSyncVisualState } from "./feishu-status";
 import { ProjectPage } from "./ProjectPage";
 import { ListPage } from "./ListPage";
 import { petSeasonalEventForDate } from "./pet-season";
+import { buildPetWeatherChip } from "./pet-weather-chip";
 import {
   applyCompanionStrategy,
   companionStrategyLabels,
@@ -14740,6 +14741,10 @@ function FloatingWindow() {
   const petSeasonEvent = petSettings.pet.seasonalEvents
     ? petSeasonalEventForDate()
     : undefined;
+  const petWeatherChip =
+    !petOnly && !floatingGame && petSettings.weather.enabled
+      ? buildPetWeatherChip(petData.weather, privacyMode)
+      : undefined;
   const petSeason = petSeasonEvent?.season;
   const floatingChat = useAgentChat({
     initialMessage:
@@ -16100,15 +16105,41 @@ function FloatingWindow() {
               )}
             </div>
           )}
-          {petSeasonEvent && (
-            <span
-              className="pet-season-chip no-drag"
-              role="status"
-              title={petSeasonEvent.message}
-              aria-label={`${petSeasonEvent.label}：${petSeasonEvent.message}`}
-            >
-              {petSeasonEvent.icon} {petSeasonEvent.label}
-            </span>
+          {(petSeasonEvent || petWeatherChip) && (
+            <div className="pet-utility-chips no-drag" aria-label="宠物桌面提示">
+              {petSeasonEvent && (
+                <span
+                  className="pet-season-chip"
+                  role="status"
+                  title={petSeasonEvent.message}
+                  aria-label={`${petSeasonEvent.label}：${petSeasonEvent.message}`}
+                >
+                  {petSeasonEvent.icon} {petSeasonEvent.label}
+                </span>
+              )}
+              {petWeatherChip && (
+                <button
+                  type="button"
+                  className={`pet-weather-chip ${petWeatherChip.severe ? "is-severe" : ""}`}
+                  aria-label={petWeatherChip.ariaLabel}
+                  aria-live="polite"
+                  title="打开天气卡片"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setTab("home");
+                    setPanelExpanded(true, "click");
+                  }}
+                >
+                  <span className="pet-weather-chip-icon" aria-hidden="true">
+                    {petWeatherChip.icon}
+                  </span>
+                  <span className="pet-weather-chip-copy">
+                    <strong>{petWeatherChip.label}</strong>
+                    <small>{petWeatherChip.detail}</small>
+                  </span>
+                </button>
+              )}
+            </div>
           )}
           {!floatingGame && (
             <button
