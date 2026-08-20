@@ -247,11 +247,10 @@ import {
   type SubtaskProgress,
 } from "./subtask-progress";
 import {
+  ELASTIC_HABITS_MIGRATED_KEY,
   formatHabitWait,
   habitState,
-  readElasticHabits,
-  writeElasticHabits,
-  type ElasticHabit,
+  readStoredElasticHabits,
 } from "./elastic-habits";
 import { weeklyReviewSummary } from "./timeline-utils";
 import {
@@ -6560,13 +6559,14 @@ function usePetData() {
   const [snapshot, setSnapshot] = useState<PetSnapshot>();
   const [weather, setWeather] = useState<WeatherSnapshot>();
   const refresh = useCallback(async () => {
-    if (!window.desktopApi) return;
+    if (!window.desktopApi) return undefined;
     const [nextSnapshot, nextWeather] = await Promise.all([
       window.desktopApi.pet.snapshot(),
       window.desktopApi.pet.weather().catch(() => undefined),
     ]);
     setSnapshot(nextSnapshot);
     setWeather(nextWeather);
+    return nextSnapshot;
   }, []);
   useEffect(() => {
     void refresh();
@@ -6720,18 +6720,62 @@ function PetPlayground({
   );
 }
 
-function ElasticHabitsPanel() {
-  const [habits, setHabits] = useState<ElasticHabit[]>(() => readElasticHabits());
+function ElasticHabitsPanel({
+  habits,
+  refresh,
+  notify,
+}: {
+  habits: PetSnapshot["habits"];
+  refresh: () => Promise<PetSnapshot | undefined>;
+  notify: (message: string, kind?: ToastKind) => void;
+}) {
   const [now, setNow] = useState(() => Date.now());
+  const [editingId, setEditingId] = useState<string>();
+  const [draft, setDraft] = useState({ label: "", hint: "", cadenceMinutes: 90 });
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
-  const update = (id: string, patch: Partial<ElasticHabit>) => {
-    setHabits((current) => {
-      const next = current.map((habit) => (habit.id === id ? { ...habit, ...patch } : habit));
-      writeElasticHabits(next);
-      return next;
+  const run = async (operation: () => Promise<unknown>, success: string): Promise<boolean> => {
+    setBusy(true);
+    try {
+      await operation();
+      await refresh();
+      notify(success, "success");
+      return true;
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "习惯操作失败", "error");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const beginEdit = (habit: PetSnapshot["habits"][number]) => {
+    setEditingId(habit.id);
+    setDraft({ label: habit.label, hint: habit.hint, cadenceMinutes: habit.cadenceMinutes });
+    setAdding(false);
+  };
+  const saveEdit = () => {
+    if (!editingId || !window.desktopApi) return;
+    void run(
+      () => window.desktopApi!.pet.updateHabit(editingId, draft),
+      "习惯已更新",
+    ).then((ok) => {
+      if (ok) setEditingId(undefined);
+    });
+  };
+  const add = () => {
+    if (!window.desktopApi) return;
+    void run(
+      () => window.desktopApi!.pet.addHabit(draft),
+      "已加入一个弹性习惯",
+    ).then((ok) => {
+      if (ok) {
+        setAdding(false);
+        setDraft({ label: "", hint: "", cadenceMinutes: 90 });
+      }
     });
   };
   return (
@@ -6739,43 +6783,70 @@ function ElasticHabitsPanel() {
       <div className="pet-section-heading">
         <div>
           <h2 id="elastic-habits-title">弹性习惯</h2>
-          <p>在合适的空档轻轻提醒，不追连续、不扣分，也不会打断专注。</p>
+          <p>在合适的空档轻轻提醒；可以自定义、暂停或移除，不追连续、不扣分。</p>
         </div>
-        <span className="pet-habit-badge">可跳过</span>
+        <button
+          type="button"
+          className="soft-button"
+          disabled={busy || habits.length >= 12}
+          onClick={() => {
+            setAdding(true);
+            setEditingId(undefined);
+            setDraft({ label: "", hint: "", cadenceMinutes: 90 });
+          }}
+        >
+          <Plus size={14} /> 新增
+        </button>
       </div>
       <div className="pet-habits-list">
         {habits.map((habit) => {
-          const ready = habitState(habit, now) === "ready";
+          const ready = habit.enabled && habitState(habit, now) === "ready";
           return (
-            <article className={`pet-habit-row ${ready ? "is-ready" : "is-resting"}`} key={habit.id}>
+            <article className={`pet-habit-row ${ready ? "is-ready" : "is-resting"} ${habit.enabled ? "" : "is-disabled"}`} key={habit.id}>
               <span className="pet-habit-dot" aria-hidden="true" />
-              <div>
-                <strong>{habit.label}</strong>
-                <p>{habit.hint}</p>
-                <small>{ready ? "现在是一个合适的空档" : formatHabitWait(habit, now)}</small>
-              </div>
-              <div className="pet-habit-actions">
-                <button
-                  type="button"
-                  className="soft-button"
-                  disabled={!ready}
-                  onClick={() => update(habit.id, { lastCompletedAt: new Date(now).toISOString(), snoozedUntil: undefined })}
-                >
-                  {ready ? "完成一次" : "已记下"}
-                </button>
-                {ready && (
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => update(habit.id, { snoozedUntil: new Date(now + 30 * 60_000).toISOString() })}
-                  >
-                    稍后
-                  </button>
-                )}
-              </div>
+              {editingId === habit.id ? (
+                <div className="pet-habit-editor">
+                  <input aria-label="习惯名称" value={draft.label} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} />
+                  <input aria-label="习惯提示" value={draft.hint} maxLength={240} onChange={(event) => setDraft((current) => ({ ...current, hint: event.target.value }))} />
+                  <label><span>间隔（分钟）</span><input type="number" min={15} max={1_440} step={15} value={draft.cadenceMinutes} onChange={(event) => setDraft((current) => ({ ...current, cadenceMinutes: Number(event.target.value) }))} /></label>
+                  <div className="pet-habit-actions">
+                    <button type="button" className="primary-button" disabled={busy} onClick={saveEdit}>保存</button>
+                    <button type="button" className="ghost-button" disabled={busy} onClick={() => setEditingId(undefined)}>取消</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <strong>{habit.label}</strong>
+                    <p>{habit.hint}</p>
+                    <small>{!habit.enabled ? "已暂停" : ready ? "现在是一个合适的空档" : formatHabitWait(habit, now)}</small>
+                  </div>
+                  <div className="pet-habit-actions">
+                    <button type="button" className="soft-button" disabled={busy || !ready} onClick={() => void run(() => window.desktopApi!.pet.completeHabit(habit.id), "已记下这次照顾自己")}>{ready ? "完成一次" : "已记下"}</button>
+                    {ready && <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.snoozeHabit(habit.id), "好，稍后再提醒")}>稍后</button>}
+                    <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.updateHabit(habit.id, { enabled: !habit.enabled }), habit.enabled ? "已暂停这个习惯" : "已恢复这个习惯")}>{habit.enabled ? "暂停" : "恢复"}</button>
+                    <button type="button" className="ghost-button" disabled={busy} onClick={() => beginEdit(habit)}>编辑</button>
+                    <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.deleteHabit(habit.id), "习惯已移除")}>移除</button>
+                  </div>
+                </>
+              )}
             </article>
           );
         })}
+        {adding && (
+          <article className="pet-habit-row is-ready">
+            <span className="pet-habit-dot" aria-hidden="true" />
+            <div className="pet-habit-editor">
+              <input autoFocus aria-label="新习惯名称" placeholder="例如：看远处 20 秒" value={draft.label} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} />
+              <input aria-label="新习惯提示" placeholder="给自己一句温和提示" value={draft.hint} maxLength={240} onChange={(event) => setDraft((current) => ({ ...current, hint: event.target.value }))} />
+              <label><span>间隔（分钟）</span><input type="number" min={15} max={1_440} step={15} value={draft.cadenceMinutes} onChange={(event) => setDraft((current) => ({ ...current, cadenceMinutes: Number(event.target.value) }))} /></label>
+              <div className="pet-habit-actions">
+                <button type="button" className="primary-button" disabled={busy || !draft.label.trim()} onClick={add}>加入</button>
+                <button type="button" className="ghost-button" disabled={busy} onClick={() => setAdding(false)}>取消</button>
+              </div>
+            </div>
+          </article>
+        )}
       </div>
     </section>
   );
@@ -7039,6 +7110,7 @@ function PetHomePage({
   onPlanTomorrow: () => void;
 }) {
   const { snapshot, weather, refresh, setWeather } = usePetData();
+  const legacyHabitMigrationStarted = useRef(false);
   const [section, setSection] = useState<
     "home" | "room" | "adventure" | "play" | "diary" | "memory"
   >("home");
@@ -7067,6 +7139,65 @@ function PetHomePage({
       .then(setAdventure)
       .catch(() => undefined);
   }, [section, snapshot?.revision]);
+  useEffect(() => {
+    if (!snapshot || !window.desktopApi || legacyHabitMigrationStarted.current) return;
+    let marker = false;
+    try {
+      marker = localStorage.getItem(ELASTIC_HABITS_MIGRATED_KEY) === "1";
+    } catch {
+      marker = false;
+    }
+    if (marker) {
+      legacyHabitMigrationStarted.current = true;
+      return;
+    }
+    legacyHabitMigrationStarted.current = true;
+    const legacy = readStoredElasticHabits();
+    const markMigrated = () => {
+      try {
+        localStorage.setItem(ELASTIC_HABITS_MIGRATED_KEY, "1");
+      } catch {
+        // The service state remains authoritative when localStorage is unavailable.
+      }
+    };
+    if (!legacy?.length) {
+      markMigrated();
+      return;
+    }
+    void (async () => {
+      const current = new Map(snapshot.habits.map((habit) => [habit.id, habit]));
+      let available = Math.max(0, 12 - current.size);
+      for (const habit of legacy.slice(0, 12)) {
+        const existing = current.get(habit.id);
+        if (existing) {
+          if (
+            existing.label !== habit.label ||
+            existing.hint !== habit.hint ||
+            existing.cadenceMinutes !== habit.cadenceMinutes ||
+            existing.enabled !== (habit.enabled !== false)
+          ) {
+            await window.desktopApi!.pet.updateHabit(habit.id, {
+              label: habit.label,
+              hint: habit.hint,
+              cadenceMinutes: habit.cadenceMinutes,
+              enabled: habit.enabled !== false,
+            });
+          }
+        } else if (available > 0) {
+          await window.desktopApi!.pet.addHabit({
+            label: habit.label,
+            hint: habit.hint,
+            cadenceMinutes: habit.cadenceMinutes,
+          });
+          available -= 1;
+        }
+      }
+      await refresh();
+      // Only mark after every legacy record has been accepted. If an IPC
+      // write fails, a later launch can retry instead of silently losing it.
+      markMigrated();
+    })().catch(() => undefined);
+  }, [refresh, snapshot]);
   if (!snapshot) {
     return (
       <main className="pet-page loading-page">
@@ -7183,7 +7314,7 @@ function PetHomePage({
               ))}
             </div>
           </section>
-          <ElasticHabitsPanel />
+          <ElasticHabitsPanel habits={snapshot.habits} refresh={refresh} notify={notify} />
           <EveningReviewCard
             tasks={tasks}
             focusHistory={snapshot.focusHistory}

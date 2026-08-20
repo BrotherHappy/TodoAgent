@@ -1382,6 +1382,11 @@ async function startApplication(): Promise<void> {
     addMemory: (input) => petService!.addMemory(input),
     updateMemory: (id, patch) => petService!.updateMemory(id, patch),
     deleteMemory: (id) => petService!.deleteMemory(id),
+    addHabit: (input) => petService!.addHabit(input),
+    updateHabit: (id, patch) => petService!.updateHabit(id, patch),
+    completeHabit: (id) => petService!.completeHabit(id),
+    snoozeHabit: (id, minutes) => petService!.snoozeHabit(id, minutes),
+    deleteHabit: (id) => petService!.deleteHabit(id),
     exportData: () => petDataController.exportToFile(),
     previewDataImport: () => petDataController.previewImport(),
     commitDataImport: async (previewToken, strategy) => {

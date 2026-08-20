@@ -5850,6 +5850,37 @@ select {
   display: flex;
   align-items: center;
   gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.pet-habit-row.is-disabled {
+  opacity: .62;
+}
+.pet-habit-editor {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.4fr) 112px;
+  align-items: center;
+  gap: 7px;
+}
+.pet-habit-editor input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 9px;
+  padding: 6px 8px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 12px;
+}
+.pet-habit-editor label {
+  display: grid;
+  gap: 3px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.pet-habit-editor .pet-habit-actions {
+  grid-column: 1 / -1;
 }
 .pet-evening-review-card {
   grid-column: 1 / -1;
@@ -9125,6 +9156,12 @@ select {
   .pet-habit-actions {
     grid-column: 2;
     justify-content: flex-start;
+  }
+  .pet-habit-editor {
+    grid-template-columns: 1fr;
+  }
+  .pet-habit-editor .pet-habit-actions {
+    grid-column: 1;
   }
   .settings-row {
     grid-template-columns: 1fr;

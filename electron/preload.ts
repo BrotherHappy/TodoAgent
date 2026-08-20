@@ -254,6 +254,14 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryUpdate, { id, patch }),
     deleteMemory: (id) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryDelete, id),
+    addHabit: (input) => ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitAdd, input),
+    updateHabit: (id, patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitUpdate, { id, patch }),
+    completeHabit: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitComplete, id),
+    snoozeHabit: (id, minutes) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitSnooze, { id, minutes }),
+    deleteHabit: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitDelete, id),
     exportData: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petDataExport),
     previewDataImport: () =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petDataPreviewImport),

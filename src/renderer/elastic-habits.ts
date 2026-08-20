@@ -1,18 +1,20 @@
 export const ELASTIC_HABITS_STORAGE_KEY = "todoAgentElasticHabits";
+export const ELASTIC_HABITS_MIGRATED_KEY = "todoAgentElasticHabitsMigratedV1";
 
 export interface ElasticHabit {
   id: string;
   label: string;
   hint: string;
   cadenceMinutes: number;
+  enabled?: boolean;
   lastCompletedAt?: string;
   snoozedUntil?: string;
 }
 
 export const defaultElasticHabits: ElasticHabit[] = [
-  { id: "water", label: "喝口水", hint: "让身体跟上你的节奏", cadenceMinutes: 90 },
-  { id: "stretch", label: "起身伸展", hint: "肩颈和眼睛一起松一松", cadenceMinutes: 120 },
-  { id: "close-loop", label: "收尾一分钟", hint: "把刚才的上下文留给未来的你", cadenceMinutes: 180 },
+  { id: "water", label: "喝口水", hint: "让身体跟上你的节奏", cadenceMinutes: 90, enabled: true },
+  { id: "stretch", label: "起身伸展", hint: "肩颈和眼睛一起松一松", cadenceMinutes: 120, enabled: true },
+  { id: "close-loop", label: "收尾一分钟", hint: "把刚才的上下文留给未来的你", cadenceMinutes: 180, enabled: true },
 ];
 
 const validHabit = (value: unknown): value is ElasticHabit => {
@@ -24,22 +26,26 @@ const validHabit = (value: unknown): value is ElasticHabit => {
     typeof record.hint === "string" &&
     typeof record.cadenceMinutes === "number" &&
     Number.isFinite(record.cadenceMinutes) &&
-    record.cadenceMinutes > 0
+    record.cadenceMinutes > 0 &&
+    (record.enabled === undefined || typeof record.enabled === "boolean")
   );
 };
 
-export const readElasticHabits = (): ElasticHabit[] => {
+export const readStoredElasticHabits = (): ElasticHabit[] | undefined => {
   try {
     const raw = localStorage.getItem(ELASTIC_HABITS_STORAGE_KEY);
-    if (!raw) return defaultElasticHabits.map((habit) => ({ ...habit }));
+    if (!raw) return undefined;
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return defaultElasticHabits.map((habit) => ({ ...habit }));
-    const habits = parsed.filter(validHabit).map((habit) => ({ ...habit }));
-    return habits.length ? habits : defaultElasticHabits.map((habit) => ({ ...habit }));
+    if (!Array.isArray(parsed)) return undefined;
+    const habits = parsed.filter(validHabit).map((habit) => ({ ...habit, enabled: habit.enabled !== false }));
+    return habits.length ? habits : undefined;
   } catch {
-    return defaultElasticHabits.map((habit) => ({ ...habit }));
+    return undefined;
   }
 };
+
+export const readElasticHabits = (): ElasticHabit[] =>
+  readStoredElasticHabits() ?? defaultElasticHabits.map((habit) => ({ ...habit }));
 
 export const writeElasticHabits = (habits: readonly ElasticHabit[]): void => {
   try {

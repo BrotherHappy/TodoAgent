@@ -1083,6 +1083,50 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.petMemoryDelete, (_event, input) =>
     dependencies.pet.deleteMemory(idSchema.parse(input)),
   );
+  handle(DESKTOP_CHANNELS.petHabitAdd, (_event, input) => {
+    const request = z
+      .object({
+        label: z.string().trim().min(1).max(80),
+        hint: z.string().trim().max(240),
+        cadenceMinutes: z.number().finite().min(15).max(1_440),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.addHabit(request);
+  });
+  handle(DESKTOP_CHANNELS.petHabitUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            label: z.string().trim().min(1).max(80).optional(),
+            hint: z.string().trim().max(240).optional(),
+            cadenceMinutes: z.number().finite().min(15).max(1_440).optional(),
+            enabled: z.boolean().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.updateHabit(request.id, request.patch);
+  });
+  handle(DESKTOP_CHANNELS.petHabitComplete, (_event, input) =>
+    dependencies.pet.completeHabit(idSchema.parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.petHabitSnooze, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        minutes: z.number().finite().min(5).max(1_440).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.snoozeHabit(request.id, request.minutes);
+  });
+  handle(DESKTOP_CHANNELS.petHabitDelete, (_event, input) =>
+    dependencies.pet.deleteHabit(idSchema.parse(input)),
+  );
   handle(DESKTOP_CHANNELS.petDataExport, () => dependencies.pet.exportData());
   handle(DESKTOP_CHANNELS.petDataPreviewImport, () =>
     dependencies.pet.previewDataImport(),

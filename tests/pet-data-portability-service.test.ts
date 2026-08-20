@@ -61,8 +61,21 @@ describe("PetDataPortabilityService", () => {
     const bundle = JSON.parse(json) as { format: string; data: { pet: PetPortableState } };
     expect(bundle.format).toBe("todo-agent-pet-portable-data");
     expect(bundle.data.pet.profile.name).toBe("团团");
+    expect(bundle.data.pet.habits.map((habit) => habit.id)).toContain("water");
     expect("focus" in bundle.data.pet).toBe(false);
     expect(json).toContain("共同记录");
+  });
+
+  it("imports v1 backups created before elastic habits were added", async () => {
+    const source = await seededPet();
+    const repository = new MemoryRepository(source.state);
+    const portability = new PetDataPortabilityService({ repository });
+    const base = JSON.parse(await portability.exportJson()) as {
+      data: { pet: Record<string, unknown> };
+    };
+    delete base.data.pet.habits;
+    const preview = await portability.previewImport(JSON.stringify(base), "overwrite");
+    expect(preview.incoming.habits).toBe(3);
   });
 
   it("previews overwrite and preserves the running focus when applying", async () => {

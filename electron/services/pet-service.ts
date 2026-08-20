@@ -14,6 +14,7 @@ import {
   type PetCustomizationPatch,
   type PetEvent,
   type PetMemoryEntry,
+  type PetHabit,
   type PetMiniGameRecord,
   type PetProfile,
   type PetPortableState,
@@ -72,8 +73,17 @@ export function createDefaultPetState(name = "小序", now = Date.now()): PetSta
     miniGames: [],
     diary: [],
     memories: [],
+    habits: defaultPetHabits(),
     proactiveMessages: [],
   };
+}
+
+function defaultPetHabits(): PetHabit[] {
+  return [
+    { id: "water", label: "喝口水", hint: "让身体跟上你的节奏", cadenceMinutes: 90, enabled: true },
+    { id: "stretch", label: "起身伸展", hint: "肩颈和眼睛一起松一松", cadenceMinutes: 120, enabled: true },
+    { id: "close-loop", label: "收尾一分钟", hint: "把刚才的上下文留给未来的你", cadenceMinutes: 180, enabled: true },
+  ].map((habit) => ({ ...habit, lastCompletedAt: undefined, snoozedUntil: undefined }));
 }
 
 function normalizePreset(input?: FocusPreset): FocusPreset {
@@ -166,6 +176,32 @@ function normalizeState(value: unknown, name: string): PetState {
         }))
       : [],
     memories: Array.isArray(raw.memories) ? clone(raw.memories) : [],
+    habits: Array.isArray(raw.habits)
+      ? raw.habits
+          .filter((habit): habit is PetHabit => {
+            if (!habit || typeof habit !== "object") return false;
+            const candidate = habit as unknown as Record<string, unknown>;
+            return (
+              typeof candidate.id === "string" &&
+              typeof candidate.label === "string" &&
+              typeof candidate.hint === "string" &&
+              typeof candidate.cadenceMinutes === "number" &&
+              Number.isFinite(candidate.cadenceMinutes) &&
+              candidate.cadenceMinutes > 0
+            );
+          })
+          .map((habit) => ({
+            id: habit.id.trim().slice(0, 80),
+            label: habit.label.trim().slice(0, 80),
+            hint: habit.hint.trim().slice(0, 240),
+            cadenceMinutes: Math.min(1_440, Math.max(15, Math.round(habit.cadenceMinutes))),
+            enabled: habit.enabled !== false,
+            lastCompletedAt: typeof habit.lastCompletedAt === "string" ? habit.lastCompletedAt : undefined,
+            snoozedUntil: typeof habit.snoozedUntil === "string" ? habit.snoozedUntil : undefined,
+          }))
+          .filter((habit, index, list) => habit.id.length > 0 && list.findIndex((candidate) => candidate.id === habit.id) === index)
+          .slice(0, 12)
+      : defaults.habits,
     proactiveMessages: Array.isArray(raw.proactiveMessages)
       ? clone(raw.proactiveMessages)
       : [],
@@ -886,6 +922,69 @@ export class PetService {
     return deleted;
   }
 
+  async addHabit(input: Pick<PetHabit, "label" | "hint" | "cadenceMinutes">): Promise<PetSnapshot> {
+    return this.#mutate((draft) => {
+      if (draft.habits.length >= 12) throw new Error("PET_HABIT_LIMIT");
+      const label = input.label.trim().slice(0, 80);
+      const hint = input.hint.trim().slice(0, 240);
+      if (!label) throw new Error("EMPTY_PET_HABIT");
+      const cadenceMinutes = normalizeHabitCadence(input.cadenceMinutes);
+      draft.habits.push({
+        id: randomUUID(),
+        label,
+        hint,
+        cadenceMinutes,
+        enabled: true,
+      });
+    });
+  }
+
+  async updateHabit(
+    id: string,
+    patch: Partial<Pick<PetHabit, "label" | "hint" | "cadenceMinutes" | "enabled">>,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft) => {
+      const habit = draft.habits.find((candidate) => candidate.id === id);
+      if (!habit) throw new Error("PET_HABIT_NOT_FOUND");
+      if (patch.label !== undefined) {
+        const label = patch.label.trim().slice(0, 80);
+        if (!label) throw new Error("EMPTY_PET_HABIT");
+        habit.label = label;
+      }
+      if (patch.hint !== undefined) habit.hint = patch.hint.trim().slice(0, 240);
+      if (patch.cadenceMinutes !== undefined) habit.cadenceMinutes = normalizeHabitCadence(patch.cadenceMinutes);
+      if (patch.enabled !== undefined) habit.enabled = patch.enabled;
+    });
+  }
+
+  async completeHabit(id: string): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      const habit = draft.habits.find((candidate) => candidate.id === id);
+      if (!habit) throw new Error("PET_HABIT_NOT_FOUND");
+      habit.lastCompletedAt = isoNow(now);
+      delete habit.snoozedUntil;
+    });
+  }
+
+  async snoozeHabit(id: string, minutes = 30): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      const habit = draft.habits.find((candidate) => candidate.id === id);
+      if (!habit) throw new Error("PET_HABIT_NOT_FOUND");
+      const delay = Number.isFinite(minutes) ? Math.min(24 * 60, Math.max(5, Math.round(minutes))) : 30;
+      habit.snoozedUntil = isoNow(now + delay * 60_000);
+    });
+  }
+
+  async deleteHabit(id: string): Promise<boolean> {
+    let deleted = false;
+    await this.#mutate((draft) => {
+      const next = draft.habits.filter((habit) => habit.id !== id);
+      deleted = next.length !== draft.habits.length;
+      draft.habits = next;
+    });
+    return deleted;
+  }
+
   async recordInteraction(kind = "pet"): Promise<PetSnapshot> {
     return this.#mutate((draft, now, events) => {
       const day = isoNow(now).slice(0, 10);
@@ -1074,6 +1173,11 @@ function addInventoryItem(
     quantity: Math.max(1, quantity),
     unlockedAt: isoNow(now),
   });
+}
+
+function normalizeHabitCadence(value: number): number {
+  if (!Number.isFinite(value)) throw new Error("INVALID_PET_HABIT_CADENCE");
+  return Math.min(1_440, Math.max(15, Math.round(value)));
 }
 
 const DAILY_ADVENTURES = [

@@ -35,6 +35,37 @@ function completedTask(id: string, priority: Task["priority"] = "medium"): Task 
 }
 
 describe("PetService", () => {
+  it("stores configurable elastic habits without creating rewards or tasks", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-habits-"));
+    let now = Date.parse("2026-08-20T08:00:00.000Z");
+    const service = new PetService({ userDataPath: root, now: () => now });
+    await service.initialize();
+    expect(service.snapshot().habits.map((habit) => habit.id)).toEqual([
+      "water",
+      "stretch",
+      "close-loop",
+    ]);
+    await service.updateHabit("water", { cadenceMinutes: 120, enabled: false });
+    await service.completeHabit("stretch");
+    now += 31 * 60_000;
+    await service.snoozeHabit("close-loop", 30);
+    const custom = await service.addHabit({
+      label: "看远处",
+      hint: "让眼睛离开屏幕一会儿",
+      cadenceMinutes: 60,
+    });
+    expect(custom.habits.find((habit) => habit.id === "water")?.enabled).toBe(false);
+    expect(custom.habits.find((habit) => habit.id === "stretch")?.lastCompletedAt).toBeDefined();
+    expect(custom.habits.find((habit) => habit.label === "看远处")?.cadenceMinutes).toBe(60);
+    expect(custom.rewards).toHaveLength(0);
+    expect(await service.deleteHabit("water")).toBe(true);
+    expect(service.snapshot().habits.some((habit) => habit.id === "water")).toBe(false);
+    const restored = new PetService({ userDataPath: root, now: () => now });
+    await restored.initialize();
+    expect(restored.snapshot().habits.some((habit) => habit.label === "看远处")).toBe(true);
+    expect(restored.snapshot().habits.some((habit) => habit.id === "water")).toBe(false);
+  });
+
   it("persists an absolute-time focus session and restores it after restart", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "todo-agent-pet-focus-"));
     let now = Date.parse("2026-08-15T01:00:00.000Z");

@@ -190,6 +190,17 @@ export interface PetMemoryEntry {
   updatedAt: string;
 }
 
+/** A gentle, user-controlled rhythm cue. It never creates a task or streak. */
+export interface PetHabit {
+  id: string;
+  label: string;
+  hint: string;
+  cadenceMinutes: number;
+  enabled: boolean;
+  lastCompletedAt?: string;
+  snoozedUntil?: string;
+}
+
 export interface ProactiveMessageRecord {
   id: string;
   kind:
@@ -219,6 +230,7 @@ export interface PetState {
   miniGames: PetMiniGameRecord[];
   diary: PetDiaryEntry[];
   memories: PetMemoryEntry[];
+  habits: PetHabit[];
   proactiveMessages: ProactiveMessageRecord[];
 }
 

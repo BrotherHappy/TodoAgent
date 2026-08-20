@@ -58,6 +58,7 @@ flowchart LR
 - 模型 API Key、飞书专属 App Secret 和用户 Token 使用 Electron `safeStorage` 加密后保存；普通设置只保存凭据引用，无法使用系统安全存储时不允许持久保存明文。
 - 数据可迁移分为两条路径：`DataPortabilityService.exportJson` 生成可恢复的 JSON（仍按用户选择做脱敏），`exportMarkdown` 只投影任务、项目和清单为人类可读清单，默认 `private` 脱敏并明确不包含草稿、撤销操作、设置、权限审计、凭据、附件本地路径或文件内容；用户可显式开启 `include.operations`，追加只读任务事件摘要（时间、操作类型、任务标识、字段名与撤销标记），不输出 before/after 快照；桌面控制器通过同目录临时文件 + 原子替换写入 `.md` / `.markdown`。
 - Todo Pet 档案由 `PetDataPortabilityService` 使用独立 `.todo-pet.json` 格式迁移，稳定状态通过 `PetService.portableSnapshot` / `replacePortableSnapshot` 读取和写入。导入先生成带 digest 的预览，仅支持“保留本机”或“覆盖本机”；覆盖不信任导入 revision，沿用本机 mutation 队列递增修订号，并保留现有运行中的 focus。备份只包含成长、外观、库存、冒险、小游戏、日记、记忆、主动消息和 focusHistory，不写入凭据、localPath、任务或飞书映射；宠物档案写入独立原子文件，不参与任务/设置/审计事务。
+- 弹性习惯由 `PetService` 与 `PetState.habits` 统一持久化，默认提供喝水、伸展和收尾三项，最多 12 项；IPC 只允许 15–1440 分钟间隔和 1–80/240 字段长度，完成、稍后、暂停/恢复、编辑与删除都走同一原子 mutation。渲染层仅在首次发现旧 `todoAgentElasticHabits` localStorage 数据时迁移一次，并在所有写入成功后记录迁移标记；习惯不创建 Task、不产生 PetReward、不进入 Feishu payload 或模型上下文，且随 `.todo-pet.json` 一并导出。旧 v1 档案缺少 `habits` 时由 normalizer 补默认值。
 
 ## 4. 窗口与系统入口
 
