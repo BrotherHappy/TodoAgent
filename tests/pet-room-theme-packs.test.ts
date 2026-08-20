@@ -43,6 +43,25 @@ describe("pet room theme packs", () => {
       colors: { top: "#000000", ground: "#000000", window: "#000000", accent: "#000000" },
       script: "alert(1)",
     })).toMatchObject({ ok: false, message: expect.stringContaining("脚本") });
+    expect(validatePetRoomThemePack({
+      id: "remote-image",
+      name: "远程图",
+      colors: { top: "#000000", ground: "#000000", window: "#000000", accent: "#000000" },
+      backgroundDataUrl: "https://example.com/room.png",
+    })).toMatchObject({ ok: false, message: expect.stringContaining("PNG") });
+    expect(validatePetRoomThemePack({
+      id: "safe-image",
+      name: "本地图",
+      colors: { top: "#000000", ground: "#000000", window: "#000000", accent: "#000000" },
+      backgroundDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+    })).toMatchObject({ ok: true, pack: { backgroundDataUrl: expect.stringContaining("data:image/png") } });
+    const oversizedBase64 = "A".repeat(Math.ceil((512 * 1024 * 4) / 3) + 8);
+    expect(validatePetRoomThemePack({
+      id: "oversized-image",
+      name: "超大图",
+      colors: { top: "#000000", ground: "#000000", window: "#000000", accent: "#000000" },
+      backgroundDataUrl: `data:image/webp;base64,${oversizedBase64}`,
+    })).toMatchObject({ ok: false, message: expect.stringContaining("512 KB") });
   });
 
   it("installs, updates, activates and removes packs locally", () => {
@@ -70,11 +89,13 @@ describe("pet room theme packs", () => {
       name: "晨雾",
       description: "轻一点的早晨",
       colors: { top: "#e9e7ff", ground: "#d8d2f0", window: "#c8ddff", accent: "#746ee2" },
+      backgroundDataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
     });
     if (!result.ok) throw new Error(result.message);
     const serialized = serializePetRoomThemePack(result.pack);
     expect(serialized).toContain('"colors"');
-    expect(parsePetRoomThemePackJson(serialized)).toMatchObject({ ok: true, pack: { id: "misty-morning" } });
+    expect(serialized).toContain('"backgroundDataUrl"');
+    expect(parsePetRoomThemePackJson(serialized)).toMatchObject({ ok: true, pack: { id: "misty-morning", backgroundDataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" } });
   });
 
   it("keeps the catalog bounded to twelve packs", () => {

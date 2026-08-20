@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 export const PET_ROOM_THEME_PACKS_STORAGE_KEY = "todo-agent.pet-room-theme-packs.v1";
 export const PET_ROOM_THEME_PACK_ACTIVE_KEY = "todo-agent.pet-room-theme-pack-active.v1";
 export const PET_ROOM_THEME_PACKS_CHANGED_EVENT = "todo-agent-pet-room-theme-packs-changed";
+export const PET_ROOM_THEME_BACKGROUND_MAX_BYTES = 512 * 1024;
 
 export interface PetRoomThemeColors {
   top: string;
@@ -16,6 +17,8 @@ export interface InstalledPetRoomThemePack {
   name: string;
   description: string;
   colors: PetRoomThemeColors;
+  /** Optional local PNG/JPEG/WebP asset encoded as a bounded data URL. */
+  backgroundDataUrl?: string;
   installedAt: string;
 }
 
@@ -24,6 +27,14 @@ export type PetRoomThemePackImportResult =
   | { ok: false; message: string };
 
 const colorPattern = /^#[0-9a-f]{6}$/iu;
+const backgroundDataUrlPattern = /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/]+=*$/iu;
+const maxBackgroundDataUrlLength = Math.ceil((PET_ROOM_THEME_BACKGROUND_MAX_BYTES * 4) / 3) + 64;
+const isBackgroundDataUrlWithinLimit = (value: string): boolean => {
+  const payload = value.slice(value.indexOf(",") + 1);
+  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+  const decodedBytes = Math.floor((payload.length * 3) / 4) - padding;
+  return decodedBytes <= PET_ROOM_THEME_BACKGROUND_MAX_BYTES;
+};
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -46,10 +57,10 @@ const emitChanged = (): void => {
 };
 
 export const validatePetRoomThemePack = (value: unknown): PetRoomThemePackImportResult => {
-  if (!isRecord(value)) return { ok: false, message: "颜色主题需要是一个 JSON 对象。" };
-  const allowedKeys = new Set(["id", "name", "description", "colors", "installedAt"]);
+  if (!isRecord(value)) return { ok: false, message: "房间主题需要是一个 JSON 对象。" };
+  const allowedKeys = new Set(["id", "name", "description", "colors", "backgroundDataUrl", "installedAt"]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) {
-    return { ok: false, message: "主题包只允许包含名称、说明和四种颜色，不接受脚本、路径或 CSS。" };
+    return { ok: false, message: "主题包只允许包含名称、说明、四种颜色和受限本地图片，不接受脚本、路径或 CSS。" };
   }
   const id = typeof value.id === "string" ? value.id.trim() : "";
   const name = typeof value.name === "string" ? value.name.trim() : "";
@@ -62,6 +73,17 @@ export const validatePetRoomThemePack = (value: unknown): PetRoomThemePackImport
   }
   if (description.length > 160) {
     return { ok: false, message: "主题说明不能超过 160 个字符。" };
+  }
+  const backgroundDataUrl = value.backgroundDataUrl;
+  if (backgroundDataUrl !== undefined) {
+    if (
+      typeof backgroundDataUrl !== "string" ||
+      backgroundDataUrl.length > maxBackgroundDataUrlLength ||
+      !backgroundDataUrlPattern.test(backgroundDataUrl) ||
+      !isBackgroundDataUrlWithinLimit(backgroundDataUrl)
+    ) {
+      return { ok: false, message: "背景只能是 512 KB 以内的 PNG、JPEG 或 WebP 本地图片。" };
+    }
   }
   if (!isRecord(value.colors)) return { ok: false, message: "主题需要提供顶部、地面、窗户和强调色。" };
   const colors = value.colors;
@@ -85,6 +107,7 @@ export const validatePetRoomThemePack = (value: unknown): PetRoomThemePackImport
       name,
       description,
       colors: normalizedColors,
+      ...(backgroundDataUrl === undefined ? {} : { backgroundDataUrl }),
       installedAt: new Date().toISOString(),
     },
   };

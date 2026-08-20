@@ -6935,6 +6935,14 @@ select {
     radial-gradient(circle at 22% 16%, color-mix(in srgb, var(--pet-room-window) 58%, white), transparent 19%),
     linear-gradient(165deg, var(--pet-room-top) 0 64%, var(--pet-room-ground) 64%);
 }
+.pet-room-stage.custom-room-theme.has-room-theme-asset {
+  background-image:
+    linear-gradient(165deg, color-mix(in srgb, var(--pet-room-top) 78%, transparent) 0 64%, color-mix(in srgb, var(--pet-room-ground) 84%, transparent) 64%),
+    var(--pet-room-background-image);
+  background-position: center;
+  background-size: cover;
+  background-blend-mode: soft-light;
+}
 .pet-room-stage.custom-room-theme .pet-room-window {
   color: var(--pet-room-accent);
   background: var(--pet-room-window);
@@ -7543,6 +7551,31 @@ select {
   color: var(--app-text-soft);
   font-size: 9px;
 }
+.pet-room-theme-asset {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+  padding: 9px;
+  background: color-mix(in srgb, var(--app-surface-raised) 78%, transparent);
+}
+.pet-room-theme-asset strong { font-size: 11px; }
+.pet-room-theme-asset p { margin: 3px 0 0; color: var(--app-text-soft); font-size: 10px; line-height: 1.4; }
+.pet-room-theme-asset-preview {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.pet-room-theme-asset-preview img {
+  width: 52px;
+  height: 34px;
+  object-fit: cover;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+}
+.pet-room-theme-asset .ghost-button { min-height: 29px; padding: 5px 9px; font-size: 10px; }
 .pet-room-theme-editor-actions {
   display: flex;
   align-items: center;
@@ -7572,6 +7605,7 @@ select {
   .pet-room-theme-editor-fields { grid-template-columns: 1fr; }
   .pet-room-theme-color-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pet-room-theme-pack-current { align-items: stretch; flex-direction: column; }
+  .pet-room-theme-asset { grid-template-columns: 1fr; }
 }
 .pet-room-controls fieldset {
   display: flex;

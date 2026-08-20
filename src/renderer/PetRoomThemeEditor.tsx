@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   type InstalledPetRoomThemePack,
   type PetRoomThemeColors,
+  PET_ROOM_THEME_BACKGROUND_MAX_BYTES,
   parsePetRoomThemePackJson,
   serializePetRoomThemePack,
   validatePetRoomThemePack,
@@ -29,14 +30,17 @@ export function PetRoomThemeEditor({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [colors, setColors] = useState<PetRoomThemeColors>(defaultColors);
+  const [backgroundDataUrl, setBackgroundDataUrl] = useState<string>();
   const [error, setError] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
+  const backgroundInputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
     setId("");
     setName("");
     setDescription("");
     setColors(defaultColors);
+    setBackgroundDataUrl(undefined);
     setError("");
   };
 
@@ -46,6 +50,7 @@ export function PetRoomThemeEditor({
     setName(activePack.name);
     setDescription(activePack.description);
     setColors({ ...activePack.colors });
+    setBackgroundDataUrl(activePack.backgroundDataUrl);
     setError("");
   };
 
@@ -57,7 +62,7 @@ export function PetRoomThemeEditor({
   }, [activePack?.id]);
 
   const submit = () => {
-    const result = validatePetRoomThemePack({ id, name, description, colors });
+    const result = validatePetRoomThemePack({ id, name, description, colors, backgroundDataUrl });
     if (!result.ok) {
       setError(result.message);
       return;
@@ -94,11 +99,49 @@ export function PetRoomThemeEditor({
       setName(result.pack.name);
       setDescription(result.pack.description);
       setColors({ ...result.pack.colors });
+      setBackgroundDataUrl(result.pack.backgroundDataUrl);
       setError("");
     } catch {
       setError("主题包不是有效的 JSON。");
     } finally {
       if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
+
+  const importBackground = async (file: File | undefined) => {
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setError("背景只支持 PNG、JPEG 或 WebP 图片。");
+      return;
+    }
+    if (file.size > PET_ROOM_THEME_BACKGROUND_MAX_BYTES) {
+      setError("背景图片不能超过 512 KB。");
+      return;
+    }
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("图片读取失败。"));
+        reader.onerror = () => reject(new Error("图片读取失败。"));
+        reader.readAsDataURL(file);
+      });
+      const result = validatePetRoomThemePack({
+        id: id.trim() || "draft-theme",
+        name: name.trim() || "草稿主题",
+        description,
+        colors,
+        backgroundDataUrl: dataUrl,
+      });
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      setBackgroundDataUrl(result.pack.backgroundDataUrl);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "图片读取失败。");
+    } finally {
+      if (backgroundInputRef.current) backgroundInputRef.current.value = "";
     }
   };
 
@@ -108,11 +151,11 @@ export function PetRoomThemeEditor({
   };
 
   return (
-    <div className="pet-room-theme-editor" aria-label="小窝颜色主题编辑器">
+    <div className="pet-room-theme-editor" aria-label="小窝主题包编辑器">
       <div className="pet-room-theme-editor-heading">
         <div>
-          <strong>颜色主题包</strong>
-          <p>组合四种颜色，主题只在本机生效，不接受脚本、图片路径或网络地址。</p>
+          <strong>小窝主题包</strong>
+          <p>组合四种颜色，可选一张本地小图；只接受受限图片数据，不接受脚本、路径或网络地址。</p>
         </div>
         <span className="pet-room-theme-swatch" style={{ background: `linear-gradient(160deg, ${colors.top} 0 62%, ${colors.ground} 62%)` }} aria-hidden="true" />
       </div>
@@ -143,6 +186,29 @@ export function PetRoomThemeEditor({
             <code>{colors[key]}</code>
           </label>
         ))}
+      </div>
+      <div className="pet-room-theme-asset">
+        <div>
+          <strong>小窝背景图（可选）</strong>
+          <p>仅支持 512 KB 以内的 PNG、JPEG 或 WebP；图片会随主题包一起保存在本机。</p>
+        </div>
+        {backgroundDataUrl ? (
+          <div className="pet-room-theme-asset-preview">
+            <img src={backgroundDataUrl} alt="" />
+            <button type="button" className="ghost-button" disabled={disabled} onClick={() => setBackgroundDataUrl(undefined)}>移除图片</button>
+          </div>
+        ) : (
+          <button type="button" className="ghost-button" disabled={disabled} onClick={() => backgroundInputRef.current?.click()}>选择本地图片</button>
+        )}
+        <input
+          ref={backgroundInputRef}
+          className="sr-only"
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          aria-label="导入小窝背景图片"
+          disabled={disabled}
+          onChange={(event) => void importBackground(event.target.files?.[0])}
+        />
       </div>
       <div className="settings-actions pet-room-theme-editor-actions">
         <button type="button" className="soft-button" disabled={disabled || !activePack} onClick={loadActive}>载入当前包</button>

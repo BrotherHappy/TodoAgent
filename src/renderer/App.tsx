@@ -7771,6 +7771,9 @@ function PetHomePage({
         "--pet-room-ground": activeRoomThemePack.colors.ground,
         "--pet-room-window": activeRoomThemePack.colors.window,
         "--pet-room-accent": activeRoomThemePack.colors.accent,
+        ...(activeRoomThemePack.backgroundDataUrl
+          ? { "--pet-room-background-image": `url(${activeRoomThemePack.backgroundDataUrl})` }
+          : {}),
       } as CSSProperties)
     : undefined;
   const hasUnlocked = (itemId: string) =>
@@ -7990,7 +7993,7 @@ function PetHomePage({
         <section className="pet-room-section">
           <div
             ref={roomStageRef}
-            className={`pet-room-stage room-${snapshot.appearance.roomTheme} atmosphere-${roomAtmosphere}${activeRoomThemePack ? " custom-room-theme" : ""}`}
+            className={`pet-room-stage room-${snapshot.appearance.roomTheme} atmosphere-${roomAtmosphere}${activeRoomThemePack ? " custom-room-theme" : ""}${activeRoomThemePack?.backgroundDataUrl ? " has-room-theme-asset" : ""}`}
             style={roomThemeStyle}
             onPointerMove={moveRoomDecoration}
             onPointerUp={finishRoomDecorationDrag}
@@ -8183,15 +8186,15 @@ function PetHomePage({
               </select>
             </label>
             <label>
-              <span>颜色主题包</span>
+              <span>小窝主题包</span>
               <select
-                aria-label="颜色主题包"
+                aria-label="小窝主题包"
                 value={roomThemePacks.activeId ?? ""}
                 disabled={busy}
                 onChange={(event) => {
                   const nextId = event.target.value || undefined;
                   roomThemePacks.activate(nextId);
-                  notify(nextId ? "颜色主题已应用" : "已恢复房间主题颜色", "success");
+                  notify(nextId ? "小窝主题已应用" : "已恢复房间主题颜色", "success");
                 }}
               >
                 <option value="">跟随房间主题</option>
@@ -8206,19 +8209,19 @@ function PetHomePage({
               onInstall={(pack) => {
                 roomThemePacks.install(pack);
                 roomThemePacks.activate(pack.id);
-                notify("颜色主题已安装并应用", "success");
+                notify("小窝主题已安装并应用", "success");
               }}
             />
             {activeRoomThemePack && (
               <div className="pet-room-theme-pack-current">
-                <span>{activeRoomThemePack.description || "本机颜色主题"}</span>
+                <span>{activeRoomThemePack.description || "本机小窝主题"}</span>
                 <button
                   type="button"
                   className="ghost-button"
                   disabled={busy}
                   onClick={() => {
                     roomThemePacks.remove(activeRoomThemePack.id);
-                    notify("颜色主题已移除", "success");
+                    notify("小窝主题已移除", "success");
                   }}
                 >
                   移除当前主题
