@@ -293,18 +293,26 @@ export interface ModelUsageStatus {
   blocked: boolean;
   blockedReason?:
     | "daily-token-limit-reached"
+    | "daily-cost-limit-reached"
     | "provider-usage-unavailable"
+    | "provider-cost-unavailable"
     | "usage-state-unavailable";
   reportedRequestCount: number;
   unreportedRequestCount: number;
+  /** Requests with token dimensions missing for a configured price profile. */
+  unpricedRequestCount: number;
   lastUpdatedAt?: string;
   accounting: "none" | "provider-reported" | "partial" | "unavailable";
   /** A completed request can cross the boundary; subsequent runs are blocked. */
   enforcement: "block-new-runs-at-or-over-limit";
   cost: {
     configuredDailyLimitUsd: number | null;
-    mode: "not-enforced";
-    reason: "MODEL_PRICING_NOT_CONFIGURED";
+    usedUsd: number | null;
+    remainingUsd: number | null;
+    mode: "enforced" | "not-enforced";
+    reason?:
+      | "MODEL_PRICING_NOT_CONFIGURED"
+      | "DAILY_COST_LIMIT_DISABLED";
   };
 }
 

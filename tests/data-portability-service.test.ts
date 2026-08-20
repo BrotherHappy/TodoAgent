@@ -285,6 +285,33 @@ describe('DataPortabilityService export safety', () => {
     },
   );
 
+  it('round-trips user-entered model prices without exporting credentials', async () => {
+    const source = new MemoryPortabilityRepository(snapshot());
+    source.state.settings.ai.pricing = {
+      promptUsdPerMillionTokens: 2.5,
+      completionUsdPerMillionTokens: 10,
+    };
+    source.state.settings.ai.fallback.pricing = {
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    };
+    const json = await serviceFor(source).exportJson({
+      include: { permissionAudit: false },
+    });
+    const target = new MemoryPortabilityRepository(snapshot());
+    await serviceFor(target).importJson(json, { strategy: 'overwrite' });
+
+    expect(target.state.settings.ai.pricing).toEqual({
+      promptUsdPerMillionTokens: 2.5,
+      completionUsdPerMillionTokens: 10,
+    });
+    expect(target.state.settings.ai.fallback.pricing).toEqual({
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    });
+    expect(json).not.toContain('credentialId');
+  });
+
   it('defaults a legacy model authentication mode to Bearer and rejects unknown values', async () => {
     const source = new MemoryPortabilityRepository(snapshot());
     const json = await serviceFor(source).exportJson({

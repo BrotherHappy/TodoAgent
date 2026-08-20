@@ -506,6 +506,52 @@ describe("AgentDesktopService", () => {
     ]);
   });
 
+  it("shows fallback usage in the shared cost budget when primary pricing is unset", async () => {
+    const primary = new ScriptedGateway([
+      () => {
+        throw new ModelGatewayError("NETWORK_ERROR", "primary offline");
+      },
+    ]);
+    const fallback = new ScriptedGateway([{
+      ...finalCompletion("备用模型完成"),
+      usage: { promptTokens: 500, completionTokens: 500, totalTokens: 1_000 },
+    }]);
+    const harness = await createHarness({
+      gatewayFactory: (input) => input.provider === "fallback" ? fallback : primary,
+    });
+    await configureAi(harness.settings);
+    const current = harness.settings.get();
+    await harness.settings.replace({
+      ...current,
+      ai: {
+        ...current.ai,
+        routing: "fallback-on-error",
+        dailyCostLimit: 0.01,
+        pricing: { promptUsdPerMillionTokens: 0, completionUsdPerMillionTokens: 0 },
+        fallback: {
+          ...current.ai.fallback,
+          enabled: true,
+          pricing: { promptUsdPerMillionTokens: 10, completionUsdPerMillionTokens: 10 },
+        },
+      },
+    });
+
+    await expect(harness.service.send({ message: "使用备用模型" })).resolves.toMatchObject({
+      state: "completed",
+      assistantText: "备用模型完成",
+    });
+    expect(await harness.service.modelUsage()).toMatchObject({
+      blocked: true,
+      blockedReason: "daily-cost-limit-reached",
+      unpricedRequestCount: 0,
+      cost: {
+        mode: "enforced",
+        usedUsd: 0.01,
+        configuredDailyLimitUsd: 0.01,
+      },
+    });
+  });
+
   it("supports local-only mode without a primary model or credential", async () => {
     const local = new ScriptedGateway([finalCompletion("只在本机完成")]);
     let provider: string | undefined;

@@ -160,6 +160,16 @@ const settingsSchema = z
             endpoint: z.string().trim().url().max(2_048),
             model: z.string().trim().max(240),
             authMode: z.enum(["bearer", "none"]).default("none"),
+            pricing: z
+              .object({
+                promptUsdPerMillionTokens: z.number().finite().min(0).max(100_000),
+                completionUsdPerMillionTokens: z.number().finite().min(0).max(100_000),
+              })
+              .strict()
+              .default({
+                promptUsdPerMillionTokens: 0,
+                completionUsdPerMillionTokens: 0,
+              }),
             credentialId: z.string().trim().min(1).max(512).optional(),
           })
           .strict()
@@ -168,11 +178,21 @@ const settingsSchema = z
             endpoint: "http://127.0.0.1:11434/v1",
             model: "llama3.2",
             authMode: "none",
+            pricing: {
+              promptUsdPerMillionTokens: 0,
+              completionUsdPerMillionTokens: 0,
+            },
           }),
         timeoutMs: z.number().int().min(1_000).max(300_000),
         retries: z.number().int().min(0).max(5),
         dailyTokenLimit: z.number().int().min(0).max(100_000_000),
         dailyCostLimit: z.number().finite().min(0).max(100_000),
+        pricing: z
+          .object({
+            promptUsdPerMillionTokens: z.number().finite().min(0).max(100_000),
+            completionUsdPerMillionTokens: z.number().finite().min(0).max(100_000),
+          })
+          .strict(),
         credentialId: z.string().trim().min(1).max(512).optional(),
       })
       .strict(),

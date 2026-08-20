@@ -1,3 +1,5 @@
+import type { ModelPricing } from './agent-types';
+
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type FloatingTopMode = 'always' | 'focus-only' | 'never';
 export type PetTab = 'all' | 'today' | 'focus' | 'chat' | 'home';
@@ -131,6 +133,8 @@ export interface AiProviderSettings {
   retries: number;
   dailyTokenLimit: number;
   dailyCostLimit: number;
+  /** Optional user-entered prices used only for local cost accounting. */
+  pricing: ModelPricing;
   credentialId?: string;
 }
 
@@ -139,6 +143,8 @@ export interface AiFallbackProviderSettings {
   endpoint: string;
   model: string;
   authMode: AiAuthenticationMode;
+  /** Optional local-model prices used only for local cost accounting. */
+  pricing: ModelPricing;
   credentialId?: string;
 }
 
@@ -278,11 +284,19 @@ export const defaultSettings: AppSettings = {
       endpoint: 'http://127.0.0.1:11434/v1',
       model: 'llama3.2',
       authMode: 'none',
+      pricing: {
+        promptUsdPerMillionTokens: 0,
+        completionUsdPerMillionTokens: 0,
+      },
     },
     timeoutMs: 30_000,
     retries: 1,
     dailyTokenLimit: 100_000,
     dailyCostLimit: 5,
+    pricing: {
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    },
   },
   feishu: {
     configured: false,

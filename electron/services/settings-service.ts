@@ -45,6 +45,40 @@ function clampInteger(
     : fallback;
 }
 
+function clampNumber(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, value))
+    : fallback;
+}
+
+function normalizeModelPricing(
+  value: unknown,
+  fallback: { promptUsdPerMillionTokens: number; completionUsdPerMillionTokens: number },
+): { promptUsdPerMillionTokens: number; completionUsdPerMillionTokens: number } {
+  const source = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    promptUsdPerMillionTokens: clampNumber(
+      source.promptUsdPerMillionTokens,
+      fallback.promptUsdPerMillionTokens,
+      0,
+      100_000,
+    ),
+    completionUsdPerMillionTokens: clampNumber(
+      source.completionUsdPerMillionTokens,
+      fallback.completionUsdPerMillionTokens,
+      0,
+      100_000,
+    ),
+  };
+}
+
 function normalizeProjectReminderModes(value: unknown): Record<string, 'normal' | 'important-only' | 'off'> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
   const normalized: Record<string, 'normal' | 'important-only' | 'off'> = {};
@@ -89,7 +123,22 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     },
     weather: { ...defaultSettings.weather, ...value?.weather },
     pet: { ...defaultSettings.pet, ...value?.pet },
-    ai: { ...defaultSettings.ai, ...value?.ai },
+    ai: {
+      ...defaultSettings.ai,
+      ...value?.ai,
+      pricing: {
+        ...defaultSettings.ai.pricing,
+        ...value?.ai?.pricing,
+      },
+      fallback: {
+        ...defaultSettings.ai.fallback,
+        ...value?.ai?.fallback,
+        pricing: {
+          ...defaultSettings.ai.fallback.pricing,
+          ...value?.ai?.fallback?.pricing,
+        },
+      },
+    },
     feishu: { ...defaultSettings.feishu, ...value?.feishu },
     modelDataScope: { ...defaultSettings.modelDataScope, ...value?.modelDataScope },
     persona: { ...defaultSettings.persona, ...value?.persona },
@@ -265,6 +314,10 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   if (!aiAuthenticationModes.has(merged.ai.authMode)) {
     merged.ai.authMode = defaultSettings.ai.authMode;
   }
+  merged.ai.pricing = normalizeModelPricing(
+    merged.ai.pricing,
+    defaultSettings.ai.pricing,
+  );
   if (!merged.ai.fallback || typeof merged.ai.fallback !== 'object') {
     merged.ai.fallback = clone(defaultSettings.ai.fallback);
   } else {
@@ -275,6 +328,10 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     if (!aiAuthenticationModes.has(merged.ai.fallback.authMode)) {
       merged.ai.fallback.authMode = defaultSettings.ai.fallback.authMode;
     }
+    merged.ai.fallback.pricing = normalizeModelPricing(
+      merged.ai.fallback.pricing,
+      defaultSettings.ai.fallback.pricing,
+    );
   }
 
   // Keep the ordinary settings document on an explicit allow-list. Types and
@@ -371,12 +428,22 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
         endpoint: merged.ai.fallback.endpoint,
         model: merged.ai.fallback.model,
         authMode: merged.ai.fallback.authMode,
+        pricing: {
+          promptUsdPerMillionTokens:
+            merged.ai.fallback.pricing.promptUsdPerMillionTokens,
+          completionUsdPerMillionTokens:
+            merged.ai.fallback.pricing.completionUsdPerMillionTokens,
+        },
         credentialId: merged.ai.fallback.credentialId,
       },
       timeoutMs: merged.ai.timeoutMs,
       retries: merged.ai.retries,
       dailyTokenLimit: merged.ai.dailyTokenLimit,
       dailyCostLimit: merged.ai.dailyCostLimit,
+      pricing: {
+        promptUsdPerMillionTokens: merged.ai.pricing.promptUsdPerMillionTokens,
+        completionUsdPerMillionTokens: merged.ai.pricing.completionUsdPerMillionTokens,
+      },
       credentialId: merged.ai.credentialId,
     },
     feishu: {
@@ -435,7 +502,9 @@ export class SettingsService {
         raw.floating?.topMode !== this.#settings.floating.topMode ||
         raw.ai?.authMode !== this.#settings.ai.authMode ||
         raw.ai?.routing !== this.#settings.ai.routing ||
+        raw.ai?.pricing === undefined ||
         raw.ai?.fallback === undefined ||
+        raw.ai?.fallback?.pricing === undefined ||
         raw.notifications?.dailyTaskReminderLimit !== this.#settings.notifications.dailyTaskReminderLimit ||
         raw.notifications?.taskIgnoreBackoffEnabled !== this.#settings.notifications.taskIgnoreBackoffEnabled ||
         raw.notifications?.taskReminderMinIntervalMinutes !== this.#settings.notifications.taskReminderMinIntervalMinutes ||

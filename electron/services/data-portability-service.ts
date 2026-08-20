@@ -1025,7 +1025,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   const ai = expectRecord(settings.ai, `${path}.ai`);
   assertOnlyKeys(ai, [
     'enabled', 'endpoint', 'model', 'authMode', 'routing', 'fallback',
-    'timeoutMs', 'retries', 'dailyTokenLimit', 'dailyCostLimit',
+    'timeoutMs', 'retries', 'dailyTokenLimit', 'dailyCostLimit', 'pricing',
   ], `${path}.ai`);
   expectBoolean(ai.enabled, `${path}.ai.enabled`);
   expectSafeWebUrl(ai.endpoint, `${path}.ai.endpoint`);
@@ -1047,7 +1047,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     const fallback = expectRecord(ai.fallback, `${path}.ai.fallback`);
     assertOnlyKeys(
       fallback,
-      ['enabled', 'endpoint', 'model', 'authMode'],
+      ['enabled', 'endpoint', 'model', 'authMode', 'pricing'],
       `${path}.ai.fallback`,
     );
     expectBoolean(fallback.enabled, `${path}.ai.fallback.enabled`);
@@ -1060,7 +1060,43 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
         `${path}.ai.fallback.authMode`,
       );
     }
+    const pricing = fallback.pricing === undefined
+      ? expectRecord(clone(defaultSettings.ai.fallback.pricing), `${path}.ai.fallback.pricing`)
+      : expectRecord(fallback.pricing, `${path}.ai.fallback.pricing`);
+    assertOnlyKeys(
+      pricing,
+      ['promptUsdPerMillionTokens', 'completionUsdPerMillionTokens'],
+      `${path}.ai.fallback.pricing`,
+    );
+    expectNumber(
+      pricing.promptUsdPerMillionTokens,
+      `${path}.ai.fallback.pricing.promptUsdPerMillionTokens`,
+      { minimum: 0, maximum: 100_000 },
+    );
+    expectNumber(
+      pricing.completionUsdPerMillionTokens,
+      `${path}.ai.fallback.pricing.completionUsdPerMillionTokens`,
+      { minimum: 0, maximum: 100_000 },
+    );
   }
+  const pricing = ai.pricing === undefined
+    ? expectRecord(clone(defaultSettings.ai.pricing), `${path}.ai.pricing`)
+    : expectRecord(ai.pricing, `${path}.ai.pricing`);
+  assertOnlyKeys(
+    pricing,
+    ['promptUsdPerMillionTokens', 'completionUsdPerMillionTokens'],
+    `${path}.ai.pricing`,
+  );
+  expectNumber(
+    pricing.promptUsdPerMillionTokens,
+    `${path}.ai.pricing.promptUsdPerMillionTokens`,
+    { minimum: 0, maximum: 100_000 },
+  );
+  expectNumber(
+    pricing.completionUsdPerMillionTokens,
+    `${path}.ai.pricing.completionUsdPerMillionTokens`,
+    { minimum: 0, maximum: 100_000 },
+  );
   ['timeoutMs', 'retries', 'dailyTokenLimit', 'dailyCostLimit'].forEach((key) =>
     expectNumber(ai[key], `${path}.ai.${key}`, { minimum: 0 }),
   );
@@ -1134,6 +1170,18 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   validated.ai = {
     ...clone(defaultSettings.ai),
     ...clone(ai),
+    pricing: {
+      ...clone(defaultSettings.ai.pricing),
+      ...(ai.pricing as Record<string, unknown>),
+    },
+    fallback: {
+      ...clone(defaultSettings.ai.fallback),
+      ...(ai.fallback as Record<string, unknown> | undefined),
+      pricing: {
+        ...clone(defaultSettings.ai.fallback.pricing),
+        ...((ai.fallback as Record<string, unknown> | undefined)?.pricing as Record<string, unknown> | undefined),
+      },
+    },
   } as AppSettings['ai'];
   // The import format intentionally carries authentication *mode*, but never
   // an OS credential reference. Keep this explicit so later defaults cannot

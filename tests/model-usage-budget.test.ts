@@ -91,8 +91,10 @@ describe('ModelUsageBudgetService', () => {
       days: {
         '2026-08-09': {
           usedTokens: 100,
+          usedCostUsd: 0,
           reportedRequestCount: 2,
           unreportedRequestCount: 0,
+          unpricedRequestCount: 0,
           lastUpdatedAt: expect.any(String),
         },
       },
@@ -168,6 +170,56 @@ describe('ModelUsageBudgetService', () => {
     });
     await expect(reloaded.assertCanStart(100, 5)).rejects.toMatchObject({
       code: 'AI_USAGE_STATE_UNAVAILABLE',
+    });
+  });
+
+  it('prices provider-reported prompt and completion tokens and enforces the cost cap', async () => {
+    const harness = await createHarness();
+    const pricing = {
+      promptUsdPerMillionTokens: 10,
+      completionUsdPerMillionTokens: 20,
+    };
+    await harness.service.recordProviderUsage(
+      { promptTokens: 500, completionTokens: 250, totalTokens: 750 },
+      0,
+      0.01,
+      pricing,
+    );
+
+    expect(await harness.service.status(0, 0.01, pricing)).toMatchObject({
+      usedTokens: 750,
+      unpricedRequestCount: 0,
+      blocked: true,
+      blockedReason: 'daily-cost-limit-reached',
+      cost: {
+        configuredDailyLimitUsd: 0.01,
+        mode: 'enforced',
+        usedUsd: 0.01,
+        remainingUsd: 0,
+      },
+    });
+    await expect(harness.service.assertCanStart(0, 0.01, pricing)).rejects.toMatchObject({
+      code: 'AI_DAILY_COST_LIMIT_REACHED',
+    });
+  });
+
+  it('fails closed when a configured cost profile cannot price a provider response', async () => {
+    const harness = await createHarness();
+    const pricing = {
+      promptUsdPerMillionTokens: 1,
+      completionUsdPerMillionTokens: 2,
+    };
+    await harness.service.recordProviderUsage(50, 0, 5, pricing);
+
+    expect(await harness.service.status(0, 5, pricing)).toMatchObject({
+      usedTokens: 50,
+      unpricedRequestCount: 1,
+      blocked: true,
+      blockedReason: 'provider-cost-unavailable',
+      cost: { mode: 'enforced', usedUsd: 0 },
+    });
+    await expect(harness.service.assertCanStart(0, 5, pricing)).rejects.toMatchObject({
+      code: 'AI_PROVIDER_COST_UNAVAILABLE',
     });
   });
 });

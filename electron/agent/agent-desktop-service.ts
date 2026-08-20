@@ -143,6 +143,33 @@ const providerFor = (
   role: ProviderRole,
 ): ProviderConfig => role === "primary" ? settings.ai : settings.ai.fallback;
 
+const pricingFor = (
+  settings: ReturnType<SettingsService["get"]>,
+  role: ProviderRole,
+) => providerFor(settings, role).pricing;
+
+const pricingConfigured = (pricing: ReturnType<typeof pricingFor>): boolean =>
+  Number.isFinite(pricing.promptUsdPerMillionTokens) &&
+  Number.isFinite(pricing.completionUsdPerMillionTokens) &&
+  (pricing.promptUsdPerMillionTokens > 0 || pricing.completionUsdPerMillionTokens > 0);
+
+/**
+ * The fallback route may use either provider. Pick a configured profile for
+ * the preflight/status gate, while actual usage is still priced with the
+ * provider role that completed the request.
+ */
+const pricingForBudget = (
+  settings: ReturnType<SettingsService["get"]>,
+): ReturnType<typeof pricingFor> | undefined => {
+  const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
+  const activePricing = pricingFor(settings, activeProvider);
+  if (settings.ai.routing !== "fallback-on-error" || pricingConfigured(activePricing)) {
+    return activePricing;
+  }
+  const fallbackPricing = pricingFor(settings, "fallback");
+  return pricingConfigured(fallbackPricing) ? fallbackPricing : activePricing;
+};
+
 const providerHasCredentials = (
   provider: ProviderConfig,
   readCredential: (id: string) => string | undefined,
@@ -547,6 +574,7 @@ export class AgentDesktopService {
     return this.options.usageBudget.status(
       settings.ai.dailyTokenLimit,
       settings.ai.dailyCostLimit,
+      pricingForBudget(settings),
     );
   }
 
@@ -586,6 +614,7 @@ export class AgentDesktopService {
       await this.options.usageBudget.assertCanStart(
         settings.ai.dailyTokenLimit,
         settings.ai.dailyCostLimit,
+        pricingForBudget(settings),
       );
       const completion = await this.#createGateway(settings).complete({
         messages: [{ role: "user", content: "Reply with exactly OK." }],
@@ -672,6 +701,7 @@ export class AgentDesktopService {
     await this.options.usageBudget.assertCanStart(
       settings.ai.dailyTokenLimit,
       settings.ai.dailyCostLimit,
+      pricingForBudget(settings),
     );
 
     const history = settings.modelDataScope.chatHistory
@@ -1019,7 +1049,7 @@ export class AgentDesktopService {
                 },
               },
       });
-      return this.#withUsageAccounting(delegate);
+      return this.#withUsageAccounting(delegate, role);
     };
 
     const activeProvider = settings.ai.routing === "local-only" ? "fallback" : "primary";
@@ -1054,7 +1084,10 @@ export class AgentDesktopService {
     };
   }
 
-  #withUsageAccounting(delegate: ModelGatewayLike): ModelGatewayLike {
+  #withUsageAccounting(
+    delegate: ModelGatewayLike,
+    role: ProviderRole,
+  ): ModelGatewayLike {
     return {
       complete: async (request, signal, onTextDelta) => {
         const completion = await delegate.complete(
@@ -1062,7 +1095,15 @@ export class AgentDesktopService {
           signal,
           onTextDelta,
         );
-        if (onTextDelta && completion.usage?.totalTokens === undefined) {
+        const usage = completion.usage;
+        const totalTokens = usage?.totalTokens ?? (
+          usage !== undefined &&
+          Number.isInteger(usage.promptTokens) &&
+          Number.isInteger(usage.completionTokens)
+            ? usage.promptTokens! + usage.completionTokens!
+            : undefined
+        );
+        if (onTextDelta && totalTokens === undefined) {
           throw new ModelGatewayError(
             "STREAM_USAGE_UNAVAILABLE",
             "The streaming provider did not report usage.total_tokens.",
@@ -1070,9 +1111,10 @@ export class AgentDesktopService {
         }
         const current = this.options.settings.get();
         await this.options.usageBudget.recordProviderUsage(
-          completion.usage?.totalTokens,
+          usage,
           current.ai.dailyTokenLimit,
           current.ai.dailyCostLimit,
+          pricingFor(current, role),
         );
         return completion;
       },
@@ -1126,6 +1168,7 @@ export class AgentDesktopService {
       await this.options.usageBudget.assertCanStart(
         settings.ai.dailyTokenLimit,
         settings.ai.dailyCostLimit,
+        pricingForBudget(settings),
       );
 
       const taskData = tasks.map((task) => morningTaskData(task, settings));
@@ -1214,8 +1257,12 @@ export class AgentDesktopService {
         "The configured model credential is unavailable.",
       AI_DAILY_TOKEN_LIMIT_REACHED:
         "The local daily token limit has been reached.",
+      AI_DAILY_COST_LIMIT_REACHED:
+        "The configured local daily cost limit has been reached.",
       AI_PROVIDER_USAGE_UNAVAILABLE:
         "The provider did not report usage.total_tokens, so the local daily limit cannot be enforced safely.",
+      AI_PROVIDER_COST_UNAVAILABLE:
+        "The provider did not report prompt/completion token usage, so the configured local cost limit cannot be enforced safely.",
       AI_USAGE_STATE_UNAVAILABLE:
         "The local usage counter is unavailable; model calls are blocked to protect the configured budget.",
     };

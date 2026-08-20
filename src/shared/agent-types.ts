@@ -171,6 +171,17 @@ export interface ModelUsage {
   totalTokens?: number;
 }
 
+/**
+ * User-supplied prices for one million provider tokens.  Prices are never
+ * inferred from a model name: zero means the corresponding side is free or
+ * intentionally left unpriced, while the pair is considered configured when
+ * at least one side is positive.
+ */
+export interface ModelPricing {
+  promptUsdPerMillionTokens: number;
+  completionUsdPerMillionTokens: number;
+}
+
 export interface ModelCompletion {
   id?: string;
   assistantMessage: Extract<ModelMessage, { role: 'assistant' }>;

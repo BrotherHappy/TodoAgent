@@ -9,12 +9,16 @@ import {
 import path from 'node:path';
 import { z } from 'zod';
 
+import type { ModelPricing, ModelUsage } from '../../src/shared/agent-types';
 import type { ModelUsageStatus } from '../../src/shared/desktop-api';
 
 const storedDaySchema = z.object({
   usedTokens: z.number().int().nonnegative(),
+  usedCostUsd: z.number().finite().nonnegative().default(0),
   reportedRequestCount: z.number().int().nonnegative(),
   unreportedRequestCount: z.number().int().nonnegative(),
+  /** Requests that returned enough tokens for token accounting but not for the configured price. */
+  unpricedRequestCount: z.number().int().nonnegative().default(0),
   lastUpdatedAt: z.string().datetime().optional(),
 }).strict();
 
@@ -35,7 +39,9 @@ export interface ModelUsageBudgetOptions {
 export class ModelUsageBudgetError extends Error {
   constructor(readonly code:
     | 'AI_DAILY_TOKEN_LIMIT_REACHED'
+    | 'AI_DAILY_COST_LIMIT_REACHED'
     | 'AI_PROVIDER_USAGE_UNAVAILABLE'
+    | 'AI_PROVIDER_COST_UNAVAILABLE'
     | 'AI_USAGE_STATE_UNAVAILABLE') {
     super(code);
     this.name = code;
@@ -55,6 +61,37 @@ const defaultLocalDate = (date: Date): string => {
 
 const isMissing = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+
+const finiteNonNegative = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+const pricingIsConfigured = (pricing: ModelPricing | undefined): pricing is ModelPricing =>
+  pricing !== undefined &&
+  finiteNonNegative(pricing.promptUsdPerMillionTokens) &&
+  finiteNonNegative(pricing.completionUsdPerMillionTokens) &&
+  (pricing.promptUsdPerMillionTokens > 0 || pricing.completionUsdPerMillionTokens > 0);
+
+/** Returns undefined when the provider did not expose the token dimensions
+ * needed to price a configured model. Never estimates a split from total. */
+const calculateCost = (
+  usage: ModelUsage | undefined,
+  pricing: ModelPricing | undefined,
+): number | undefined => {
+  if (!pricingIsConfigured(pricing) || usage === undefined) return undefined;
+  const promptTokens = pricing.promptUsdPerMillionTokens === 0
+    ? 0
+    : usage.promptTokens;
+  const completionTokens = pricing.completionUsdPerMillionTokens === 0
+    ? 0
+    : usage.completionTokens;
+  if (!finiteNonNegative(promptTokens) || !finiteNonNegative(completionTokens)) {
+    return undefined;
+  }
+  return (
+    promptTokens * pricing.promptUsdPerMillionTokens +
+    completionTokens * pricing.completionUsdPerMillionTokens
+  ) / 1_000_000;
+};
 
 /**
  * Persists provider-reported token usage separately from preferences and
@@ -119,30 +156,45 @@ export class ModelUsageBudgetService {
     });
   }
 
-  async status(dailyTokenLimit: number, dailyCostLimit: number): Promise<ModelUsageStatus> {
-    return this.#enqueue(async () => this.#statusUnsafe(dailyTokenLimit, dailyCostLimit));
+  async status(
+    dailyTokenLimit: number,
+    dailyCostLimit: number,
+    pricing?: ModelPricing,
+  ): Promise<ModelUsageStatus> {
+    return this.#enqueue(async () => this.#statusUnsafe(dailyTokenLimit, dailyCostLimit, pricing));
   }
 
-  async assertCanStart(dailyTokenLimit: number, dailyCostLimit: number): Promise<ModelUsageStatus> {
+  async assertCanStart(
+    dailyTokenLimit: number,
+    dailyCostLimit: number,
+    pricing?: ModelPricing,
+  ): Promise<ModelUsageStatus> {
     return this.#enqueue(async () => {
-      const status = this.#statusUnsafe(dailyTokenLimit, dailyCostLimit);
+      const status = this.#statusUnsafe(dailyTokenLimit, dailyCostLimit, pricing);
       if (status.blockedReason === 'usage-state-unavailable') {
         throw new ModelUsageBudgetError('AI_USAGE_STATE_UNAVAILABLE');
       }
       if (status.blockedReason === 'provider-usage-unavailable') {
         throw new ModelUsageBudgetError('AI_PROVIDER_USAGE_UNAVAILABLE');
       }
+      if (status.blockedReason === 'provider-cost-unavailable') {
+        throw new ModelUsageBudgetError('AI_PROVIDER_COST_UNAVAILABLE');
+      }
       if (status.blockedReason === 'daily-token-limit-reached') {
         throw new ModelUsageBudgetError('AI_DAILY_TOKEN_LIMIT_REACHED');
+      }
+      if (status.blockedReason === 'daily-cost-limit-reached') {
+        throw new ModelUsageBudgetError('AI_DAILY_COST_LIMIT_REACHED');
       }
       return status;
     });
   }
 
   async recordProviderUsage(
-    totalTokens: number | undefined,
+    usageOrTotalTokens: ModelUsage | number | undefined,
     dailyTokenLimit: number,
     dailyCostLimit: number,
+    pricing?: ModelPricing,
   ): Promise<ModelUsageStatus> {
     return this.#enqueue(async () => {
       this.#assertInitialized();
@@ -155,14 +207,31 @@ export class ModelUsageBudgetService {
       const next = clone(this.#state);
       const day = next.days[localDate] ?? {
         usedTokens: 0,
+        usedCostUsd: 0,
         reportedRequestCount: 0,
         unreportedRequestCount: 0,
+        unpricedRequestCount: 0,
       };
+      const usage = typeof usageOrTotalTokens === 'number'
+        ? { totalTokens: usageOrTotalTokens }
+        : usageOrTotalTokens;
+      const totalTokens = usage?.totalTokens ?? (
+        usage !== undefined &&
+        Number.isInteger(usage.promptTokens) && Number.isInteger(usage.completionTokens)
+          ? usage.promptTokens! + usage.completionTokens!
+          : undefined
+      );
       if (Number.isInteger(totalTokens) && (totalTokens ?? -1) >= 0) {
         day.usedTokens += totalTokens!;
         day.reportedRequestCount += 1;
       } else {
         day.unreportedRequestCount += 1;
+      }
+      const cost = calculateCost(usage, pricing);
+      if (cost !== undefined) {
+        day.usedCostUsd += cost;
+      } else if (pricingIsConfigured(pricing)) {
+        day.unpricedRequestCount += 1;
       }
       day.lastUpdatedAt = now.toISOString();
       next.days[localDate] = day;
@@ -175,17 +244,23 @@ export class ModelUsageBudgetService {
         throw new ModelUsageBudgetError('AI_USAGE_STATE_UNAVAILABLE');
       }
       this.#state = next;
-      return this.#statusUnsafe(dailyTokenLimit, dailyCostLimit);
+      return this.#statusUnsafe(dailyTokenLimit, dailyCostLimit, pricing);
     });
   }
 
-  #statusUnsafe(dailyTokenLimit: number, dailyCostLimit: number): ModelUsageStatus {
+  #statusUnsafe(
+    dailyTokenLimit: number,
+    dailyCostLimit: number,
+    pricing?: ModelPricing,
+  ): ModelUsageStatus {
     this.#assertInitialized();
     const localDate = this.#localDate(this.#now());
     const day = this.#state.days[localDate] ?? {
       usedTokens: 0,
+      usedCostUsd: 0,
       reportedRequestCount: 0,
       unreportedRequestCount: 0,
+      unpricedRequestCount: 0,
     };
     const tokenLimit = Number.isInteger(dailyTokenLimit) && dailyTokenLimit > 0
       ? dailyTokenLimit
@@ -193,12 +268,23 @@ export class ModelUsageBudgetService {
     const remainingTokens = tokenLimit === null
       ? null
       : Math.max(0, tokenLimit - day.usedTokens);
+    const pricingConfigured = pricingIsConfigured(pricing);
+    const costLimit = Number.isFinite(dailyCostLimit) && dailyCostLimit > 0
+      ? dailyCostLimit
+      : null;
+    const remainingCost = pricingConfigured && costLimit !== null
+      ? Math.max(0, costLimit - day.usedCostUsd)
+      : null;
     const blockedReason = !this.#storageAvailable
       ? 'usage-state-unavailable' as const
       : tokenLimit !== null && day.unreportedRequestCount > 0
         ? 'provider-usage-unavailable' as const
+        : costLimit !== null && pricingConfigured && day.unpricedRequestCount > 0
+          ? 'provider-cost-unavailable' as const
         : tokenLimit !== null && day.usedTokens >= tokenLimit
           ? 'daily-token-limit-reached' as const
+          : costLimit !== null && pricingConfigured && day.usedCostUsd >= costLimit
+            ? 'daily-cost-limit-reached' as const
           : undefined;
     const accounting = day.reportedRequestCount === 0 && day.unreportedRequestCount === 0
       ? 'none' as const
@@ -216,15 +302,18 @@ export class ModelUsageBudgetService {
       blockedReason,
       reportedRequestCount: day.reportedRequestCount,
       unreportedRequestCount: day.unreportedRequestCount,
+      unpricedRequestCount: day.unpricedRequestCount,
       lastUpdatedAt: day.lastUpdatedAt,
       accounting,
       enforcement: 'block-new-runs-at-or-over-limit',
       cost: {
-        configuredDailyLimitUsd: Number.isFinite(dailyCostLimit) && dailyCostLimit > 0
-          ? dailyCostLimit
-          : null,
-        mode: 'not-enforced',
-        reason: 'MODEL_PRICING_NOT_CONFIGURED',
+        configuredDailyLimitUsd: costLimit,
+        usedUsd: pricingConfigured ? day.usedCostUsd : null,
+        remainingUsd: remainingCost,
+        mode: pricingConfigured && costLimit !== null ? 'enforced' : 'not-enforced',
+        reason: pricingConfigured
+          ? costLimit === null ? 'DAILY_COST_LIMIT_DISABLED' : undefined
+          : 'MODEL_PRICING_NOT_CONFIGURED',
       },
     };
   }

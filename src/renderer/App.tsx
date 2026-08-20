@@ -95,7 +95,7 @@ import type {
   TaskView,
   TaskViewSectionId,
 } from "../shared/models";
-import type { AuditRecord } from "../shared/agent-types";
+import type { AuditRecord, ModelPricing } from "../shared/agent-types";
 import type { QuickCaptureResult } from "../shared/quick-capture";
 import type { CalendarEvent } from "../shared/calendar-events";
 import {
@@ -8117,6 +8117,34 @@ function SettingsPage({
   };
   const update = (patch: Partial<AppSettings>, message?: string) =>
     void persist({ ...appSettings, ...patch }, message);
+  const updateModelPricing = (
+    provider: "primary" | "fallback",
+    field: keyof ModelPricing,
+    value: number,
+  ) => {
+    setAppSettings((current) => {
+      if (provider === "primary") {
+        return {
+          ...current,
+          ai: {
+            ...current.ai,
+            pricing: { ...current.ai.pricing, [field]: value },
+          },
+        };
+      }
+      return {
+        ...current,
+        ai: {
+          ...current.ai,
+          fallback: {
+            ...current.ai.fallback,
+            pricing: { ...current.ai.fallback.pricing, [field]: value },
+          },
+        },
+      };
+    });
+  };
+  const persistModelPricing = () => void persist(appSettings, "模型价格已更新");
   const saveApiKey = async () => {
     if (
       appSettings.ai.authMode === "none" ||
@@ -10595,10 +10623,27 @@ function SettingsPage({
                 </div>
                 <small>
                   {modelUsage.blocked
-                    ? `已暂停新运行 · ${modelUsage.blockedReason}`
+                    ? `已暂停新运行 · ${
+                        modelUsage.blockedReason === "daily-cost-limit-reached"
+                          ? "已达到每日费用预算"
+                          : modelUsage.blockedReason === "provider-cost-unavailable"
+                            ? "提供方未回报可计费的输入/输出 token"
+                            : modelUsage.blockedReason === "daily-token-limit-reached"
+                              ? "已达到每日 Token 预算"
+                              : modelUsage.blockedReason === "provider-usage-unavailable"
+                                ? "提供方未回报 Token 用量"
+                                : "本地用量记录不可用"
+                      }`
                     : modelUsage.accounting === "provider-reported"
                       ? `提供方精确回报 · 剩余 ${modelUsage.remainingTokens?.toLocaleString() ?? "不限"}`
                       : `统计状态：${modelUsage.accounting}`}
+                </small>
+                <small>
+                  {modelUsage.cost.mode === "enforced"
+                    ? `今日费用 $${(modelUsage.cost.usedUsd ?? 0).toFixed(4)} / $${(modelUsage.cost.configuredDailyLimitUsd ?? 0).toFixed(2)} · 剩余 $${(modelUsage.cost.remainingUsd ?? 0).toFixed(4)}`
+                    : modelUsage.cost.reason === "MODEL_PRICING_NOT_CONFIGURED"
+                      ? "费用预算未启用价格核算；可在下方填写模型价格"
+                      : "费用预算未设置上限"}
                 </small>
               </div>
             )}
@@ -10768,7 +10813,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>每日费用预算</strong>
-                <p>仅作本地偏好，以美元计；不会替代提供方账单限额</p>
+                <p>配置模型价格后会在本机按提供方回报的输入/输出 token 核算，并在达到上限前阻止新运行</p>
               </div>
               <input
                 className="settings-input"
@@ -10787,6 +10832,86 @@ function SettingsPage({
                 }
                 onBlur={() => void persist(appSettings)}
               />
+            </div>
+            <div className="settings-row settings-row-stack">
+              <div>
+                <strong>主模型价格（美元 / 百万 tokens）</strong>
+                <p>只用于本地预算；不会猜测价格，也不会发送给模型提供方。填 0 表示该部分免费或不计费。</p>
+              </div>
+              <div className="settings-pricing-grid">
+                <label className="settings-number-control">
+                  输入
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100_000}
+                    step={0.01}
+                    aria-label="主模型输入价格（每百万 tokens）"
+                    value={appSettings.ai.pricing.promptUsdPerMillionTokens}
+                    onChange={(event) =>
+                      updateModelPricing("primary", "promptUsdPerMillionTokens", Number(event.target.value))
+                    }
+                    onBlur={persistModelPricing}
+                  />
+                </label>
+                <label className="settings-number-control">
+                  输出
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100_000}
+                    step={0.01}
+                    aria-label="主模型输出价格（每百万 tokens）"
+                    value={appSettings.ai.pricing.completionUsdPerMillionTokens}
+                    onChange={(event) =>
+                      updateModelPricing("primary", "completionUsdPerMillionTokens", Number(event.target.value))
+                    }
+                    onBlur={persistModelPricing}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="settings-row settings-row-stack">
+              <div>
+                <strong>备用 / 本地模型价格（美元 / 百万 tokens）</strong>
+                <p>仅在切换到本地模型或备用模型实际接管时使用；本地模型通常可保持为 0。</p>
+              </div>
+              <div className="settings-pricing-grid">
+                <label className="settings-number-control">
+                  输入
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100_000}
+                    step={0.01}
+                    aria-label="备用模型输入价格（每百万 tokens）"
+                    value={appSettings.ai.fallback.pricing.promptUsdPerMillionTokens}
+                    onChange={(event) =>
+                      updateModelPricing("fallback", "promptUsdPerMillionTokens", Number(event.target.value))
+                    }
+                    onBlur={persistModelPricing}
+                  />
+                </label>
+                <label className="settings-number-control">
+                  输出
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100_000}
+                    step={0.01}
+                    aria-label="备用模型输出价格（每百万 tokens）"
+                    value={appSettings.ai.fallback.pricing.completionUsdPerMillionTokens}
+                    onChange={(event) =>
+                      updateModelPricing("fallback", "completionUsdPerMillionTokens", Number(event.target.value))
+                    }
+                    onBlur={persistModelPricing}
+                  />
+                </label>
+              </div>
             </div>
           </section>
         )}

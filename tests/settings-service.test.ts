@@ -50,6 +50,30 @@ describe('SettingsService', () => {
     expect(persisted.ai.authMode).toBe('bearer');
   });
 
+  it('migrates missing model price profiles without inventing a provider price', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-model-pricing-'));
+    const initial = new SettingsService(root, encryption);
+    await initial.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const legacy = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      ai: { pricing?: unknown; fallback?: { pricing?: unknown } };
+    };
+    delete legacy.ai.pricing;
+    delete legacy.ai.fallback?.pricing;
+    await writeFile(settingsPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().ai.pricing).toEqual({
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    });
+    expect(migrated.get().ai.fallback.pricing).toEqual({
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    });
+  });
+
   it('migrates a legacy orb or capsule into the unique Todo Pet configuration', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-floating-settings-'));
     const initial = new SettingsService(root, encryption);
