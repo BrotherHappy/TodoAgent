@@ -7349,7 +7349,11 @@ select {
   place-items: center;
   color: #746ee2;
   font-weight: 800;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
+.pet-room-decoration.is-dragging { cursor: grabbing; filter: drop-shadow(0 8px 12px rgba(63, 56, 143, 0.2)); }
 .cloud-lamp { color: #746ee2; font-size: 47px; }
 .room-plant { color: #4d9a78; font-size: 58px; }
 .room-books { color: #bd6a78; font-size: 52px; }

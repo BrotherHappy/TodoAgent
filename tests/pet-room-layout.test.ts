@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PET_ROOM_DECORATION_DEFAULTS,
   clampPetDecorationPlacement,
+  placementForPetRoomPoint,
   projectPetRoomPlacements,
 } from "../src/shared/pet-room-layout";
 
@@ -27,5 +28,19 @@ describe("pet room layout", () => {
       PET_ROOM_DECORATION_DEFAULTS.books,
     )).toEqual(PET_ROOM_DECORATION_DEFAULTS.books);
   });
-});
 
+  it("turns a room pointer position into a bounded percentage placement", () => {
+    expect(placementForPetRoomPoint(
+      { clientX: 150, clientY: 80 },
+      { left: 50, top: 20, width: 200, height: 100 },
+      { x: 30, y: 40, scale: 1 },
+      PET_ROOM_DECORATION_DEFAULTS.plant,
+    )).toEqual({ x: 50, y: 60, scale: 1 });
+    expect(placementForPetRoomPoint(
+      { clientX: -100, clientY: 500 },
+      { left: 0, top: 0, width: 100, height: 100 },
+      { x: 30, y: 40, scale: 1 },
+      PET_ROOM_DECORATION_DEFAULTS.plant,
+    )).toEqual({ x: 8, y: 88, scale: 1 });
+  });
+});

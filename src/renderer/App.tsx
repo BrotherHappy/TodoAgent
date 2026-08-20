@@ -99,6 +99,7 @@ import type {
   TaskView,
   TaskViewSectionId,
 } from "../shared/models";
+import type { PetDecorationPlacement } from "../shared/pet-types";
 import type { AuditRecord, ModelPricing } from "../shared/agent-types";
 import type { QuickCaptureResult } from "../shared/quick-capture";
 import type { CalendarEvent } from "../shared/calendar-events";
@@ -223,7 +224,12 @@ import { PetCollectionCard } from "./PetCollectionCard";
 import { PetCompletionStampsCard } from "./PetCompletionStampsCard";
 import { PetProjectChapters } from "./PetProjectChapters";
 import { PetRoomLayoutControls } from "./PetRoomLayoutControls";
-import { projectPetRoomPlacements } from "./pet-room-layout";
+import {
+  PET_ROOM_DECORATION_DEFAULTS,
+  placementForPetRoomPoint,
+  projectPetRoomPlacements,
+  type PetRoomDecorationId,
+} from "./pet-room-layout";
 import {
   PetCompanionAvatar,
   kindLabels as petCompanionKindLabels,
@@ -7634,6 +7640,15 @@ function PetHomePage({
   const [editingDiary, setEditingDiary] = useState<PetDiaryEntry>();
   const [editingMemory, setEditingMemory] = useState<PetMemoryEntry>();
   const [adventure, setAdventure] = useState<PetAdventure>();
+  const [roomDraftPositions, setRoomDraftPositions] = useState(() => projectPetRoomPlacements());
+  const roomDraftPositionsRef = useRef(roomDraftPositions);
+  const roomStageRef = useRef<HTMLDivElement>(null);
+  const roomDragRef = useRef<{
+    id: PetRoomDecorationId;
+    pointerId: number;
+    origin: Required<PetDecorationPlacement>;
+  } | undefined>(undefined);
+  const [roomDragId, setRoomDragId] = useState<PetRoomDecorationId>();
 
   const run = async (operation: () => Promise<void>, success: string) => {
     setBusy(true);
@@ -7654,6 +7669,12 @@ function PetHomePage({
       .then(setAdventure)
       .catch(() => undefined);
   }, [section, snapshot?.revision]);
+  useEffect(() => {
+    if (!snapshot) return;
+    const next = projectPetRoomPlacements(snapshot.appearance.decorationPositions);
+    roomDraftPositionsRef.current = next;
+    setRoomDraftPositions(next);
+  }, [snapshot?.revision]);
   useEffect(() => {
     if (!snapshot || !window.desktopApi || legacyHabitMigrationStarted.current) return;
     let marker = false;
@@ -7722,10 +7743,52 @@ function PetHomePage({
     );
   }
   const profile = snapshot.profile;
-  const roomPlacements = projectPetRoomPlacements(snapshot.appearance.decorationPositions);
   const roomAtmosphere = snapshot.appearance.atmosphere ?? "daylight";
   const hasUnlocked = (itemId: string) =>
     snapshot.inventory.some((item) => item.id === itemId);
+  const beginRoomDecorationDrag = (id: PetRoomDecorationId, event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (busy) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    roomDragRef.current = {
+      id,
+      pointerId: event.pointerId,
+      origin: roomDraftPositionsRef.current[id],
+    };
+    setRoomDragId(id);
+  };
+  const moveRoomDecoration = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = roomDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const rect = roomStageRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    const current = roomDraftPositionsRef.current[drag.id];
+    const next = {
+      ...roomDraftPositionsRef.current,
+      [drag.id]: placementForPetRoomPoint(
+        event,
+        rect,
+        current,
+        PET_ROOM_DECORATION_DEFAULTS[drag.id],
+      ),
+    };
+    roomDraftPositionsRef.current = next;
+    setRoomDraftPositions(next);
+  };
+  const finishRoomDecorationDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = roomDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    roomDragRef.current = undefined;
+    setRoomDragId(undefined);
+    const next = roomDraftPositionsRef.current;
+    const final = next[drag.id];
+    const changed = final.x !== drag.origin.x || final.y !== drag.origin.y || final.scale !== drag.origin.scale;
+    if (!changed || busy) return;
+    void run(async () => {
+      await window.desktopApi?.pet.customize({ decorationPositions: next });
+    }, "摆件位置已更新");
+  };
   const levelProgress = profile.experience % 100;
   const recentRewards = snapshot.rewards.slice(0, 6);
   return (
@@ -7896,7 +7959,13 @@ function PetHomePage({
 
       {section === "room" && (
         <section className="pet-room-section">
-          <div className={`pet-room-stage room-${snapshot.appearance.roomTheme} atmosphere-${roomAtmosphere}`}>
+          <div
+            ref={roomStageRef}
+            className={`pet-room-stage room-${snapshot.appearance.roomTheme} atmosphere-${roomAtmosphere}`}
+            onPointerMove={moveRoomDecoration}
+            onPointerUp={finishRoomDecorationDrag}
+            onPointerCancel={finishRoomDecorationDrag}
+          >
             <span className="pet-room-window" aria-hidden="true">☁</span>
             {([
               ["cloud-lamp", "☼", "cloud-lamp"],
@@ -7904,12 +7973,14 @@ function PetHomePage({
               ["books", "▥", "room-books"],
             ] as const).map(([id, glyph, className]) => {
               if (!snapshot.appearance.decorations.includes(id)) return null;
-              const placement = roomPlacements[id];
+              const placement = roomDraftPositions[id];
               return (
                 <span
                   key={id}
-                  className={`pet-room-decoration ${className}`}
+                  className={`pet-room-decoration ${className} ${roomDragId === id ? "is-dragging" : ""}`}
                   aria-hidden="true"
+                  title="按住拖动摆件"
+                  onPointerDown={(event) => beginRoomDecorationDrag(id, event)}
                   style={{
                     left: `${placement.x}%`,
                     top: `${placement.y}%`,
@@ -8089,7 +8160,7 @@ function PetHomePage({
             </fieldset>
             <PetRoomLayoutControls
               decorations={snapshot.appearance.decorations}
-              positions={roomPlacements}
+              positions={roomDraftPositions}
               disabled={busy}
               onChange={(positions) =>
                 void run(async () => {

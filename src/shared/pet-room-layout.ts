@@ -65,3 +65,26 @@ export function isPetRoomDecorationId(value: string): value is PetRoomDecoration
   return (PET_ROOM_DECORATION_IDS as readonly string[]).includes(value);
 }
 
+export interface PetRoomStageBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Convert a pointer position to a bounded room placement without DOM state. */
+export function placementForPetRoomPoint(
+  point: { clientX: number; clientY: number },
+  bounds: PetRoomStageBounds,
+  current: Required<PetDecorationPlacement>,
+  fallback: Required<PetDecorationPlacement>,
+): Required<PetDecorationPlacement> {
+  if (!Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
+    return current;
+  }
+  return clampPetDecorationPlacement({
+    ...current,
+    x: ((point.clientX - bounds.left) / bounds.width) * 100,
+    y: ((point.clientY - bounds.top) / bounds.height) * 100,
+  }, fallback);
+}
