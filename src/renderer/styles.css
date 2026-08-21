@@ -8983,6 +8983,29 @@ select {
   font-size: 10px;
   font-weight: 650;
 }
+.agent-action-items-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--app-text-faint);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 650;
+}
+.agent-action-items-button:hover:not(:disabled),
+.agent-action-items-button:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 64%, transparent);
+}
+.agent-action-items-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
 .agent-reply-copy-button:hover:not(:disabled),
 .agent-reply-copy-button:focus-visible {
   border-color: color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
@@ -9278,6 +9301,10 @@ select {
   grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: start;
 }
+.agent-action-items-sheet .modal-header {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: start;
+}
 .calendar-action-items-context {
   display: grid;
   gap: 4px;
@@ -9298,6 +9325,11 @@ select {
   gap: 5px;
   color: var(--app-text-soft);
   font-size: 12px;
+}
+.agent-action-items-sheet .calendar-action-items-context span {
+  display: block;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 .calendar-action-item-list {
   display: grid;

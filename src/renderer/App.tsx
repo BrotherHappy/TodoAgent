@@ -105,6 +105,7 @@ import type { QuickCaptureResult } from "../shared/quick-capture";
 import type { CalendarEvent } from "../shared/calendar-events";
 import {
   extractCalendarActionItems,
+  extractActionItemsFromText,
   type CalendarActionItemDraft,
 } from "../shared/calendar-action-items";
 import {
@@ -203,6 +204,7 @@ import {
 import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
 import { CalendarActionItemsSheet } from "./CalendarActionItemsSheet";
+import { AgentActionItemsSheet } from "./AgentActionItemsSheet";
 import { readCalendarEvents, writeCalendarEvents } from "./calendar-store";
 import { buildMorningCalendarSummary } from "./morning-calendar";
 import { suggestMorningRollover } from "./morning-rollover";
@@ -5733,6 +5735,10 @@ function AgentPage({
 }) {
   const [proposal, setProposal] = useState(false);
   const [permission, setPermission] = useState(false);
+  const [agentActionItems, setAgentActionItems] = useState<{
+    sourceText: string;
+    drafts: CalendarActionItemDraft[];
+  }>();
   const [agentCapabilities, setAgentCapabilities] = useState(
     defaultSettings.agentCapabilities,
   );
@@ -5849,6 +5855,19 @@ function AgentPage({
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
     notify("对话已导出为 Markdown", "success");
+  };
+  const openAgentActionItems = (text: string): void => {
+    const drafts = extractActionItemsFromText({
+      id: `agent-reply-${crypto.randomUUID()}`,
+      label: "Agent 研究回复",
+      text,
+      plannedDate: dateKey(),
+    });
+    if (!drafts.length) {
+      notify("回复中没有识别到明确行动项", "info");
+      return;
+    }
+    setAgentActionItems({ sourceText: text, drafts });
   };
   useEffect(() => {
     if (!initialPrompt) return;
@@ -6111,7 +6130,11 @@ function AgentPage({
           >
             {message.role === "assistant" ? (
               message.text ? (
-                <AgentMarkdown text={message.text} streaming={message.streaming} />
+                <AgentMarkdown
+                  text={message.text}
+                  streaming={message.streaming}
+                  onExtractActionItems={openAgentActionItems}
+                />
               ) : (
                 <span className="streaming-indicator" role="status">
                   <i />
@@ -6312,6 +6335,41 @@ function AgentPage({
           title={`允许 Agent 更新 ${affected.length} 个任务？`}
           onDeny={() => setPermission(false)}
           onAllow={() => void execute()}
+        />
+      )}
+      {agentActionItems && (
+        <AgentActionItemsSheet
+          sourceLabel="Agent 研究回复"
+          sourceText={agentActionItems.sourceText}
+          drafts={agentActionItems.drafts}
+          onClose={() => setAgentActionItems(undefined)}
+          onConfirm={async (items) => {
+            let created = 0;
+            try {
+              for (const item of items) {
+                await controller.create(
+                  {
+                    title: item.title,
+                    notes: item.notes,
+                    plannedDate: item.plannedDate || undefined,
+                    source: { type: "local" },
+                    sync: { status: "local" },
+                  },
+                  { selectCreated: false },
+                );
+                created += 1;
+              }
+            } catch (reason) {
+              const detail = reason instanceof Error ? reason.message : "未知错误";
+              throw new Error(
+                created > 0
+                  ? `已创建 ${created}/${items.length} 项，剩余行动项未创建：${detail}`
+                  : detail,
+              );
+            }
+            notify(`已创建 ${created} 项本地行动任务`, "success");
+            setAgentActionItems(undefined);
+          }}
         />
       )}
       {approval && (

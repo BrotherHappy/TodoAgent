@@ -1,4 +1,4 @@
-import { Check, Clipboard, Sparkles } from "lucide-react";
+import { Check, Clipboard, ListChecks, Sparkles } from "lucide-react";
 import { useEffect, useState, type MouseEvent, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -20,9 +20,11 @@ const safeExternalUrl = (value: string | undefined): string | undefined => {
 export function AgentMarkdown({
   text,
   streaming = false,
+  onExtractActionItems,
 }: {
   text: string;
   streaming?: boolean;
+  onExtractActionItems?: (text: string) => void;
 }): ReactElement {
   const [savedContext, setSavedContext] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -65,6 +67,19 @@ export function AgentMarkdown({
   return (
     <div className="agent-markdown">
       <div className="agent-markdown-toolbar">
+        {onExtractActionItems && (
+          <button
+            type="button"
+            className="agent-action-items-button"
+            aria-label="从 Agent 回复提取行动项"
+            title="先预览并确认，再创建本地任务"
+            disabled={streaming || !text.trim()}
+            onClick={() => onExtractActionItems(text.trim())}
+          >
+            <ListChecks size={12} />
+            <span>提取行动项</span>
+          </button>
+        )}
         <button
           type="button"
           className="agent-reply-copy-button"

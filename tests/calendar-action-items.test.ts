@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractCalendarActionItems } from "../src/shared/calendar-action-items";
+import {
+  extractActionItemsFromText,
+  extractCalendarActionItems,
+} from "../src/shared/calendar-action-items";
 
 const event = {
   id: "meeting-actions",
@@ -38,5 +41,29 @@ describe("calendar action-item extraction", () => {
     });
     expect(drafts.map((draft) => draft.title)).toEqual(["讨论范围", "检查接口"]);
     expect(extractCalendarActionItems({ ...event, description: "普通会议记录，没有待办" })).toEqual([]);
+  });
+
+  it("extracts explicit Agent research actions without creating tasks", () => {
+    const drafts = extractActionItemsFromText({
+      id: "agent-reply-1",
+      label: "Agent 研究回复",
+      text: "## 行动项\n- 验证来源\n- 整理对比表\n\n结论：先确认范围。",
+      plannedDate: "2026-08-21",
+    });
+    expect(drafts.map((draft) => draft.title)).toEqual(["验证来源", "整理对比表"]);
+    expect(drafts[0]).toMatchObject({
+      plannedDate: "2026-08-21",
+      notes: "来源：Agent 研究回复\n行动项：验证来源",
+    });
+  });
+
+  it("does not turn ordinary Agent prose into action items", () => {
+    expect(
+      extractActionItemsFromText({
+        id: "agent-reply-2",
+        label: "Agent 回复",
+        text: "## 观察\n- 这个方案成本更低\n- 用户体验更顺畅",
+      }),
+    ).toEqual([]);
   });
 });

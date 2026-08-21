@@ -8,6 +8,13 @@ export interface CalendarActionItemDraft {
   plannedDate: string;
 }
 
+export interface TextActionItemSource {
+  id: string;
+  label: string;
+  text: string;
+  plannedDate?: string;
+}
+
 const MAX_ITEMS = 8;
 const MAX_TITLE_CHARS = 160;
 const BULLET_PATTERN = /^\s*(?:[-*•▪◦]|☐|☑|\[[ xX]\]|\d+[.)])\s+/u;
@@ -28,6 +35,57 @@ function normalizeCandidate(value: string): string {
     .trim()
     .slice(0, MAX_TITLE_CHARS)
     .trim();
+}
+
+function extractCandidateValues(description: string): string[] {
+  const lines = description.split("\n");
+  const hasExplicitCue = /(?:行动项|待办|下一步|action\s*item|todo|to-do|next\s*step)/iu.test(description);
+  const candidates: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const prefixed = PREFIX_PATTERN.exec(line);
+    const bullet = BULLET_PATTERN.test(line);
+    const withoutBullet = bullet ? line.replace(BULLET_PATTERN, "") : line;
+    const value = prefixed?.[0]
+      ? line.slice(prefixed[0].length)
+      : bullet
+        ? withoutBullet
+        : "";
+    if (!value) continue;
+    // Once a description explicitly declares an action-item section, its
+    // bullets are trusted. Without that cue, require a checklist marker or a
+    // recognisable action verb to avoid turning every agenda bullet into work.
+    if (!prefixed && !hasExplicitCue && !/^(?:☐|☑|\[[ xX]\])/u.test(line) && !ACTION_VERB_PATTERN.test(value)) {
+      continue;
+    }
+    candidates.push(...splitCandidate(value));
+  }
+  return candidates;
+}
+
+function buildActionItemDrafts(
+  candidates: readonly string[],
+  source: TextActionItemSource,
+  notesFor: (title: string) => string,
+): CalendarActionItemDraft[] {
+  const seen = new Set<string>();
+  const drafts: CalendarActionItemDraft[] = [];
+  for (const candidate of candidates) {
+    const title = normalizeCandidate(candidate);
+    const key = title.toLocaleLowerCase();
+    if (!title || seen.has(key)) continue;
+    seen.add(key);
+    drafts.push({
+      id: `${source.id}-action-${drafts.length + 1}`,
+      title,
+      notes: notesFor(title),
+      plannedDate: source.plannedDate ?? "",
+    });
+    if (drafts.length >= MAX_ITEMS) break;
+  }
+  return drafts;
 }
 
 function localDateForEvent(event: CalendarEvent, fallbackDate?: string): string {
@@ -58,47 +116,29 @@ export function extractCalendarActionItems(
 ): CalendarActionItemDraft[] {
   const description = event.description?.replace(/\r\n?/gu, "\n").trim();
   if (!description) return [];
-  const lines = description.split("\n");
-  const hasExplicitCue = /(?:行动项|待办|下一步|action\s*item|todo|to-do|next\s*step)/iu.test(description);
-  const candidates: string[] = [];
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const prefixed = PREFIX_PATTERN.exec(line);
-    const bullet = BULLET_PATTERN.test(line);
-    const withoutBullet = bullet ? line.replace(BULLET_PATTERN, "") : line;
-    const value = prefixed?.[0]
-      ? line.slice(prefixed[0].length)
-      : bullet
-        ? withoutBullet
-        : "";
-    if (!value) continue;
-    // Once a description explicitly declares an action-item section, its
-    // bullets are trusted. Without that cue, require a checklist marker or a
-    // recognisable action verb to avoid turning every agenda bullet into work.
-    if (!prefixed && !hasExplicitCue && !/^(?:☐|☑|\[[ xX]\])/u.test(line) && !ACTION_VERB_PATTERN.test(value)) {
-      continue;
-    }
-    candidates.push(...splitCandidate(value));
-  }
-
   const plannedDate = localDateForEvent(event, fallbackDate);
   const context = buildCalendarFollowUpDraft(event, plannedDate);
-  const seen = new Set<string>();
-  const drafts: CalendarActionItemDraft[] = [];
-  for (const candidate of candidates) {
-    const title = normalizeCandidate(candidate);
-    const key = title.toLocaleLowerCase();
-    if (!title || seen.has(key)) continue;
-    seen.add(key);
-    drafts.push({
-      id: `${event.id}-action-${drafts.length + 1}`,
-      title,
-      notes: `会议：${event.summary.trim() || "未命名日历事件"}\n会议行动项：${title}\n${context.notes}`,
-      plannedDate,
-    });
-    if (drafts.length >= MAX_ITEMS) break;
-  }
-  return drafts;
+  return buildActionItemDrafts(
+    extractCandidateValues(description),
+    { id: event.id, label: event.summary, text: description, plannedDate },
+    (title) => `会议：${event.summary.trim() || "未命名日历事件"}\n会议行动项：${title}\n${context.notes}`,
+  );
+}
+
+/**
+ * Extract a conservative, local-only action-item preview from arbitrary text
+ * such as an Agent research reply. It shares the meeting parser's explicit
+ * cue rules and always returns editable drafts; it never creates a task.
+ */
+export function extractActionItemsFromText(
+  source: TextActionItemSource,
+): CalendarActionItemDraft[] {
+  const text = source.text.replace(/\r\n?/gu, "\n").trim();
+  if (!text) return [];
+  const label = source.label.trim() || "文本来源";
+  return buildActionItemDrafts(
+    extractCandidateValues(text),
+    { ...source, text, label },
+    (title) => `来源：${label}\n行动项：${title}`,
+  );
 }
