@@ -1478,6 +1478,11 @@ select {
 }
 
 .task-section-heading {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1486,6 +1491,23 @@ select {
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.01em;
+  text-align: left;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+
+.task-section-heading:hover,
+.task-section-heading:focus-visible {
+  color: var(--app-accent);
+}
+
+.task-section-heading svg {
+  flex: 0 0 auto;
+  transition: transform 150ms ease;
+}
+
+.task-section-heading svg.collapsed {
+  transform: rotate(-90deg);
 }
 
 .task-section-heading span:last-child {

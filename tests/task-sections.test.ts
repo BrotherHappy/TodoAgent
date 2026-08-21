@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { groupTasksBySection } from "../src/renderer/task-sections";
+import {
+  readTaskSectionCollapseState,
+  taskSectionGroupKey,
+  toggleTaskSectionCollapse,
+  writeTaskSectionCollapseState,
+} from "../src/renderer/task-section-state";
 import type { Task } from "../src/shared/models";
 
 const task = (id: string, sectionId?: string): Task =>
@@ -47,5 +53,48 @@ describe("local task section headings", () => {
     const groups = groupTasksBySection([task("a", "  ")]);
     expect(groups).toMatchObject([{ id: "__ungrouped__", tasks: [{ id: "a" }] }]);
     expect(groups[0]?.label).toBeUndefined();
+  });
+
+  it("keeps collapse state separate from task data and toggles it immutably", () => {
+    const groupKey = taskSectionGroupKey("open", "本周发布");
+    const initial = { "all:local": ["completed:旧"] };
+    const collapsed = toggleTaskSectionCollapse(
+      initial,
+      "all:local",
+      groupKey,
+      true,
+    );
+    expect(initial).toEqual({ "all:local": ["completed:旧"] });
+    expect(collapsed["all:local"]).toEqual(["completed:旧", groupKey]);
+    const expanded = toggleTaskSectionCollapse(
+      collapsed,
+      "all:local",
+      groupKey,
+      false,
+    );
+    expect(expanded["all:local"]).toEqual(["completed:旧"]);
+  });
+
+  it("round-trips valid collapse state and ignores malformed storage", () => {
+    const storage = new Map<string, string>();
+    const adapter: Storage = {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => void storage.set(key, value),
+      removeItem: (key) => void storage.delete(key),
+      clear: () => void storage.clear(),
+      key: (index) => [...storage.keys()][index] ?? null,
+      get length() {
+        return storage.size;
+      },
+    };
+    writeTaskSectionCollapseState(
+      { "all:local": ["open:本周发布", "open:本周发布", "  "] },
+      adapter,
+    );
+    expect(readTaskSectionCollapseState(adapter)).toEqual({
+      "all:local": ["open:本周发布"],
+    });
+    adapter.setItem("todoAgentTaskSectionCollapsed", "{bad json");
+    expect(readTaskSectionCollapseState(adapter)).toEqual({});
   });
 });

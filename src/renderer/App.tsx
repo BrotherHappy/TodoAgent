@@ -197,6 +197,13 @@ import {
 } from "./task-agent-context";
 import { groupTasksBySection } from "./task-sections";
 import {
+  readTaskSectionCollapseState,
+  taskSectionGroupKey,
+  toggleTaskSectionCollapse,
+  writeTaskSectionCollapseState,
+  type TaskSectionCollapseState,
+} from "./task-section-state";
+import {
   FocusEnvironmentSound,
   environmentSoundOptions,
 } from "./focus-environment-sound";
@@ -2014,6 +2021,8 @@ function TaskListPage({
   const [smartViewQuery, setSmartViewQuery] = useState("");
   const [smartViewQueryResult, setSmartViewQueryResult] =
     useState<SmartViewQueryResult>();
+  const [collapsedSectionGroups, setCollapsedSectionGroups] =
+    useState<TaskSectionCollapseState>(() => readTaskSectionCollapseState());
   // A sidebar destination represents a different collection, not a compound
   // search. Secondary filters belong to the current collection so they cannot
   // make the next page look empty while its sidebar count is non-zero.
@@ -2035,6 +2044,24 @@ function TaskListPage({
     setSmartViewQuery("");
     setSmartViewQueryResult(undefined);
   }, [navigationKey]);
+  useEffect(() => {
+    writeTaskSectionCollapseState(collapsedSectionGroups);
+  }, [collapsedSectionGroups]);
+  const sectionCollapseScope = `${route}:${sourceFilter ?? "all"}`;
+  const isSectionGroupCollapsed = (sectionId: string, groupId: string) =>
+    collapsedSectionGroups[sectionCollapseScope]?.includes(
+      taskSectionGroupKey(sectionId, groupId),
+    ) ?? false;
+  const toggleSectionGroup = (
+    sectionId: string,
+    groupId: string,
+    collapsed: boolean,
+  ) => {
+    const key = taskSectionGroupKey(sectionId, groupId);
+    setCollapsedSectionGroups((current) =>
+      toggleTaskSectionCollapse(current, sectionCollapseScope, key, collapsed),
+    );
+  };
   const applySmartView = (view: SmartViewDefinition) => {
     setPriorityFilter(view.priority);
     setFlaggedFilter(view.flagged === true);
@@ -2967,56 +2994,83 @@ function TaskListPage({
                 <span>{sectionTitles[section.id]}</span>
                 <span className="list-count">{section.tasks.length}</span>
               </div>
-              {groups.map((group) => (
-                <div className="task-section-group" key={`${section.id}-${group.id}`}>
-                  {group.label && (
-                    <div className="task-section-heading">
-                      <span>{group.label}</span>
-                      <span>{group.tasks.length}</span>
-                    </div>
-                  )}
-                  <div className="task-list">
-                    {group.tasks.map((task) => {
-                      const sectionIndex = section.tasks.findIndex(
-                        (candidate) => candidate.id === task.id,
-                      );
-                      return (
-                        <TaskRow
-                          key={task.id}
-                          task={task}
-                          selected={controller.selectedId === task.id}
-                          controller={controller}
-                          notify={notify}
-                          selectionMode={bulkMode}
-                          selectedForBulk={bulkSelection.has(task.id)}
-                          onToggleBulk={() => toggleBulkSelection(task.id)}
-                          interactionDisabled={bulkBusy}
-                          subtaskProgress={subtaskProgress.get(task.id)}
-                          onAskAgent={onAskAgent}
-                          moveUp={
-                            canReorder && sectionIndex > 0
-                              ? () =>
-                                  void moveTodayTask(
-                                    task.id,
-                                    section.tasks[sectionIndex - 1].id,
-                                  )
-                              : undefined
-                          }
-                          moveDown={
-                            canReorder && sectionIndex < section.tasks.length - 1
-                              ? () =>
-                                  void moveTodayTask(
-                                    task.id,
-                                    section.tasks[sectionIndex + 1].id,
-                                  )
-                              : undefined
-                          }
+              {groups.map((group) => {
+                const groupCollapsed =
+                  Boolean(group.label) &&
+                  isSectionGroupCollapsed(section.id, group.id);
+                return (
+                  <div className="task-section-group" key={`${section.id}-${group.id}`}>
+                    {group.label && (
+                      <button
+                        type="button"
+                        className="task-section-heading"
+                        aria-expanded={!groupCollapsed}
+                        aria-controls={`task-section-${section.id}-${group.id}`}
+                        onClick={() =>
+                          toggleSectionGroup(
+                            section.id,
+                            group.id,
+                            !groupCollapsed,
+                          )
+                        }
+                        title={groupCollapsed ? "展开分组" : "收起分组"}
+                      >
+                        <ChevronDown
+                          size={14}
+                          aria-hidden="true"
+                          className={groupCollapsed ? "collapsed" : undefined}
                         />
-                      );
-                    })}
+                        <span>{group.label}</span>
+                        <span>{group.tasks.length}</span>
+                      </button>
+                    )}
+                    <div
+                      id={`task-section-${section.id}-${group.id}`}
+                      className="task-list"
+                      hidden={groupCollapsed}
+                    >
+                      {group.tasks.map((task) => {
+                        const sectionIndex = section.tasks.findIndex(
+                          (candidate) => candidate.id === task.id,
+                        );
+                        return (
+                          <TaskRow
+                            key={task.id}
+                            task={task}
+                            selected={controller.selectedId === task.id}
+                            controller={controller}
+                            notify={notify}
+                            selectionMode={bulkMode}
+                            selectedForBulk={bulkSelection.has(task.id)}
+                            onToggleBulk={() => toggleBulkSelection(task.id)}
+                            interactionDisabled={bulkBusy}
+                            subtaskProgress={subtaskProgress.get(task.id)}
+                            onAskAgent={onAskAgent}
+                            moveUp={
+                              canReorder && sectionIndex > 0
+                                ? () =>
+                                    void moveTodayTask(
+                                      task.id,
+                                      section.tasks[sectionIndex - 1].id,
+                                    )
+                                : undefined
+                            }
+                            moveDown={
+                              canReorder && sectionIndex < section.tasks.length - 1
+                                ? () =>
+                                    void moveTodayTask(
+                                      task.id,
+                                      section.tasks[sectionIndex + 1].id,
+                                    )
+                                : undefined
+                            }
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </section>
           );
         })
