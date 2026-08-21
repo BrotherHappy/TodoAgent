@@ -60,6 +60,7 @@ import {
   Sparkles,
   Square,
   Star,
+  Table2,
   Sun,
   Tag,
   Trash2,
@@ -354,6 +355,7 @@ import {
   useTaskTemplates,
 } from "./task-templates";
 import { TaskTemplateSaveSheet } from "./TaskTemplateSaveSheet";
+import { TaskTable, type TaskTableViewMode } from "./TaskTable";
 import { suggestDailyPlan } from "../shared/daily-planner";
 import { formatDailyScheduleTime } from "../shared/daily-schedule";
 import {
@@ -479,6 +481,17 @@ const floatingTabStorageKey = "todoAgentFloatingTab";
 const floatingPetOnlyStorageKey = "todoAgentFloatingPetOnly";
 const floatingSmartViewStorageKey = "todoAgentFloatingSmartView";
 const mainNavigationStateKey = "todoAgentMainNavigation";
+const taskListViewStorageKey = "todoAgentTaskListView";
+
+function readTaskListViewMode(): TaskTableViewMode {
+  try {
+    return localStorage.getItem(taskListViewStorageKey) === "table"
+      ? "table"
+      : "list";
+  } catch {
+    return "list";
+  }
+}
 
 function isPetTab(value: unknown): value is PetTab {
   return (
@@ -2058,6 +2071,9 @@ function TaskListPage({
   onOpenAll?: () => void;
 }) {
   const [filterOpen, setFilterOpen] = useState(false);
+  const [listViewMode, setListViewMode] = useState<TaskTableViewMode>(() =>
+    readTaskListViewMode(),
+  );
   const [inboxTriageOpen, setInboxTriageOpen] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<Set<string>>(
@@ -2148,6 +2164,13 @@ function TaskListPage({
   useEffect(() => {
     writeTaskSectionCollapseState(collapsedSectionGroups);
   }, [collapsedSectionGroups]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(taskListViewStorageKey, listViewMode);
+    } catch {
+      // A restricted storage area should not make the list unusable.
+    }
+  }, [listViewMode]);
   const sectionCollapseScope = `${route}:${sourceFilter ?? "all"}`;
   const isSectionGroupCollapsed = (sectionId: string, groupId: string) =>
     collapsedSectionGroups[sectionCollapseScope]?.includes(
@@ -2639,6 +2662,28 @@ function TaskListPage({
           </p>
         </div>
         <div className="page-actions">
+          <div className="task-view-toggle" role="group" aria-label="任务视图">
+            <button
+              type="button"
+              className={listViewMode === "list" ? "active" : ""}
+              aria-pressed={listViewMode === "list"}
+              onClick={() => setListViewMode("list")}
+              title="列表视图"
+            >
+              <LayoutList size={15} aria-hidden="true" />
+              列表
+            </button>
+            <button
+              type="button"
+              className={listViewMode === "table" ? "active" : ""}
+              aria-pressed={listViewMode === "table"}
+              onClick={() => setListViewMode("table")}
+              title="表格视图"
+            >
+              <Table2 size={15} aria-hidden="true" />
+              表格
+            </button>
+          </div>
           <button
             type="button"
             className={`soft-button bulk-mode-toggle ${bulkMode ? "active" : ""}`}
@@ -2958,6 +3003,11 @@ function TaskListPage({
             </button>
           ))}
         </div>
+      )}
+      {listViewMode === "table" && route === "today" && (
+        <p className="task-view-hint">
+          表格视图适合比较字段；切回列表视图即可继续拖动调整今天的顺序。
+        </p>
       )}
       {route === "today" && (
         <MorningBrief
@@ -3317,6 +3367,7 @@ function TaskListPage({
         visibleSections.map((section) => {
           const canReorder =
             route === "today" &&
+            listViewMode === "list" &&
             priorityFilter === "all" &&
             !flaggedFilter &&
             projectFilter === "all" &&
@@ -3365,10 +3416,25 @@ function TaskListPage({
                     )}
                     <div
                       id={`task-section-${section.id}-${group.id}`}
-                      className="task-list"
+                      className={listViewMode === "table" ? "task-table-section" : "task-list"}
                       hidden={groupCollapsed}
                     >
-                      {group.tasks.map((task) => {
+                      {listViewMode === "table" ? (
+                        <TaskTable
+                          tasks={group.tasks}
+                          selectedId={controller.selectedId}
+                          controller={controller}
+                          notify={notify}
+                          projects={projects}
+                          lists={lists}
+                          selectionMode={bulkMode}
+                          selectedIds={bulkSelection}
+                          onToggleBulk={toggleBulkSelection}
+                          interactionDisabled={bulkBusy || reorderBusy}
+                          subtaskProgress={subtaskProgress}
+                          onAskAgent={onAskAgent}
+                        />
+                      ) : group.tasks.map((task) => {
                         const sectionIndex = section.tasks.findIndex(
                           (candidate) => candidate.id === task.id,
                         );
