@@ -10138,7 +10138,7 @@ select {
   width: min(760px, 100%);
   max-height: min(690px, calc(100vh - 80px));
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--app-brand) 32%, var(--app-line-strong));
   border-radius: 24px;
@@ -10257,6 +10257,79 @@ select {
   color: inherit;
   font-size: 9px;
 }
+.global-search-save-bar {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 17px 9px;
+}
+.global-search-save-button {
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 58%, var(--app-surface-raised));
+  font-size: 11px;
+  cursor: pointer;
+}
+.global-search-save-button:hover {
+  border-color: color-mix(in srgb, var(--app-brand) 52%, var(--app-line));
+  background: var(--app-brand-soft);
+}
+.global-search-save-form {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 34%, var(--app-line));
+  border-radius: 11px;
+  padding: 3px 5px 3px 9px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 46%, var(--app-surface-raised));
+}
+.global-search-save-form input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  color: var(--app-text);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+}
+.global-search-save-form input::placeholder {
+  color: var(--app-text-faint);
+}
+.global-search-save-form button {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 7px;
+  color: var(--app-text-soft);
+  background: transparent;
+  cursor: pointer;
+}
+.global-search-save-form button[type="submit"] {
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.global-search-save-form button:hover {
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.global-search-save-form span[role="alert"] {
+  flex: 0 0 auto;
+  color: var(--app-danger, #c14f59);
+  font-size: 10px;
+}
 .global-search-results {
   min-height: 116px;
   max-height: min(460px, calc(100vh - 260px));
@@ -10360,6 +10433,81 @@ select {
 .global-search-start {
   min-height: 116px;
   padding: 19px 14px 22px;
+}
+.global-search-saved {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.global-search-saved-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.global-search-saved-list {
+  display: grid;
+  gap: 6px;
+}
+.global-search-saved-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 5px;
+}
+.global-search-saved-open {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--app-line);
+  border-radius: 11px;
+  padding: 7px 9px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-surface-raised) 82%, transparent);
+  text-align: left;
+  cursor: pointer;
+}
+.global-search-saved-open:hover {
+  border-color: color-mix(in srgb, var(--app-brand) 40%, var(--app-line));
+  background: var(--app-brand-soft);
+}
+.global-search-saved-open > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.global-search-saved-open strong,
+.global-search-saved-open small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.global-search-saved-open strong {
+  color: var(--app-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+.global-search-saved-open small {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.global-search-saved-remove {
+  width: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--app-line);
+  border-radius: 10px;
+  color: var(--app-text-faint);
+  background: color-mix(in srgb, var(--app-surface-raised) 82%, transparent);
+  cursor: pointer;
+}
+.global-search-saved-remove:hover {
+  border-color: color-mix(in srgb, var(--app-danger, #c14f59) 42%, var(--app-line));
+  color: var(--app-danger, #c14f59);
+  background: color-mix(in srgb, var(--app-danger, #c14f59) 8%, var(--app-surface-raised));
 }
 .global-search-recent {
   display: grid;

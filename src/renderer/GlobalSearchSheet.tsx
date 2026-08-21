@@ -1,6 +1,8 @@
 import {
   ArrowDown,
   ArrowUp,
+  Bookmark,
+  Check,
   ClipboardCheck,
   Command,
   CornerDownLeft,
@@ -9,6 +11,7 @@ import {
   MessageCircle,
   RefreshCw,
   Search,
+  Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -25,6 +28,13 @@ import {
   readGlobalSearchHistory,
   rememberGlobalSearch,
 } from "./global-search-history";
+import {
+  clearGlobalSearchPresets,
+  readGlobalSearchPresets,
+  removeGlobalSearchPreset,
+  saveGlobalSearchPreset,
+  type GlobalSearchPreset,
+} from "./global-search-presets";
 
 type SearchFilter = "all" | GlobalSearchResultKind;
 
@@ -77,6 +87,10 @@ export function GlobalSearchSheet({
   const [filter, setFilter] = useState<SearchFilter>("all");
   const [activeIndex, setActiveIndex] = useState(0);
   const [recentQueries, setRecentQueries] = useState<string[]>(() => readGlobalSearchHistory());
+  const [presets, setPresets] = useState<GlobalSearchPreset[]>(() => readGlobalSearchPresets());
+  const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [presetError, setPresetError] = useState<string>();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const searchInput: GlobalSearchInput = useMemo(
@@ -110,6 +124,31 @@ export function GlobalSearchSheet({
   const selectResult = (result: GlobalSearchResult): void => {
     setRecentQueries(rememberGlobalSearch(query));
     onSelect(result);
+  };
+
+  const submitPreset = (): void => {
+    const name = presetName.trim();
+    const normalizedQuery = query.trim();
+    if (!name) {
+      setPresetError("请给这个搜索起一个名字");
+      return;
+    }
+    if (!normalizedQuery) {
+      setPresetError("先输入搜索关键词，再保存快捷搜索");
+      return;
+    }
+    setPresets(saveGlobalSearchPreset(name, normalizedQuery));
+    setSavePresetOpen(false);
+    setPresetName("");
+    setPresetError(undefined);
+    inputRef.current?.focus();
+  };
+
+  const usePreset = (preset: GlobalSearchPreset): void => {
+    setQuery(preset.query);
+    setFilter("all");
+    setActiveIndex(0);
+    inputRef.current?.focus();
   };
 
   return (
@@ -207,6 +246,71 @@ export function GlobalSearchSheet({
             </button>
           ))}
         </nav>
+        {query.trim() ? (
+          <div className="global-search-save-bar">
+            {savePresetOpen ? (
+              <form
+                className="global-search-save-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submitPreset();
+                }}
+              >
+                <Bookmark size={14} aria-hidden="true" />
+                <input
+                  autoFocus
+                  value={presetName}
+                  onChange={(event) => {
+                    setPresetName(event.target.value);
+                    if (presetError) setPresetError(undefined);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSavePresetOpen(false);
+                      setPresetName("");
+                      setPresetError(undefined);
+                      inputRef.current?.focus();
+                    }
+                  }}
+                  placeholder="例如：今天要处理"
+                  aria-label="快捷搜索名称"
+                  maxLength={48}
+                />
+                <button type="submit" aria-label="保存快捷搜索" title="保存快捷搜索">
+                  <Check size={14} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="取消保存快捷搜索"
+                  title="取消"
+                  onClick={() => {
+                    setSavePresetOpen(false);
+                    setPresetName("");
+                    setPresetError(undefined);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  <X size={14} />
+                </button>
+                {presetError ? <span role="alert">{presetError}</span> : null}
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="global-search-save-button"
+                onClick={() => {
+                  setSavePresetOpen(true);
+                  setPresetName(query.trim());
+                  setPresetError(undefined);
+                }}
+              >
+                <Bookmark size={14} aria-hidden="true" />
+                保存为快捷搜索
+              </button>
+            )}
+          </div>
+        ) : null}
         <div
           id="global-search-results"
           className="global-search-results"
@@ -229,6 +333,51 @@ export function GlobalSearchSheet({
             </div>
           ) : !query.trim() ? (
             <div className="global-search-start">
+              {presets.length > 0 ? (
+                <div className="global-search-saved">
+                  <div className="global-search-saved-heading">
+                    <span>快捷搜索</span>
+                    <button
+                      type="button"
+                      className="global-search-clear-recent"
+                      onClick={() => {
+                        clearGlobalSearchPresets();
+                        setPresets([]);
+                        inputRef.current?.focus();
+                      }}
+                    >
+                      清空
+                    </button>
+                  </div>
+                  <div className="global-search-saved-list">
+                    {presets.map((preset) => (
+                      <div className="global-search-saved-item" key={preset.id}>
+                        <button
+                          type="button"
+                          className="global-search-saved-open"
+                          aria-label={`打开快捷搜索：${preset.name}`}
+                          onClick={() => usePreset(preset)}
+                        >
+                          <Bookmark size={14} aria-hidden="true" />
+                          <span>
+                            <strong>{preset.name}</strong>
+                            <small>{preset.query}</small>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="global-search-saved-remove"
+                          aria-label={`删除快捷搜索：${preset.name}`}
+                          title="删除快捷搜索"
+                          onClick={() => setPresets(removeGlobalSearchPreset(preset.id))}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {recentQueries.length > 0 ? (
                 <div className="global-search-recent">
                   <div className="global-search-recent-heading">
@@ -262,12 +411,12 @@ export function GlobalSearchSheet({
                     ))}
                   </div>
                 </div>
-              ) : (
+              ) : presets.length === 0 ? (
                 <div className="global-search-state">
                   <Command size={19} aria-hidden="true" />
                   <span>输入关键词，搜索所有本地内容</span>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : results.length === 0 ? (
             <div className="global-search-state">
@@ -308,7 +457,7 @@ export function GlobalSearchSheet({
           <span><ArrowUp size={13} /><ArrowDown size={13} /> 选择</span>
           <span><CornerDownLeft size={13} /> 打开</span>
           <span>⌘ ⇧ F 随时打开</span>
-          <span>最近搜索仅保存在本机</span>
+          <span>搜索记录和快捷项仅保存在本机</span>
         </footer>
       </section>
     </div>
