@@ -140,6 +140,7 @@ import {
   taskAutomationScheduleLabel,
   taskAutomationTriggerLabel,
   type TaskAutomationAction,
+  type TaskAutomationConditionBranch,
   type TaskAutomationRule,
   type TaskAutomationScheduleFrequency,
   type TaskAutomationTrigger,
@@ -9685,6 +9686,24 @@ function PetHomePage({
   );
 }
 
+type AutomationConditionDraft = {
+  source: "all" | "local" | "feishu";
+  project: string;
+  list: string;
+  section: string;
+  tag: string;
+  context: string;
+};
+
+const emptyAutomationConditionDraft = (): AutomationConditionDraft => ({
+  source: "all",
+  project: "",
+  list: "",
+  section: "",
+  tag: "",
+  context: "",
+});
+
 function SettingsPage({
   notify,
 }: {
@@ -9765,6 +9784,9 @@ function SettingsPage({
   const [automationConditionTag, setAutomationConditionTag] = useState("");
   const [automationConditionContext, setAutomationConditionContext] =
     useState("");
+  const [automationAlternativeConditions, setAutomationAlternativeConditions] =
+    useState<AutomationConditionDraft[]>([]);
+  const [automationAlternativesOpen, setAutomationAlternativesOpen] = useState(false);
   const automationProjectOptions = useMemo(() => {
     const options = new Map<string, string>();
     for (const project of automationProjectState.projects) {
@@ -9908,21 +9930,40 @@ function SettingsPage({
     () => new Map(automationListOptions),
     [automationListOptions],
   );
-  const describeAutomationCondition = (rule: TaskAutomationRule): string => {
+  const describeAutomationConditionBranch = (
+    branch: TaskAutomationConditionBranch,
+  ): string => {
     const labels: string[] = [];
-    if (rule.condition.source) {
-      labels.push(rule.condition.source === "local" ? "仅本地" : "仅飞书");
+    if (branch.source) labels.push(branch.source === "local" ? "仅本地" : "仅飞书");
+    if (branch.projectId) {
+      labels.push(`项目：${automationProjectNames.get(branch.projectId) ?? branch.projectId}`);
     }
-    if (rule.condition.projectId) {
-      labels.push(`项目：${automationProjectNames.get(rule.condition.projectId) ?? rule.condition.projectId}`);
+    if (branch.listId) {
+      labels.push(`清单：${automationListNames.get(branch.listId) ?? branch.listId}`);
     }
-    if (rule.condition.listId) {
-      labels.push(`清单：${automationListNames.get(rule.condition.listId) ?? rule.condition.listId}`);
-    }
-    if (rule.condition.sectionId) labels.push(`分组：${rule.condition.sectionId}`);
-    if (rule.condition.tag) labels.push(`标签：${rule.condition.tag}`);
-    if (rule.condition.context) labels.push(`情境：${rule.condition.context}`);
+    if (branch.sectionId) labels.push(`分组：${branch.sectionId}`);
+    if (branch.tag) labels.push(`标签：${branch.tag}`);
+    if (branch.context) labels.push(`情境：${branch.context}`);
     return labels.length ? labels.join(" · ") : "所有任务";
+  };
+  const describeAutomationCondition = (rule: TaskAutomationRule): string => {
+    const { anyOf, ...base } = rule.condition;
+    const baseLabel = describeAutomationConditionBranch(base);
+    if (!anyOf?.length) return baseLabel;
+    return `${baseLabel} · 任一：${anyOf.map(describeAutomationConditionBranch).join(" / ")}`;
+  };
+  const buildAutomationConditionBranch = (
+    draft: AutomationConditionDraft,
+  ): TaskAutomationConditionBranch | undefined => {
+    const branch: TaskAutomationConditionBranch = {
+      ...(draft.source === "all" ? {} : { source: draft.source }),
+      ...(draft.project.trim() ? { projectId: draft.project.trim() } : {}),
+      ...(draft.list.trim() ? { listId: draft.list.trim() } : {}),
+      ...(draft.section.trim() ? { sectionId: draft.section.trim() } : {}),
+      ...(draft.tag.trim() ? { tag: draft.tag.trim() } : {}),
+      ...(draft.context.trim() ? { context: draft.context.trim() } : {}),
+    };
+    return Object.keys(branch).length > 0 ? branch : undefined;
   };
   const addAutomation = async (): Promise<void> => {
     if (appSettings.automations.length >= 50) {
@@ -9939,6 +9980,13 @@ function SettingsPage({
       automationScheduleWeekdays.length === 0
     ) {
       notify("每周计划至少选择一天", "error");
+      return;
+    }
+    const alternativeConditions = automationAlternativeConditions
+      .map(buildAutomationConditionBranch)
+      .filter((branch): branch is TaskAutomationConditionBranch => branch !== undefined);
+    if (alternativeConditions.length !== automationAlternativeConditions.length) {
+      notify("请完整填写每个任一条件组，或移除空白条件组", "error");
       return;
     }
     try {
@@ -9964,6 +10012,7 @@ function SettingsPage({
           ...(automationConditionContext.trim()
             ? { context: automationConditionContext.trim() }
             : {}),
+          ...(alternativeConditions.length ? { anyOf: alternativeConditions } : {}),
         },
         action: buildAutomationAction(),
         ...(automationTrigger === "scheduled"
@@ -9999,6 +10048,8 @@ function SettingsPage({
       setAutomationConditionSection("");
       setAutomationConditionTag("");
       setAutomationConditionContext("");
+      setAutomationAlternativeConditions([]);
+      setAutomationAlternativesOpen(false);
     } catch (reason) {
       notify(
         reason instanceof Error && reason.message === "INVALID_TASK_AUTOMATION_RULE"
@@ -12006,7 +12057,7 @@ function SettingsPage({
               </div>
               <div className="settings-note-quiet">
                 <Filter size={16} aria-hidden="true" />
-                <span>条件组合：下面填写的条件会同时生效；留空表示不限制。规则仍只读取任务的本地私有字段。</span>
+                <span>条件组合：下面填写的条件会同时生效；可展开“任一条件组”表达 OR；留空表示不限制。规则仍只读取任务的本地私有字段。</span>
               </div>
               <div className="settings-row">
                 <div>
@@ -12084,6 +12135,168 @@ function SettingsPage({
                   onChange={(event) => setAutomationConditionContext(event.target.value)}
                 />
               </div>
+              <details
+                className="automation-alternative-conditions"
+                open={automationAlternativesOpen}
+                onToggle={(event) => setAutomationAlternativesOpen(event.currentTarget.open)}
+              >
+                <summary>
+                  任一条件组（可选）{automationAlternativeConditions.length ? ` · ${automationAlternativeConditions.length} 组` : ""}
+                </summary>
+                <div className="automation-alternative-content">
+                  <div className="settings-note-quiet">
+                    <GitBranch size={16} aria-hidden="true" />
+                    <span>顶部条件仍需同时满足；这里的每一组只要满足其中一组即可。适合“项目 A 或项目 B”这类规则，最多 5 组。</span>
+                  </div>
+                  {automationAlternativeConditions.map((draft, index) => (
+                    <div className="automation-alternative-card" key={`alternative-${index}`}>
+                      <div className="automation-alternative-card-heading">
+                        <strong>任一条件 {index + 1}</strong>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`删除任一条件${index + 1}`}
+                          onClick={() =>
+                            setAutomationAlternativeConditions((current) =>
+                              current.filter((_item, candidateIndex) => candidateIndex !== index),
+                            )
+                          }
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      <div className="automation-alternative-grid">
+                        <label className="automation-alternative-field">
+                          <span>来源</span>
+                          <select
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}来源`}
+                            value={draft.source}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index
+                                    ? { ...item, source: event.target.value as AutomationConditionDraft["source"] }
+                                    : item,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="all">所有来源</option>
+                            <option value="local">仅本地</option>
+                            <option value="feishu">仅飞书</option>
+                          </select>
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>项目</span>
+                          <select
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}项目`}
+                            value={draft.project}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, project: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="">所有项目</option>
+                            {automationProjectOptions.map(([id, name]) => (
+                              <option key={id} value={id}>{name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>清单</span>
+                          <select
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}清单`}
+                            value={draft.list}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, list: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="">所有清单</option>
+                            {automationListOptions.map(([id, name]) => (
+                              <option key={id} value={id}>{name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>分组</span>
+                          <input
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}分组`}
+                            list="automation-section-options"
+                            placeholder="例如：本周发布"
+                            value={draft.section}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, section: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>标签</span>
+                          <input
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}标签`}
+                            list="automation-tag-options"
+                            placeholder="例如：发布"
+                            value={draft.tag}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, tag: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>情境</span>
+                          <input
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}情境`}
+                            list="automation-context-options"
+                            placeholder="例如：办公室"
+                            value={draft.context}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, context: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="soft-button"
+                    disabled={automationAlternativeConditions.length >= 5}
+                    onClick={() => {
+                      setAutomationAlternativeConditions((current) => [
+                        ...current,
+                        emptyAutomationConditionDraft(),
+                      ]);
+                      setAutomationAlternativesOpen(true);
+                    }}
+                  >
+                    <Plus size={14} /> 添加任一条件组
+                  </button>
+                </div>
+              </details>
               <datalist id="automation-section-options">
                 {automationSectionOptions.map((value) => <option key={value} value={value} />)}
               </datalist>

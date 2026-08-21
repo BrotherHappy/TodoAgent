@@ -11452,6 +11452,57 @@ select {
 .automation-weekday-option input {
   accent-color: var(--app-brand);
 }
+.automation-alternative-conditions {
+  margin: 14px 0 8px;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-surface) 78%, transparent);
+}
+.automation-alternative-conditions > summary {
+  cursor: pointer;
+  padding: 11px 13px;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 650;
+  user-select: none;
+}
+.automation-alternative-conditions[open] > summary {
+  border-bottom: 1px solid var(--app-line);
+}
+.automation-alternative-content {
+  padding: 0 13px 13px;
+}
+.automation-alternative-card {
+  margin-top: 10px;
+  padding: 10px 12px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 20%, var(--app-line));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--app-brand-soft) 18%, transparent);
+}
+.automation-alternative-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.automation-alternative-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+.automation-alternative-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.automation-alternative-field .settings-input {
+  width: 100%;
+}
 .markdown-export-history-option {
   display: inline-flex;
   align-items: center;
@@ -12201,6 +12252,9 @@ select {
   .automation-weekday-picker {
     justify-content: flex-start;
     max-width: none;
+  }
+  .automation-alternative-grid {
+    grid-template-columns: 1fr;
   }
   .settings-pricing-grid {
     min-width: 0;

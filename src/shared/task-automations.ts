@@ -20,6 +20,7 @@ export const TASK_AUTOMATION_MAX_NAME_LENGTH = 80;
 export const TASK_AUTOMATION_MAX_VALUE_LENGTH = 80;
 export const TASK_AUTOMATION_MIN_DEADLINE_WINDOW_MINUTES = 5;
 export const TASK_AUTOMATION_MAX_DEADLINE_WINDOW_MINUTES = 10_080;
+export const TASK_AUTOMATION_MAX_ALTERNATIVE_CONDITIONS = 5;
 
 export type TaskAutomationTrigger =
   | "task-created"
@@ -40,13 +41,18 @@ export interface TaskAutomationSchedule {
   lastRunAt?: IsoDateTime;
 }
 
-export interface TaskAutomationCondition {
+export interface TaskAutomationConditionBranch {
   source?: TaskSourceType;
   projectId?: string;
   listId?: string;
   sectionId?: string;
   tag?: string;
   context?: string;
+}
+
+export interface TaskAutomationCondition extends TaskAutomationConditionBranch {
+  /** Optional OR branches; every top-level field still applies first. */
+  anyOf?: TaskAutomationConditionBranch[];
 }
 
 export type TaskAutomationAction =
@@ -202,10 +208,22 @@ function normalizeSchedule(
   };
 }
 
-function normalizeCondition(value: unknown): TaskAutomationCondition | undefined {
-  if (value === undefined) return {};
-  if (!isRecord(value)) return undefined;
-  const condition: TaskAutomationCondition = {};
+function normalizeConditionBranch(
+  value: Record<string, unknown>,
+  allowAnyOf = false,
+): TaskAutomationConditionBranch | undefined {
+  if (!allowAnyOf && value.anyOf !== undefined) return undefined;
+  const allowedKeys = new Set([
+    "source",
+    "projectId",
+    "listId",
+    "sectionId",
+    "tag",
+    "context",
+    ...(allowAnyOf ? ["anyOf"] : []),
+  ]);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) return undefined;
+  const condition: TaskAutomationConditionBranch = {};
   if (value.source !== undefined) {
     if (typeof value.source !== "string" || !sourceTypes.has(value.source as TaskSourceType)) {
       return undefined;
@@ -225,6 +243,33 @@ function normalizeCondition(value: unknown): TaskAutomationCondition | undefined
     condition[key] = item;
   }
   return condition;
+}
+
+function hasConditionFields(value: TaskAutomationConditionBranch): boolean {
+  return Object.values(value).some((item) => item !== undefined);
+}
+
+function normalizeCondition(value: unknown): TaskAutomationCondition | undefined {
+  if (value === undefined) return {};
+  if (!isRecord(value)) return undefined;
+  const base = normalizeConditionBranch(value, true);
+  if (base === undefined) return undefined;
+  if (value.anyOf === undefined) return base;
+  if (
+    !Array.isArray(value.anyOf) ||
+    value.anyOf.length === 0 ||
+    value.anyOf.length > TASK_AUTOMATION_MAX_ALTERNATIVE_CONDITIONS
+  ) {
+    return undefined;
+  }
+  const anyOf: TaskAutomationConditionBranch[] = [];
+  for (const item of value.anyOf) {
+    if (!isRecord(item)) return undefined;
+    const branch = normalizeConditionBranch(item);
+    if (branch === undefined || !hasConditionFields(branch)) return undefined;
+    anyOf.push(branch);
+  }
+  return { ...base, anyOf };
 }
 
 function normalizeAction(value: unknown): TaskAutomationAction | undefined {
@@ -356,14 +401,18 @@ export function matchesTaskAutomation(
   task: Task,
 ): boolean {
   if (!rule.enabled || task.deletedAt !== undefined) return false;
-  const { condition } = rule;
-  if (condition.source !== undefined && task.source.type !== condition.source) return false;
-  if (condition.projectId !== undefined && task.projectId !== condition.projectId) return false;
-  if (condition.listId !== undefined && task.listId !== condition.listId) return false;
-  if (condition.sectionId !== undefined && task.sectionId !== condition.sectionId) return false;
-  if (condition.tag !== undefined && !task.tags.some((tag) => tag.toLocaleLowerCase() === condition.tag!.toLocaleLowerCase())) return false;
-  if (condition.context !== undefined && !(task.contexts ?? []).some((context) => context.toLocaleLowerCase() === condition.context!.toLocaleLowerCase())) return false;
-  return true;
+  const matchesBranch = (condition: TaskAutomationConditionBranch): boolean => {
+    if (condition.source !== undefined && task.source.type !== condition.source) return false;
+    if (condition.projectId !== undefined && task.projectId !== condition.projectId) return false;
+    if (condition.listId !== undefined && task.listId !== condition.listId) return false;
+    if (condition.sectionId !== undefined && task.sectionId !== condition.sectionId) return false;
+    if (condition.tag !== undefined && !task.tags.some((tag) => tag.toLocaleLowerCase() === condition.tag!.toLocaleLowerCase())) return false;
+    if (condition.context !== undefined && !(task.contexts ?? []).some((context) => context.toLocaleLowerCase() === condition.context!.toLocaleLowerCase())) return false;
+    return true;
+  };
+  const { anyOf, ...base } = rule.condition;
+  if (!matchesBranch(base)) return false;
+  return anyOf === undefined || anyOf.some(matchesBranch);
 }
 
 /** Return the edge represented by a pair of snapshots. */

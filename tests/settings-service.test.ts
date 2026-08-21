@@ -39,16 +39,27 @@ describe('SettingsService', () => {
           deadlineWindowMinutes: 120,
           action: { kind: 'set-flagged', value: true },
         }),
+        createTaskAutomationRule({
+          id: 'rule-any',
+          name: '两个项目都加重点',
+          trigger: 'manual',
+          condition: { anyOf: [{ projectId: 'project-a' }, { projectId: 'project-b' }] },
+          action: { kind: 'set-flagged', value: true },
+        }),
         { id: 'malformed', enabled: true } as never,
       ],
     });
-    expect(saved.automations).toHaveLength(3);
+    expect(saved.automations).toHaveLength(4);
     expect(saved.automations[0]?.id).toBe('rule-flag');
     expect(saved.automations[1]?.schedule).toEqual({
       frequency: 'daily',
       time: '09:00',
     });
     expect(saved.automations[2]?.deadlineWindowMinutes).toBe(120);
+    expect(saved.automations[3]?.condition.anyOf).toEqual([
+      { projectId: 'project-a' },
+      { projectId: 'project-b' },
+    ]);
 
     const reloaded = new SettingsService(root, encryption);
     await reloaded.load();

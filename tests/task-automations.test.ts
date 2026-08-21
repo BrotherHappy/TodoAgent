@@ -71,6 +71,20 @@ describe("task automation rules", () => {
       { ...valid, trigger: "deadline-approaching", deadlineWindowMinutes: 60 },
       { ...valid, trigger: "task-created", deadlineWindowMinutes: 60 },
     ])).toHaveLength(1);
+    expect(normalizeTaskAutomationRules([
+      {
+        ...valid,
+        condition: { anyOf: [{ projectId: "project-a" }, { tag: "发布" }] },
+      },
+      { ...valid, id: "empty-any", condition: { anyOf: [{}] } },
+      { ...valid, id: "nested-any", condition: { anyOf: [{ anyOf: [{ tag: "发布" }] }] } },
+      { ...valid, id: "unknown-condition", condition: { tag: "发布", arbitrary: "value" } },
+      {
+        ...valid,
+        id: "too-many-any",
+        condition: { anyOf: Array.from({ length: 6 }, (_, index) => ({ tag: `tag-${index}` })) },
+      },
+    ])).toHaveLength(1);
   });
 
   it("matches source and private context conditions", () => {
@@ -96,6 +110,26 @@ describe("task automation rules", () => {
     expect(matchesTaskAutomation(rule({ condition: { source: "local" } }), target)).toBe(false);
     expect(matchesTaskAutomation(
       rule({ condition: { listId: "list-2" } }),
+      target,
+    )).toBe(false);
+    const alternative = rule({
+      condition: {
+        source: "feishu",
+        anyOf: [{ projectId: "project-1" }, { tag: "未命中" }],
+      },
+    });
+    expect(matchesTaskAutomation(alternative, target)).toBe(true);
+    expect(matchesTaskAutomation(
+      rule({
+        condition: {
+          source: "feishu",
+          anyOf: [{ projectId: "project-2" }, { tag: "未命中" }],
+        },
+      }),
+      target,
+    )).toBe(false);
+    expect(matchesTaskAutomation(
+      rule({ condition: { source: "local", anyOf: [{ projectId: "project-1" }] } }),
       target,
     )).toBe(false);
   });

@@ -34,7 +34,7 @@ const localAttachmentSchema = z
   })
   .strict();
 
-const taskAutomationConditionSchema = z
+const taskAutomationConditionBranchSchema = z
   .object({
     source: z.enum(["local", "feishu"]).optional(),
     projectId: idSchema.max(80).optional(),
@@ -42,6 +42,12 @@ const taskAutomationConditionSchema = z
     sectionId: idSchema.max(80).optional(),
     tag: z.string().trim().min(1).max(40).optional(),
     context: z.string().trim().min(1).max(40).optional(),
+  })
+  .strict();
+
+const taskAutomationConditionSchema = taskAutomationConditionBranchSchema
+  .extend({
+    anyOf: z.array(taskAutomationConditionBranchSchema).min(1).max(5).optional(),
   })
   .strict();
 
