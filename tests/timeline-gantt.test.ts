@@ -93,6 +93,25 @@ describe("buildGanttPlan", () => {
     expect(plan.unscheduledTasks.map((task) => task.id)).toEqual(["发布未排"]);
   });
 
+  it("supports a longer horizon without changing the Monday-first anchor", () => {
+    const plan = buildGanttPlan(
+      [
+        makeTask("月内任务", { plannedDate: "2026-09-12" }),
+        makeTask("窗外任务", { plannedDate: "2026-09-14" }),
+      ],
+      "2026-08-19",
+      "all",
+      "2026-08-19",
+      28,
+    );
+
+    expect(plan.windowDays).toBe(28);
+    expect(plan.startDate).toBe("2026-08-17");
+    expect(plan.endDate).toBe("2026-09-13");
+    expect(plan.days).toHaveLength(28);
+    expect(plan.groups.flatMap((group) => group.rows.map((row) => row.task.id))).toEqual(["月内任务"]);
+  });
+
   it("marks only the longest dependency chain as the critical route", () => {
     const plan = buildGanttPlan(
       [

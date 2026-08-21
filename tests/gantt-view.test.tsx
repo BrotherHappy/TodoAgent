@@ -40,7 +40,9 @@ describe("GanttView", () => {
         plan={plan}
         projectId="all"
         projectIds={["发布"]}
+        windowDays={14}
         onProjectChange={vi.fn()}
+        onWindowChange={vi.fn()}
         onSelect={onSelect}
       />,
     );
@@ -61,7 +63,9 @@ describe("GanttView", () => {
         plan={plan}
         projectId="all"
         projectIds={["发布"]}
+        windowDays={14}
         onProjectChange={onProjectChange}
+        onWindowChange={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -70,6 +74,28 @@ describe("GanttView", () => {
     expect(within(unplanned).getByText("还没排")).toBeVisible();
     fireEvent.change(screen.getByRole("combobox", { name: "甘特项目" }), { target: { value: "发布" } });
     expect(onProjectChange).toHaveBeenCalledWith("发布");
+  });
+
+  it("offers readable short, month-like and quarter-like horizons", () => {
+    const onWindowChange = vi.fn();
+    const plan = buildGanttPlan([makeTask("远期任务", { plannedDate: "2026-09-01" })], "2026-08-19", "all", "2026-08-19", 28);
+    render(
+      <GanttView
+        plan={plan}
+        projectId="all"
+        projectIds={[]}
+        windowDays={28}
+        onProjectChange={vi.fn()}
+        onWindowChange={onWindowChange}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(document.querySelector(".timeline-gantt-heading p")).toHaveTextContent("用 4 周 时间窗看见任务跨度");
+    const windowSelect = screen.getByRole("combobox", { name: "甘特时间窗" });
+    expect(windowSelect).toHaveValue("28");
+    fireEvent.change(windowSelect, { target: { value: "84" } });
+    expect(onWindowChange).toHaveBeenCalledWith(84);
   });
 
   it("explains the critical route without turning it into a second task state", () => {
@@ -82,7 +108,9 @@ describe("GanttView", () => {
         plan={plan}
         projectId="all"
         projectIds={["发布"]}
+        windowDays={14}
         onProjectChange={vi.fn()}
+        onWindowChange={vi.fn()}
         onSelect={onSelect}
       />,
     );

@@ -1,13 +1,20 @@
 import { AlertTriangle, CalendarDays, ChevronRight, Clock3, Layers3, Sparkles } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { Task } from "../shared/models";
-import type { GanttPlan } from "./timeline-gantt";
+import {
+  GANTT_WINDOW_OPTIONS,
+  ganttWindowLabel,
+  type GanttPlan,
+  type GanttWindowDays,
+} from "./timeline-gantt";
 
 interface GanttViewProps {
   plan: GanttPlan;
   projectId: string;
   projectIds: readonly string[];
+  windowDays: GanttWindowDays;
   onProjectChange: (projectId: string) => void;
+  onWindowChange: (windowDays: GanttWindowDays) => void;
   onSelect: (taskId: string) => void;
 }
 
@@ -34,26 +41,41 @@ export function GanttView({
   plan,
   projectId,
   projectIds,
+  windowDays,
   onProjectChange,
+  onWindowChange,
   onSelect,
 }: GanttViewProps) {
   const totalRows = plan.groups.reduce((total, group) => total + group.rows.length, 0);
   const projectOptions = projectIds.filter((value) => value.trim().length > 0);
   const taskById = new Map(plan.groups.flatMap((group) => group.rows.map((row) => [row.task.id, row.task] as const)));
+  const dayWidth = plan.windowDays >= 84 ? 34 : plan.windowDays >= 28 ? 42 : 52;
   return (
     <section className="timeline-gantt" aria-label="甘特视图">
       <div className="timeline-gantt-heading">
         <div>
           <div className="timeline-gantt-title"><ChartGanttMark /><h2>项目路线</h2></div>
-          <p>用两周时间窗看见任务跨度、依赖和完成进度；这里是只读投影，不会自动改期。</p>
+          <p>用 {ganttWindowLabel(plan.windowDays)} 时间窗看见任务跨度、依赖和完成进度；这里是只读投影，不会自动改期。</p>
         </div>
-        <label className="timeline-gantt-project-filter">
-          <span>当前项目</span>
-          <select aria-label="甘特项目" value={projectId} onChange={(event) => onProjectChange(event.target.value)}>
-            <option value="all">全部任务</option>
-            {projectOptions.map((value) => <option key={value} value={value}>{value}</option>)}
-          </select>
-        </label>
+        <div className="timeline-gantt-filters">
+          <label className="timeline-gantt-project-filter">
+            <span>当前项目</span>
+            <select aria-label="甘特项目" value={projectId} onChange={(event) => onProjectChange(event.target.value)}>
+              <option value="all">全部任务</option>
+              {projectOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="timeline-gantt-project-filter">
+            <span>时间窗</span>
+            <select
+              aria-label="甘特时间窗"
+              value={windowDays}
+              onChange={(event) => onWindowChange(Number(event.target.value) as GanttWindowDays)}
+            >
+              {GANTT_WINDOW_OPTIONS.map((value) => <option key={value} value={value}>{ganttWindowLabel(value)}</option>)}
+            </select>
+          </label>
+        </div>
       </div>
       <div className="timeline-gantt-meta" aria-label="甘特摘要">
         <span><CalendarDays size={13} /> {plan.startDate} — {plan.endDate}</span>
@@ -92,7 +114,10 @@ export function GanttView({
       )}
       {totalRows > 0 ? (
         <div className="timeline-gantt-scroll">
-          <div className="timeline-gantt-grid" style={{ "--gantt-days": String(plan.days.length) } as CSSProperties}>
+          <div
+            className="timeline-gantt-grid"
+            style={{ "--gantt-days": String(plan.days.length), "--gantt-day-width": `${dayWidth}px` } as CSSProperties}
+          >
             <div className="timeline-gantt-corner">项目 / 任务</div>
             <div className="timeline-gantt-day-head">
               {plan.days.map((day) => (

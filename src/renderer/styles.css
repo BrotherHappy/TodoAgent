@@ -2257,6 +2257,13 @@ select {
   gap: 14px;
   margin-bottom: 9px;
 }
+.timeline-gantt-filters {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .timeline-gantt-title {
   gap: 7px;
 }
@@ -2423,9 +2430,9 @@ select {
   background: color-mix(in srgb, var(--app-surface-raised) 60%, transparent);
 }
 .timeline-gantt-grid {
-  min-width: 980px;
+  min-width: calc(220px + var(--gantt-days) * var(--gantt-day-width, 52px));
   display: grid;
-  grid-template-columns: minmax(220px, 0.85fr) minmax(720px, 2.15fr);
+  grid-template-columns: minmax(220px, 0.85fr) minmax(calc(var(--gantt-days) * var(--gantt-day-width, 52px)), 2.15fr);
   align-items: stretch;
 }
 .timeline-gantt-corner,
@@ -2444,7 +2451,7 @@ select {
 }
 .timeline-gantt-day-head {
   display: grid;
-  grid-template-columns: repeat(var(--gantt-days), minmax(42px, 1fr));
+  grid-template-columns: repeat(var(--gantt-days), minmax(var(--gantt-day-width, 42px), 1fr));
 }
 .timeline-gantt-day {
   display: grid;
@@ -2552,7 +2559,7 @@ select {
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: repeat(var(--gantt-days), minmax(42px, 1fr));
+  grid-template-columns: repeat(var(--gantt-days), minmax(var(--gantt-day-width, 42px), 1fr));
   pointer-events: none;
 }
 .timeline-gantt-track-days i {

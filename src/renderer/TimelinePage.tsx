@@ -51,7 +51,12 @@ import {
   writeCalendarSourceColors,
 } from "./calendar-source-preferences";
 import { GanttView } from "./GanttView";
-import { buildGanttPlan } from "./timeline-gantt";
+import {
+  buildGanttPlan,
+  GANTT_WINDOW_DAYS,
+  normalizeGanttWindowDays,
+  type GanttWindowDays,
+} from "./timeline-gantt";
 
 type ToastKind = "success" | "error" | "info";
 
@@ -77,6 +82,15 @@ const priorityClass = (task: Task): string =>
     : task.priority === "medium"
       ? "is-medium"
       : "is-low";
+
+const readGanttWindowDays = (): GanttWindowDays => {
+  try {
+    const stored = Number(localStorage.getItem("todo-agent:gantt-window-days"));
+    return normalizeGanttWindowDays(stored);
+  } catch {
+    return GANTT_WINDOW_DAYS;
+  }
+};
 
 const taskDuration = (task: Task): number => {
   if (task.timeBlock) {
@@ -119,6 +133,7 @@ export function TimelinePage({
   const [date, setDate] = useState(() => localDateKey());
   const [viewMode, setViewMode] = useState<"day" | "week" | "board" | "gantt">("day");
   const [boardProjectId, setBoardProjectId] = useState("all");
+  const [ganttWindowDays, setGanttWindowDays] = useState<GanttWindowDays>(() => readGanttWindowDays());
   const [draggingId, setDraggingId] = useState<string>();
   const [movingId, setMovingId] = useState<string>();
   const [announcement, setAnnouncement] = useState("");
@@ -176,8 +191,8 @@ export function TimelinePage({
     [boardProjectId, tasks],
   );
   const ganttPlan = useMemo(
-    () => buildGanttPlan(tasks, date, boardProjectId),
-    [boardProjectId, date, tasks],
+    () => buildGanttPlan(tasks, date, boardProjectId, localDateKey(), ganttWindowDays),
+    [boardProjectId, date, ganttWindowDays, tasks],
   );
   const calendarSourceNames = useMemo(() => {
     const names = new Map<string, string>();
@@ -338,8 +353,18 @@ export function TimelinePage({
   };
 
   const shiftDate = (amount: number) => {
-    const step = viewMode === "week" ? 7 : viewMode === "gantt" ? 14 : 1;
+    const step = viewMode === "week" ? 7 : viewMode === "gantt" ? ganttWindowDays : 1;
     setDate((value) => addLocalDays(value, amount * step));
+  };
+
+  const changeGanttWindow = (value: GanttWindowDays) => {
+    const next = normalizeGanttWindowDays(value);
+    setGanttWindowDays(next);
+    try {
+      localStorage.setItem("todo-agent:gantt-window-days", String(next));
+    } catch {
+      // A read-only storage area should not make the timeline unusable.
+    }
   };
 
   const changeWeeklyCapacity = (value: string) => {
@@ -577,7 +602,9 @@ export function TimelinePage({
           plan={ganttPlan}
           projectId={boardProjectId}
           projectIds={projectIds}
+          windowDays={ganttWindowDays}
           onProjectChange={setBoardProjectId}
+          onWindowChange={changeGanttWindow}
           onSelect={onSelect}
         />
       ) : viewMode === "week" ? (

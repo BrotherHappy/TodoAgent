@@ -49,6 +49,7 @@ afterEach(() => {
   cleanup();
   writeHiddenCalendarSources([]);
   writeCalendarSourceColors({});
+  localStorage.removeItem("todo-agent:gantt-window-days");
 });
 
 describe("TimelinePage", () => {
@@ -310,6 +311,19 @@ describe("TimelinePage", () => {
     expect(screen.getByRole("region", { name: "甘特视图" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /甘特任务，/u }));
     expect(onSelect).toHaveBeenCalledWith(task.id);
+  });
+
+  it("lets the Gantt route switch horizon and remembers it locally", () => {
+    render(<TimelinePage {...props({ tasks: [makeTask("远期路线", { plannedDate: addLocalDays(date, 40) })] })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "甘特" }));
+    const windowSelect = screen.getByRole("combobox", { name: "甘特时间窗" });
+    expect(windowSelect).toHaveValue("14");
+    fireEvent.change(windowSelect, { target: { value: "84" } });
+
+    expect(windowSelect).toHaveValue("84");
+    expect(document.querySelector(".timeline-gantt-heading p")).toHaveTextContent("用 12 周 时间窗看见任务跨度");
+    expect(localStorage.getItem("todo-agent:gantt-window-days")).toBe("84");
   });
 
   it("shows estimated-versus-actual review and links back to a task", () => {

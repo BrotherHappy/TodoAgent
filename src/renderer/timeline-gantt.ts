@@ -1,8 +1,20 @@
 import type { Task } from "../shared/models";
 import { addLocalDays, localDateKey, weekDateKeys } from "./timeline-utils";
 
-/** The compact Gantt surface shows two Monday-first weeks at a time. */
+/** The compact Gantt surface starts on Monday and supports a few readable horizons. */
 export const GANTT_WINDOW_DAYS = 14;
+export const GANTT_WINDOW_OPTIONS = [14, 28, 84] as const;
+export type GanttWindowDays = (typeof GANTT_WINDOW_OPTIONS)[number];
+
+export const normalizeGanttWindowDays = (value: number): GanttWindowDays =>
+  GANTT_WINDOW_OPTIONS.includes(value as GanttWindowDays)
+    ? (value as GanttWindowDays)
+    : GANTT_WINDOW_DAYS;
+
+export const ganttWindowLabel = (windowDays: GanttWindowDays): string => {
+  const weeks = Math.round(windowDays / 7);
+  return `${weeks} 周`;
+};
 
 export interface GanttDay {
   date: string;
@@ -46,6 +58,7 @@ export interface GanttCriticalChain {
 export interface GanttPlan {
   startDate: string;
   endDate: string;
+  windowDays: GanttWindowDays;
   days: GanttDay[];
   groups: GanttGroup[];
   unscheduledTasks: Task[];
@@ -103,8 +116,8 @@ const sortTasks = (left: Task, right: Task): number =>
   left.title.localeCompare(right.title, "zh-CN") ||
   left.id.localeCompare(right.id);
 
-const buildDays = (startDate: string, today: string): GanttDay[] =>
-  Array.from({ length: GANTT_WINDOW_DAYS }, (_, index) => {
+const buildDays = (startDate: string, today: string, windowDays: GanttWindowDays): GanttDay[] =>
+  Array.from({ length: windowDays }, (_, index) => {
     const date = addLocalDays(startDate, index);
     const parsed = dateForKey(date);
     return {
@@ -225,10 +238,12 @@ export const buildGanttPlan = (
   anchorDate: string,
   projectId = "all",
   today = localDateKey(),
+  windowDays: GanttWindowDays = GANTT_WINDOW_DAYS,
 ): GanttPlan => {
+  const normalizedWindowDays = normalizeGanttWindowDays(windowDays);
   const startDate = weekDateKeys(anchorDate)[0] ?? anchorDate;
-  const endDate = addLocalDays(startDate, GANTT_WINDOW_DAYS - 1);
-  const days = buildDays(startDate, today);
+  const endDate = addLocalDays(startDate, normalizedWindowDays - 1);
+  const days = buildDays(startDate, today, normalizedWindowDays);
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const groupMap = new Map<string, GanttGroup>();
   const unscheduledTasks: Task[] = [];
@@ -312,6 +327,7 @@ export const buildGanttPlan = (
   return {
     startDate,
     endDate,
+    windowDays: normalizedWindowDays,
     days,
     groups,
     unscheduledTasks,
