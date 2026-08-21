@@ -4,6 +4,7 @@ import { TimelinePage, type TimelinePageProps } from "../src/renderer/TimelinePa
 import type { Task } from "../src/shared/models";
 import { addLocalDays, localDateKey, localIsoAt } from "../src/renderer/timeline-utils";
 import { writeHiddenCalendarSources } from "../src/renderer/calendar-view-preferences";
+import { calendarSourceColor, writeCalendarSourceColors } from "../src/renderer/calendar-source-preferences";
 
 const date = localDateKey();
 
@@ -47,6 +48,7 @@ function props(overrides: Partial<TimelinePageProps> = {}): TimelinePageProps {
 afterEach(() => {
   cleanup();
   writeHiddenCalendarSources([]);
+  writeCalendarSourceColors({});
 });
 
 describe("TimelinePage", () => {
@@ -134,6 +136,29 @@ describe("TimelinePage", () => {
     expect(within(agenda).getByText("个人安排")).toBeVisible();
     fireEvent.click(within(agenda).getByRole("button", { name: "全部" }));
     expect(within(agenda).getByText("工作评审")).toBeVisible();
+  });
+
+  it("lets each calendar source choose a local color used by its event cards", () => {
+    const event = {
+      id: "calendar-work",
+      summary: "工作评审",
+      startAt: localIsoAt(date, 10 * 60),
+      endAt: localIsoAt(date, 11 * 60),
+      allDay: false,
+      sourceName: "工作日历",
+    };
+    render(<TimelinePage {...props({ calendarEvents: [event] })} />);
+    const agenda = screen.getByRole("region", { name: "今日议程" });
+    const colorInput = within(agenda).getByLabelText("设置日历来源颜色：工作日历");
+    fireEvent.change(colorInput, { target: { value: "#123456" } });
+    expect(colorInput).toHaveValue("#123456");
+    expect(within(agenda).getByText("工作评审").closest(".timeline-calendar-event")).toHaveAttribute(
+      "data-calendar-source-color",
+      "#123456",
+    );
+    expect(within(agenda).getByRole("button", { name: "恢复日历来源默认颜色：工作日历" })).toBeVisible();
+    fireEvent.click(within(agenda).getByRole("button", { name: "恢复日历来源默认颜色：工作日历" }));
+    expect(colorInput).toHaveValue(calendarSourceColor("工作日历"));
   });
 
   it("can clear one calendar source with an undo action", () => {

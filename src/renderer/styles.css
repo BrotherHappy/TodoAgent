@@ -1929,6 +1929,16 @@ select {
   align-items: stretch;
   gap: 2px;
   max-width: 100%;
+  --timeline-calendar-source-color: var(--app-brand);
+}
+.timeline-calendar-source-swatch {
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--timeline-calendar-source-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--timeline-calendar-source-color) 18%, transparent);
 }
 .timeline-calendar-source-toggle,
 .timeline-calendar-source-clear {
@@ -1949,9 +1959,9 @@ select {
 }
 .timeline-calendar-source-toggle:hover,
 .timeline-calendar-source-toggle.is-active {
-  border-color: color-mix(in srgb, var(--app-brand) 45%, var(--app-line));
-  color: var(--app-brand-strong);
-  background: var(--app-brand-soft);
+  border-color: color-mix(in srgb, var(--timeline-calendar-source-color) 55%, var(--app-line));
+  color: color-mix(in srgb, var(--timeline-calendar-source-color) 82%, var(--app-text));
+  background: color-mix(in srgb, var(--timeline-calendar-source-color) 12%, var(--app-surface-raised));
 }
 .timeline-calendar-source-clear {
   width: 25px;
@@ -1967,8 +1977,59 @@ select {
   color: var(--app-danger, #c14f59);
   background: color-mix(in srgb, var(--app-danger, #c14f59) 8%, var(--app-surface-raised));
 }
+.timeline-calendar-source-color-picker {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  min-height: 25px;
+  border: 1px solid var(--app-line);
+  border-radius: 7px;
+  padding: 3px;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--app-surface-raised) 78%, transparent);
+}
+.timeline-calendar-source-color-picker:hover,
+.timeline-calendar-source-color-picker:focus-within {
+  border-color: color-mix(in srgb, var(--timeline-calendar-source-color) 55%, var(--app-line));
+}
+.timeline-calendar-source-color-picker input {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  background: transparent;
+}
+.timeline-calendar-source-color-picker input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.timeline-calendar-source-color-picker input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 50%;
+}
+.timeline-calendar-source-reset {
+  width: 25px;
+  min-height: 25px;
+  border: 1px solid var(--app-line);
+  border-radius: 7px;
+  padding: 0;
+  color: var(--app-text-faint);
+  background: color-mix(in srgb, var(--app-surface-raised) 78%, transparent);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.timeline-calendar-source-reset:hover,
+.timeline-calendar-source-reset:focus-visible {
+  border-color: color-mix(in srgb, var(--timeline-calendar-source-color) 55%, var(--app-line));
+  color: var(--timeline-calendar-source-color);
+}
 .timeline-calendar-source-toggle:focus-visible,
-.timeline-calendar-source-clear:focus-visible {
+.timeline-calendar-source-clear:focus-visible,
+.timeline-calendar-source-reset:focus-visible,
+.timeline-calendar-source-color-picker:focus-within {
   outline: 2px solid var(--app-brand);
   outline-offset: 2px;
 }
@@ -1983,7 +2044,7 @@ select {
   gap: 10px;
   min-height: 35px;
   border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
-  border-left: 3px solid var(--app-brand);
+  border-left: 3px solid var(--timeline-calendar-source-color, var(--app-brand));
   border-radius: 10px;
   padding: 6px 9px;
   background: color-mix(in srgb, var(--app-surface-raised) 76%, transparent);

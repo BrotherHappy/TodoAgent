@@ -1,5 +1,5 @@
 import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, ListChecks, Plus, Sparkles, Trash2, Upload } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent } from "react";
 import type { Task, UpdateTaskInput } from "../shared/models";
 import {
   calendarBusyBlocksForDate,
@@ -42,6 +42,14 @@ import {
   setCalendarSourceHidden,
   writeHiddenCalendarSources,
 } from "./calendar-view-preferences";
+import {
+  calendarSourceColor,
+  clearCalendarSourceColor,
+  hasCalendarSourceColorOverride,
+  readCalendarSourceColors,
+  setCalendarSourceColor,
+  writeCalendarSourceColors,
+} from "./calendar-source-preferences";
 
 type ToastKind = "success" | "error" | "info";
 
@@ -115,6 +123,7 @@ export function TimelinePage({
   const autoScrolledKeyRef = useRef<string | undefined>(undefined);
   const calendarInputRef = useRef<HTMLInputElement>(null);
   const [hiddenCalendarSources, setHiddenCalendarSources] = useState<string[]>(() => readHiddenCalendarSources());
+  const [calendarSourceColors, setCalendarSourceColors] = useState(() => readCalendarSourceColors());
   const [weeklyCapacityHours, setWeeklyCapacityHours] = useState(() => {
     try {
       const stored = Number(localStorage.getItem("todo-agent:weekly-capacity-hours"));
@@ -347,6 +356,18 @@ export function TimelinePage({
   const showAllCalendarSources = () => {
     writeHiddenCalendarSources([]);
     setHiddenCalendarSources([]);
+  };
+
+  const changeCalendarSourceColor = (source: string, color: string) => {
+    const next = setCalendarSourceColor(calendarSourceColors, source, color);
+    setCalendarSourceColors(next);
+    writeCalendarSourceColors(next);
+  };
+
+  const resetCalendarSourceColor = (source: string) => {
+    const next = clearCalendarSourceColor(calendarSourceColors, source);
+    setCalendarSourceColors(next);
+    writeCalendarSourceColors(next);
   };
 
   const clearCalendarSource = (source: string) => {
@@ -879,8 +900,13 @@ export function TimelinePage({
                   const visible = !hiddenCalendarSources.some(
                     (hidden) => hidden.toLocaleLowerCase() === source.toLocaleLowerCase(),
                   );
+                  const sourceColor = calendarSourceColor(source, calendarSourceColors);
+                  const sourceStyle = {
+                    "--timeline-calendar-source-color": sourceColor,
+                  } as CSSProperties;
                   return (
-                    <span className="timeline-calendar-source-chip" key={source}>
+                    <span className="timeline-calendar-source-chip" key={source} style={sourceStyle}>
+                      <span className="timeline-calendar-source-swatch" aria-hidden="true" />
                       <button
                         type="button"
                         className={`timeline-calendar-source-toggle ${visible ? "is-active" : ""}`}
@@ -889,6 +915,26 @@ export function TimelinePage({
                       >
                         {source}
                       </button>
+                      <label className="timeline-calendar-source-color-picker">
+                        <span className="sr-only">设置日历来源颜色：{source}</span>
+                        <input
+                          type="color"
+                          aria-label={`设置日历来源颜色：${source}`}
+                          value={sourceColor}
+                          onChange={(event) => changeCalendarSourceColor(source, event.target.value)}
+                        />
+                      </label>
+                      {hasCalendarSourceColorOverride(source, calendarSourceColors) && (
+                        <button
+                          type="button"
+                          className="timeline-calendar-source-reset"
+                          aria-label={`恢复日历来源默认颜色：${source}`}
+                          title="恢复默认颜色"
+                          onClick={() => resetCalendarSourceColor(source)}
+                        >
+                          ↺
+                        </button>
+                      )}
                       {onCalendarEventsChange && (
                         <button
                           type="button"
@@ -909,8 +955,17 @@ export function TimelinePage({
               <div className="timeline-calendar-event-list">
                 {dayCalendarBlocks.map((block) => {
                   const sourceEvent = dayCalendarEvents.find((event) => event.id === block.id);
+                  const sourceColor = calendarSourceColor(block.sourceName, calendarSourceColors);
+                  const sourceStyle = {
+                    "--timeline-calendar-source-color": sourceColor,
+                  } as CSSProperties;
                   return (
-                    <div className="timeline-calendar-event" key={block.id}>
+                    <div
+                      className="timeline-calendar-event"
+                      key={block.id}
+                      style={sourceStyle}
+                      data-calendar-source-color={sourceColor}
+                    >
                       <span className="timeline-calendar-event-time">
                         {block.startMinutes === 0 && block.endMinutes >= 1_440
                           ? "全天"
