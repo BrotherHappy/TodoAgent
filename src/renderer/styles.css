@@ -1010,6 +1010,58 @@ select {
   color: var(--app-text-soft);
   line-height: 1.65;
 }
+.sync-run-summary {
+  margin: 16px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 20%, var(--app-line));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--app-brand-soft) 34%, var(--app-glass-soft));
+}
+.sync-run-summary.is-warning {
+  border-color: color-mix(in srgb, var(--app-warning) 32%, var(--app-line));
+  background: color-mix(in srgb, var(--app-warning-soft) 62%, var(--app-glass-soft));
+}
+.sync-run-summary.is-error {
+  border-color: color-mix(in srgb, var(--app-danger) 28%, var(--app-line));
+  background: color-mix(in srgb, var(--app-danger-soft) 58%, var(--app-glass-soft));
+}
+.sync-run-summary-heading,
+.sync-run-summary-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+.sync-run-summary-heading {
+  justify-content: space-between;
+  gap: 12px;
+}
+.sync-run-summary-heading strong { font-size: 14px; }
+.sync-run-summary-heading span,
+.sync-run-summary-time {
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.sync-run-summary-metrics {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0 7px;
+}
+.sync-run-summary-metrics span {
+  padding: 4px 8px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  background: color-mix(in srgb, var(--app-surface) 58%, transparent);
+}
+.sync-run-summary-metrics b { color: var(--app-text); }
+.sync-run-summary p {
+  margin: 0;
+  color: var(--app-text-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
 .brief-calendar {
   margin-top: 12px;
   border: 1px solid color-mix(in srgb, var(--app-brand) 20%, var(--app-line));

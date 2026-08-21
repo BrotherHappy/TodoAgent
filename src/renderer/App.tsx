@@ -179,6 +179,7 @@ import type {
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { ResearchCardMarkdown } from "./ResearchCardMarkdown";
+import { summarizeFeishuSyncReport } from "./feishu-sync-summary";
 import {
   ResearchCardActionList,
   researchCardActionKey,
@@ -7765,6 +7766,7 @@ function SyncPage({
 }) {
   const [status, setStatus] = useState<FeishuStatusView>();
   const [conflicts, setConflicts] = useState<FeishuConflictView[]>([]);
+  const [lastReport, setLastReport] = useState<FeishuSyncReportView>();
   const [busy, setBusy] = useState(false);
   const refresh = useCallback(async () => {
     if (!window.desktopApi) return;
@@ -7815,6 +7817,7 @@ function SyncPage({
     setBusy(true);
     try {
       const report = await window.desktopApi.feishu.syncNow(forceFull);
+      setLastReport(report);
       if (report.issue) {
         notify(
           feishuSyncIssueCopy(report.issue),
@@ -7954,6 +7957,31 @@ function SyncPage({
           <small>上次同步：{formatDateTime(status.lastSyncAt)}</small>
         )}
       </section>
+      {lastReport && (() => {
+        const summary = summarizeFeishuSyncReport(lastReport);
+        return (
+          <section
+            className={`sync-run-summary is-${summary.tone}`}
+            aria-label="最近一次同步摘要"
+            aria-live="polite"
+          >
+            <div className="sync-run-summary-heading">
+              <div>
+                <strong>{summary.statusLabel}</strong>
+                <span>{summary.modeLabel}</span>
+              </div>
+              <span className="sync-run-summary-time">刚刚完成</span>
+            </div>
+            <div className="sync-run-summary-metrics">
+              <span><b>{lastReport.pushed}</b> 上传</span>
+              <span><b>{lastReport.pulled}</b> 拉取</span>
+              <span><b>{lastReport.deleted}</b> 删除</span>
+              <span><b>{lastReport.conflicts.length}</b> 冲突</span>
+            </div>
+            <p>{summary.detail}</p>
+          </section>
+        );
+      })()}
       {status?.lastError && (
         <div className="conflict-banner">
           <AlertTriangle size={19} />
