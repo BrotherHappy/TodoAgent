@@ -1,4 +1,5 @@
 import type {
+  IsoDateTime,
   LocalDate,
   Task,
   TaskId,
@@ -52,6 +53,13 @@ export interface TaskAutomationRule {
   action: TaskAutomationAction;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Canonical main-process input for a reviewed multi-task manual rule run. */
+export interface TaskAutomationApplyRequest {
+  ids: TaskId[];
+  rule: TaskAutomationRule;
+  baselines?: Array<{ id: TaskId; updatedAt: IsoDateTime }>;
 }
 
 export interface CreateTaskAutomationRuleInput {

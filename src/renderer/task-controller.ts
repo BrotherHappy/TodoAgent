@@ -13,6 +13,7 @@ import type {
   TaskSourceType,
   UpdateTaskInput,
 } from "../shared/models";
+import type { ApplyTaskAutomationRequest } from "../shared/desktop-api";
 
 const localDate = (date = new Date()): string => {
   const year = date.getFullYear();
@@ -164,6 +165,7 @@ export interface TaskController {
   reorderToday(taskIds: TaskId[]): Promise<string | undefined>;
   applyTodayPlan(request: ApplyTodayPlanRequest): Promise<string | undefined>;
   applyBulkTaskAction(request: BulkTaskRequest): Promise<string | undefined>;
+  applyTaskAutomation(request: ApplyTaskAutomationRequest): Promise<string | undefined>;
   undo(operationId?: string): Promise<void>;
 }
 
@@ -517,6 +519,19 @@ export function useTaskController(
     [api, refresh],
   );
 
+  const applyTaskAutomation = useCallback(
+    async (request: ApplyTaskAutomationRequest) => {
+      if (api) {
+        const operation = await api.applyTaskAutomation(request);
+        setLastOperationId(operation.id);
+        await refresh();
+        return operation.id;
+      }
+      return undefined;
+    },
+    [api, refresh],
+  );
+
   const toggleComplete = useCallback(
     async (task: Task, options?: { selectUpdated?: boolean }) => {
       const selectUpdated = options?.selectUpdated !== false;
@@ -672,6 +687,7 @@ export function useTaskController(
       reorderToday,
       applyTodayPlan,
       applyBulkTaskAction,
+      applyTaskAutomation,
       undo,
     }),
     [
@@ -691,6 +707,7 @@ export function useTaskController(
       reorderToday,
       applyTodayPlan,
       applyBulkTaskAction,
+      applyTaskAutomation,
       undo,
     ],
   );

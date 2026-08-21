@@ -1614,6 +1614,17 @@ select {
 .bulk-action-buttons {
   padding-top: 1px;
 }
+.bulk-automation-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 300px;
+  min-width: min(100%, 280px);
+}
+.bulk-automation-control .field-select {
+  min-width: 0;
+  flex: 1 1 220px;
+}
 .bulk-action-buttons .danger-button,
 .bulk-preview-actions .danger-button {
   border: 1px solid color-mix(in srgb, var(--app-danger) 36%, var(--app-line));

@@ -44,6 +44,12 @@ import {
   shiftTemporal,
   validateRecurrenceRule,
 } from "./recurrence";
+import {
+  matchesTaskAutomation,
+  normalizeTaskAutomationRule,
+  taskAutomationPatch,
+  type TaskAutomationApplyRequest,
+} from "../../src/shared/task-automations";
 
 export interface TaskServiceOptions {
   clock?: () => Date;
@@ -1585,6 +1591,85 @@ export class TaskService {
         }
       });
 
+      return deepClone(this.recordOperation(state, "bulk", changes, now));
+    });
+  }
+
+  /**
+   * Apply one canonical, manually-triggered private automation to a reviewed
+   * set of tasks in one transaction. Every selected task must still satisfy
+   * the rule and its baseline; otherwise the whole request fails closed before
+   * any task is changed. This preserves the same preview/undo semantics as
+   * other bulk actions while keeping provider-owned fields untouched.
+   */
+  async applyTaskAutomation(
+    request: TaskAutomationApplyRequest,
+  ): Promise<TaskOperation> {
+    if (!Array.isArray(request.ids) || request.ids.length === 0) {
+      throw new TaskValidationError("至少选择一项任务后再应用自动化。");
+    }
+    if (request.ids.length > 500) {
+      throw new TaskValidationError("一次自动化最多处理 500 项任务。");
+    }
+    if (new Set(request.ids).size !== request.ids.length) {
+      throw new TaskValidationError("自动化任务不能重复选择。");
+    }
+    const rule = normalizeTaskAutomationRule(request.rule);
+    if (!rule || rule.enabled !== true || rule.trigger !== "manual") {
+      throw new TaskValidationError("只能手动应用已启用的手动规则。");
+    }
+    const baselines = request.baselines ?? [];
+    if (new Set(baselines.map((baseline) => baseline.id)).size !== baselines.length) {
+      throw new TaskValidationError("自动化基线不能重复。");
+    }
+    if (
+      baselines.length > 0 &&
+      (baselines.length !== request.ids.length ||
+        request.ids.some(
+          (id) => !baselines.some((baseline) => baseline.id === id),
+        ))
+    ) {
+      throw new TaskValidationError("自动化基线必须覆盖全部选中任务。");
+    }
+
+    return this.store.transact((state) => {
+      const now = this.now();
+      const baselineById = new Map(
+        baselines.map((baseline) => [baseline.id, baseline]),
+      );
+      const targets = request.ids.map((id) => this.requireTask(state, id));
+      const changes: TaskSnapshotChange[] = [];
+
+      targets.forEach((task) => {
+        const baseline = baselineById.get(task.id);
+        if (baseline !== undefined && task.updatedAt !== baseline.updatedAt) {
+          throw new TaskStateError(
+            `任务“${task.title}”已发生变化，请重新预览自动化。`,
+          );
+        }
+        this.requireNotDeleted(task);
+        if (!matchesTaskAutomation(rule, task)) {
+          throw new TaskStateError(
+            `任务“${task.title}”不满足“${rule.name}”的条件。`,
+          );
+        }
+        const patch = taskAutomationPatch(rule, task);
+        if (!patch) {
+          throw new TaskStateError(
+            `任务“${task.title}”已经是“${rule.name}”的目标状态。`,
+          );
+        }
+        const before = deepClone(task);
+        const updated = this.applyPatch(task, patch, now, false);
+        state.tasks[task.id] = updated;
+        if (!deepEqual(before, updated)) {
+          changes.push(this.change(before, updated));
+        }
+      });
+
+      if (changes.length === 0) {
+        throw new TaskStateError("当前没有需要应用的自动化变化。");
+      }
       return deepClone(this.recordOperation(state, "bulk", changes, now));
     });
   }

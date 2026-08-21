@@ -99,6 +99,7 @@ import type {
   RecurrenceRule,
   TaskSourceType,
   TaskSyncStatus,
+  TaskId,
   TaskView,
   TaskViewSectionId,
 } from "../shared/models";
@@ -2010,6 +2011,11 @@ function TaskListPage({
     () => new Set(),
   );
   const [bulkPreview, setBulkPreview] = useState<BulkTaskAction>();
+  const [bulkAutomationRuleId, setBulkAutomationRuleId] = useState("");
+  const [bulkAutomationPreview, setBulkAutomationPreview] = useState<{
+    rule: TaskAutomationRule;
+    tasks: Task[];
+  }>();
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">(
@@ -2035,6 +2041,28 @@ function TaskListPage({
     useState<SmartViewQueryResult>();
   const [collapsedSectionGroups, setCollapsedSectionGroups] =
     useState<TaskSectionCollapseState>(() => readTaskSectionCollapseState());
+  const [manualAutomations, setManualAutomations] = useState<
+    readonly TaskAutomationRule[]
+  >([]);
+  useEffect(() => {
+    if (!window.desktopApi) {
+      setManualAutomations([]);
+      return undefined;
+    }
+    const apply = (settings: AppSettings): void => {
+      setManualAutomations(
+        settings.automations.filter(
+          (rule) => rule.enabled && rule.trigger === "manual",
+        ),
+      );
+    };
+    void window.desktopApi.settings.get().then(apply).catch(() => undefined);
+    return window.desktopApi.events.onSettingsChanged(apply);
+  }, []);
+  useEffect(() => {
+    if (manualAutomations.some((rule) => rule.id === bulkAutomationRuleId)) return;
+    setBulkAutomationRuleId(manualAutomations[0]?.id ?? "");
+  }, [bulkAutomationRuleId, manualAutomations]);
   // A sidebar destination represents a different collection, not a compound
   // search. Secondary filters belong to the current collection so they cannot
   // make the next page look empty while its sidebar count is non-zero.
@@ -2052,6 +2080,7 @@ function TaskListPage({
     setBulkMode(false);
     setBulkSelection(new Set());
     setBulkPreview(undefined);
+    setBulkAutomationPreview(undefined);
     setBulkEditOpen(false);
     setInboxTriageOpen(false);
     setSmartViewQuery("");
@@ -2225,6 +2254,20 @@ function TaskListPage({
     () => visibleTasks.filter((task) => bulkSelection.has(task.id)),
     [bulkSelection, visibleTasks],
   );
+  const selectedManualAutomation = manualAutomations.find(
+    (rule) => rule.id === bulkAutomationRuleId,
+  );
+  const selectedManualAutomationTasks = useMemo(
+    () =>
+      selectedManualAutomation
+        ? selectedBulkTasks.filter(
+            (task) =>
+              matchesTaskAutomation(selectedManualAutomation, task) &&
+              taskAutomationPatch(selectedManualAutomation, task) !== undefined,
+          )
+        : [],
+    [selectedBulkTasks, selectedManualAutomation],
+  );
   const allSelectedAreOpen =
     selectedBulkTasks.length > 0 &&
     selectedBulkTasks.every(
@@ -2286,7 +2329,19 @@ function TaskListPage({
   };
   const requestBulkPreview = (action: BulkTaskAction) => {
     if (selectedBulkTasks.length === 0) return;
+    setBulkAutomationPreview(undefined);
     setBulkPreview(action);
+  };
+  const requestBulkAutomationPreview = () => {
+    if (!selectedManualAutomation || selectedManualAutomationTasks.length === 0) {
+      notify("当前选择没有符合条件且需要变化的任务", "info");
+      return;
+    }
+    setBulkPreview(undefined);
+    setBulkAutomationPreview({
+      rule: selectedManualAutomation,
+      tasks: selectedManualAutomationTasks,
+    });
   };
   const runBulkAction = async () => {
     if (!bulkPreview || selectedBulkTasks.length === 0 || bulkBusy) return;
@@ -2320,21 +2375,58 @@ function TaskListPage({
       setBulkBusy(false);
     }
   };
+  const runBulkAutomation = async () => {
+    if (!bulkAutomationPreview || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      const operationId = await controller.applyTaskAutomation({
+        ids: bulkAutomationPreview.tasks.map((task) => task.id),
+        ruleId: bulkAutomationPreview.rule.id,
+        baselines: bulkAutomationPreview.tasks.map((task) => ({
+          id: task.id,
+          updatedAt: task.updatedAt,
+        })),
+      });
+      const count = bulkAutomationPreview.tasks.length;
+      const name = bulkAutomationPreview.rule.name;
+      setBulkAutomationPreview(undefined);
+      setBulkSelection(new Set());
+      setBulkMode(false);
+      notify(
+        `${count} 项任务已应用“${name}”`,
+        "success",
+        operationId
+          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          : undefined,
+      );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "批量自动化未完成",
+        "error",
+      );
+    } finally {
+      setBulkBusy(false);
+    }
+  };
   const toggleBulkMode = () => {
     setBulkMode((current) => {
       if (current) {
         setBulkSelection(new Set());
         setBulkPreview(undefined);
+        setBulkAutomationPreview(undefined);
         setBulkEditOpen(false);
       }
       return !current;
     });
   };
   const selectAllVisible = () => {
+    setBulkPreview(undefined);
+    setBulkAutomationPreview(undefined);
     setBulkSelection(new Set(visibleTasks.map((task) => task.id)));
   };
   const toggleBulkSelection = (taskId: string) => {
     setBulkPreview(undefined);
+    setBulkAutomationPreview(undefined);
     setBulkEditOpen(false);
     setBulkSelection((current) => {
       const next = new Set(current);
@@ -2774,7 +2866,11 @@ function TaskListPage({
               <button
                 type="button"
                 className="ghost-button"
-                onClick={() => setBulkSelection(new Set())}
+                onClick={() => {
+                  setBulkSelection(new Set());
+                  setBulkPreview(undefined);
+                  setBulkAutomationPreview(undefined);
+                }}
                 disabled={bulkBusy || selectedBulkTasks.length === 0}
               >
                 清除选择
@@ -2801,6 +2897,7 @@ function TaskListPage({
                 disabled={bulkBusy}
                 onClick={() => {
                   setBulkPreview(undefined);
+                  setBulkAutomationPreview(undefined);
                   setBulkEditOpen(true);
                 }}
               >
@@ -2859,6 +2956,42 @@ function TaskListPage({
                 <RotateCcw size={15} /> 恢复任务
               </button>
             )}
+            {selectedBulkTasks.length > 0 && manualAutomations.length > 0 && (
+              <div className="bulk-automation-control">
+                <select
+                  className="field-select"
+                  aria-label="选择手动自动化"
+                  value={bulkAutomationRuleId}
+                  disabled={bulkBusy}
+                  onChange={(event) => {
+                    setBulkAutomationRuleId(event.target.value);
+                    setBulkAutomationPreview(undefined);
+                  }}
+                >
+                  {manualAutomations.map((rule) => {
+                    const eligibleCount = selectedBulkTasks.filter(
+                      (task) =>
+                        matchesTaskAutomation(rule, task) &&
+                        taskAutomationPatch(rule, task) !== undefined,
+                    ).length;
+                    return (
+                      <option value={rule.id} key={rule.id}>
+                        {rule.name} · {eligibleCount} 项可应用
+                      </option>
+                    );
+                  })}
+                </select>
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={bulkBusy || selectedManualAutomationTasks.length === 0}
+                  onClick={requestBulkAutomationPreview}
+                  title="只会应用到满足条件且仍有变化的任务"
+                >
+                  <WandSparkles size={15} /> 预览自动化
+                </button>
+              </div>
+            )}
           </div>
           {bulkPreview && (
             <div className="bulk-preview" role="dialog" aria-label="批量操作预览">
@@ -2903,6 +3036,42 @@ function TaskListPage({
                   onClick={() => void runBulkAction()}
                 >
                   {bulkBusy ? "正在处理…" : "确认执行"}
+                </button>
+              </div>
+            </div>
+          )}
+          {bulkAutomationPreview && (
+            <div className="bulk-preview" role="dialog" aria-label="批量自动化预览">
+              <div>
+                <strong>
+                  将对 {bulkAutomationPreview.tasks.length} 项任务应用“{bulkAutomationPreview.rule.name}”
+                </strong>
+                <p>
+                  动作：{taskAutomationActionLabel(bulkAutomationPreview.rule.action)}。这会作为一次本地操作保存，可整体撤销。
+                </p>
+                <small>
+                  目标：{bulkAutomationPreview.tasks.slice(0, 3).map((task) => task.title).join("、")}
+                  {bulkAutomationPreview.tasks.length > 3
+                    ? ` 等 ${bulkAutomationPreview.tasks.length} 项`
+                    : ""}
+                </small>
+              </div>
+              <div className="bulk-preview-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={bulkBusy}
+                  onClick={() => setBulkAutomationPreview(undefined)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={bulkBusy}
+                  onClick={() => void runBulkAutomation()}
+                >
+                  {bulkBusy ? "正在处理…" : "确认应用"}
                 </button>
               </div>
             </div>

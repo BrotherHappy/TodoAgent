@@ -78,6 +78,8 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskApplyTodayPlan, request),
     applyBulkTaskAction: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskApplyBulkAction, request),
+    applyTaskAutomation: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskApplyAutomation, request),
     moveToTrash: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskTrash, id),
     restore: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskRestore, id),
     purge: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskPurge, id),

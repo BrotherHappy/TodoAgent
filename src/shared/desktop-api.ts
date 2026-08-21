@@ -77,6 +77,14 @@ export interface UpdateTaskRequest {
   recurrenceScope?: RecurrenceEditScope;
 }
 
+/** Renderer-facing request for a reviewed manual automation run. The main
+ * process resolves `ruleId` from canonical settings before applying it. */
+export interface ApplyTaskAutomationRequest {
+  ids: TaskId[];
+  ruleId: string;
+  baselines?: Array<{ id: TaskId; updatedAt: IsoDateTime }>;
+}
+
 export interface CompleteTaskRequest {
   id: TaskId;
   completedAt?: string;
@@ -113,6 +121,7 @@ export interface TaskDesktopApi {
   reorderToday(taskIds: TaskId[]): Promise<TaskOperation>;
   applyTodayPlan(request: ApplyTodayPlanRequest): Promise<TaskOperation>;
   applyBulkTaskAction(request: BulkTaskRequest): Promise<TaskOperation>;
+  applyTaskAutomation(request: ApplyTaskAutomationRequest): Promise<TaskOperation>;
   moveToTrash(id: TaskId): Promise<TaskMutationResult>;
   restore(id: TaskId): Promise<TaskMutationResult>;
   purge(id: TaskId): Promise<TaskOperation>;
@@ -797,6 +806,7 @@ export const DESKTOP_CHANNELS = {
   taskReorderToday: "tasks:reorder-today",
   taskApplyTodayPlan: "tasks:apply-today-plan",
   taskApplyBulkAction: "tasks:apply-bulk-action",
+  taskApplyAutomation: "tasks:apply-automation",
   taskTrash: "tasks:trash",
   taskRestore: "tasks:restore",
   taskPurge: "tasks:purge",

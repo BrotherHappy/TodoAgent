@@ -12,6 +12,7 @@ import {
   UndoConflictError,
 } from "../electron/services/task-service";
 import type { Task, TodayPlanBaseline } from "../src/shared/models";
+import { createTaskAutomationRule } from "../src/shared/task-automations";
 
 const testDirectories: string[] = [];
 
@@ -708,6 +709,84 @@ describe("TaskService mutations, recovery, and recurrence", () => {
       sync: { status: "synced" },
     });
     expect((await service.getTask(remote.task.id))?.flagged).toBeUndefined();
+  });
+
+  it("applies a manual automation to multiple tasks atomically and undoes once", async () => {
+    const { service } = await createFixture();
+    const local = await service.createTask({ title: "本地规则任务", tags: ["旧"] });
+    const remote = await service.createTask({
+      title: "飞书规则任务",
+      source: { type: "feishu", accountId: "primary", externalId: "remote-rule" },
+      sync: { status: "synced" },
+      tags: ["旧"],
+    });
+    const rule = createTaskAutomationRule(
+      {
+        id: "manual-add-tag",
+        name: "加上待整理标签",
+        trigger: "manual",
+        action: { kind: "add-tag", value: "待整理" },
+      },
+      "2026-08-09T10:00:00.000Z",
+    );
+    const operation = await service.applyTaskAutomation({
+      ids: [local.task.id, remote.task.id],
+      rule,
+      baselines: [
+        { id: local.task.id, updatedAt: local.task.updatedAt },
+        { id: remote.task.id, updatedAt: remote.task.updatedAt },
+      ],
+    });
+    expect(operation.kind).toBe("bulk");
+    expect(operation.changes).toHaveLength(2);
+    expect((await service.getTask(local.task.id))?.tags).toEqual(["旧", "待整理"]);
+    expect((await service.getTask(remote.task.id))?.tags).toEqual(["旧", "待整理"]);
+    expect((await service.getTask(remote.task.id))?.sync.status).toBe("synced");
+    await service.undo(operation.id);
+    expect((await service.getTask(local.task.id))?.tags).toEqual(["旧"]);
+    expect((await service.getTask(remote.task.id))?.tags).toEqual(["旧"]);
+  });
+
+  it("rejects a mixed or stale manual automation selection before any write", async () => {
+    const { service, setNow } = await createFixture();
+    const matching = await service.createTask({ title: "符合条件", source: { type: "local" } });
+    const remote = await service.createTask({
+      title: "不符合条件",
+      source: { type: "feishu", accountId: "primary", externalId: "remote-mismatch" },
+      sync: { status: "synced" },
+    });
+    const rule = createTaskAutomationRule(
+      {
+        id: "manual-local-only",
+        name: "只整理本地任务",
+        trigger: "manual",
+        condition: { source: "local" },
+        action: { kind: "set-flagged", value: true },
+      },
+      "2026-08-09T10:00:00.000Z",
+    );
+    const operationsBefore = await service.getOperations();
+    await expect(
+      service.applyTaskAutomation({
+        ids: [matching.task.id, remote.task.id],
+        rule,
+        baselines: [
+          { id: matching.task.id, updatedAt: matching.task.updatedAt },
+          { id: remote.task.id, updatedAt: remote.task.updatedAt },
+        ],
+      }),
+    ).rejects.toThrow("不满足");
+    expect((await service.getTask(matching.task.id))?.flagged).toBeUndefined();
+    expect((await service.getOperations()).length).toBe(operationsBefore.length);
+    setNow("2026-08-09T10:01:00.000Z");
+    await service.updateTask(matching.task.id, { notes: "已被其他操作修改" });
+    await expect(
+      service.applyTaskAutomation({
+        ids: [matching.task.id],
+        rule,
+        baselines: [{ id: matching.task.id, updatedAt: matching.task.updatedAt }],
+      }),
+    ).rejects.toThrow("已发生变化");
   });
 
   it("rejects malformed batch edit patches before touching tasks", async () => {

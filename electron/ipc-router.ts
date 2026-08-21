@@ -534,6 +534,54 @@ export function registerDesktopIpc(
       .parse(input);
     return changed(() => dependencies.tasks.applyBulkTaskAction(request));
   });
+  handle(DESKTOP_CHANNELS.taskApplyAutomation, async (_event, input) => {
+    const request = z
+      .object({
+        ids: z.array(idSchema).min(1).max(500),
+        ruleId: idSchema,
+        baselines: z
+          .array(
+            z
+              .object({ id: idSchema, updatedAt: z.string().datetime() })
+              .strict(),
+          )
+          .max(500)
+          .optional(),
+      })
+      .strict()
+      .refine((value) => new Set(value.ids).size === value.ids.length, {
+        message: "自动化任务不能重复选择。",
+        path: ["ids"],
+      })
+      .refine(
+        (value) =>
+          value.baselines === undefined ||
+          (value.baselines.length === value.ids.length &&
+            new Set(value.baselines.map((baseline) => baseline.id)).size ===
+              value.baselines.length &&
+            value.ids.every((id) =>
+              value.baselines!.some((baseline) => baseline.id === id),
+            )),
+        {
+          message: "自动化基线必须覆盖全部选中任务。",
+          path: ["baselines"],
+        },
+      )
+      .parse(input);
+    const rule = dependencies.settings
+      .get()
+      .automations.find((candidate) => candidate.id === request.ruleId);
+    if (!rule || !rule.enabled || rule.trigger !== "manual") {
+      throw new Error("MANUAL_AUTOMATION_UNAVAILABLE");
+    }
+    return changed(() =>
+      dependencies.tasks.applyTaskAutomation({
+        ids: request.ids,
+        rule,
+        baselines: request.baselines,
+      }),
+    );
+  });
   handle(DESKTOP_CHANNELS.taskTrash, (_event, input) =>
     changed(() => dependencies.tasks.moveToTrash(idSchema.parse(input))),
   );
