@@ -8925,6 +8925,36 @@ select {
   background: var(--app-brand-soft);
   white-space: pre-wrap;
 }
+.agent-markdown-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 22px;
+  margin: -2px 0 4px;
+}
+.agent-speak-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--app-text-faint);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 650;
+}
+.agent-speak-button:hover:not(:disabled),
+.agent-speak-button:focus-visible,
+.agent-speak-button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 64%, transparent);
+}
+.agent-speak-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
 .agent-markdown > :first-child {
   margin-top: 0;
 }
