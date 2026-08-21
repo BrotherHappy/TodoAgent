@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SettingsService, type EncryptionAdapter } from '../electron/services/settings-service';
+import { createTaskAutomationRule } from '../src/shared/task-automations';
 
 const encryption: EncryptionAdapter = {
   isAvailable: () => true,
@@ -12,6 +13,29 @@ const encryption: EncryptionAdapter = {
 };
 
 describe('SettingsService', () => {
+  it('persists and sanitizes local task automation rules', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-automations-'));
+    const service = new SettingsService(root, encryption);
+    await service.load();
+    const saved = await service.update({
+      automations: [
+        createTaskAutomationRule({
+          id: 'rule-flag',
+          name: '完成后加重点',
+          trigger: 'task-completed',
+          action: { kind: 'set-flagged', value: true },
+        }),
+        { id: 'malformed', enabled: true } as never,
+      ],
+    });
+    expect(saved.automations).toHaveLength(1);
+    expect(saved.automations[0]?.id).toBe('rule-flag');
+
+    const reloaded = new SettingsService(root, encryption);
+    await reloaded.load();
+    expect(reloaded.get().automations).toEqual(saved.automations);
+  });
+
   it('creates defaults and persists nested updates', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-settings-'));
     const service = new SettingsService(root, encryption);

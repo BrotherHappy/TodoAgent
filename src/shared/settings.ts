@@ -1,4 +1,5 @@
 import type { ModelPricing } from './agent-types';
+import type { TaskAutomationRule } from './task-automations';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type FloatingTopMode = 'always' | 'focus-only' | 'never';
@@ -218,6 +219,8 @@ export interface AppSettings {
   modelDataScope: ModelDataScope;
   agentCapabilities: AgentCapabilitySettings;
   persona: PersonaSettings;
+  /** Deterministic local-only task rules; never sent to Feishu or an Agent. */
+  automations: TaskAutomationRule[];
   permissionMode: AgentPermissionMode;
   onboardingComplete: boolean;
 }
@@ -357,6 +360,7 @@ export const defaultSettings: AppSettings = {
     reminderStrength: 'gentle',
     syncWithPet: true,
   },
+  automations: [],
   permissionMode: 'standard',
   onboardingComplete: false,
 };

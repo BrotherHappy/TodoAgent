@@ -34,6 +34,45 @@ const localAttachmentSchema = z
   })
   .strict();
 
+const taskAutomationConditionSchema = z
+  .object({
+    source: z.enum(["local", "feishu"]).optional(),
+    projectId: idSchema.max(80).optional(),
+    listId: idSchema.max(80).optional(),
+    sectionId: idSchema.max(80).optional(),
+    tag: z.string().trim().min(1).max(40).optional(),
+    context: z.string().trim().min(1).max(40).optional(),
+  })
+  .strict();
+
+const taskAutomationActionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("set-flagged"), value: z.boolean() }).strict(),
+  z.object({ kind: z.literal("set-project"), value: z.string().trim().min(1).max(80).nullable() }).strict(),
+  z.object({ kind: z.literal("set-list"), value: z.string().trim().min(1).max(80).nullable() }).strict(),
+  z.object({ kind: z.literal("set-section"), value: z.string().trim().min(1).max(80).nullable() }).strict(),
+  z.object({
+    kind: z.literal("set-defer-until"),
+    value: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/u), z.null()]),
+  }).strict(),
+  z.object({ kind: z.literal("add-tag"), value: z.string().trim().min(1).max(40) }).strict(),
+  z.object({ kind: z.literal("remove-tag"), value: z.string().trim().min(1).max(40) }).strict(),
+  z.object({ kind: z.literal("add-context"), value: z.string().trim().min(1).max(40) }).strict(),
+  z.object({ kind: z.literal("remove-context"), value: z.string().trim().min(1).max(40) }).strict(),
+]);
+
+const taskAutomationRuleSchema = z
+  .object({
+    id: idSchema.max(160),
+    name: z.string().trim().min(1).max(80),
+    enabled: z.boolean(),
+    trigger: z.enum(["task-created", "task-completed"]),
+    condition: taskAutomationConditionSchema,
+    action: taskAutomationActionSchema,
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+
 const settingsSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -107,6 +146,8 @@ const settingsSchema = z
           "cafe",
           "white-noise",
         ]),
+        shieldMode: z.enum(["off", "gentle", "pause"]).default("off"),
+        shieldApplications: z.array(z.string().trim().min(1).max(80)).max(12).default([]),
       })
       .strict(),
     planning: z
@@ -250,6 +291,7 @@ const settingsSchema = z
         syncWithPet: z.boolean().optional(),
       })
       .strict(),
+    automations: z.array(taskAutomationRuleSchema).max(50).default([]),
     permissionMode: z.enum(["read-only", "standard", "full-access"]),
     onboardingComplete: z.boolean(),
   })

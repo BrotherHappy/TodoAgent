@@ -17,6 +17,10 @@ import {
   FLOATING_HOVER_EXPAND_DELAY_MIN_MS,
   type AppSettings,
 } from '../../src/shared/settings';
+import {
+  normalizeTaskAutomationRules,
+  TASK_AUTOMATION_MAX_RULES,
+} from '../../src/shared/task-automations';
 
 export const PORTABLE_DATA_FORMAT = 'todo-agent-portable-data' as const;
 export type ExportRedaction = 'none' | 'private' | 'strict';
@@ -838,7 +842,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   const settings = expectRecord(value, path);
   assertOnlyKeys(settings, [
     'schemaVersion', 'theme', 'launchAtLogin', 'closeToTray', 'quickCaptureShortcut',
-    'notifications', 'floating', 'focus', 'planning', 'weather', 'pet', 'ai', 'feishu', 'modelDataScope', 'agentCapabilities', 'persona', 'permissionMode',
+    'notifications', 'floating', 'focus', 'planning', 'weather', 'pet', 'ai', 'feishu', 'modelDataScope', 'agentCapabilities', 'persona', 'automations', 'permissionMode',
     'onboardingComplete',
   ], path);
   if (settings.schemaVersion !== 1) throw new DataImportValidationError('Unsupported settings schema', `${path}.schemaVersion`);
@@ -1160,7 +1164,29 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   expectOptional(persona, 'syncWithPet', `${path}.persona`, expectBoolean);
   expectEnum(settings.permissionMode, ['read-only', 'standard', 'full-access'] as const, `${path}.permissionMode`);
   expectBoolean(settings.onboardingComplete, `${path}.onboardingComplete`);
+  const automationRules = settings.automations === undefined
+    ? []
+    : (() => {
+        if (!Array.isArray(settings.automations)) {
+          throw new DataImportValidationError('Expected an array', `${path}.automations`);
+        }
+        if (settings.automations.length > TASK_AUTOMATION_MAX_RULES) {
+          throw new DataImportValidationError(
+            `最多导入 ${TASK_AUTOMATION_MAX_RULES} 条任务自动化规则`,
+            `${path}.automations`,
+          );
+        }
+        const normalized = normalizeTaskAutomationRules(settings.automations);
+        if (normalized.length !== settings.automations.length) {
+          throw new DataImportValidationError(
+            '任务自动化规则包含无效或重复项',
+            `${path}.automations`,
+          );
+        }
+        return normalized;
+      })();
   const validated = clone(settings) as unknown as AppSettings;
+  validated.automations = automationRules;
   validated.notifications = {
     ...clone(defaultSettings.notifications),
     ...clone(notifications),

@@ -8,6 +8,7 @@ import {
   type AppSettings,
   type PublicCredentialState,
 } from '../../src/shared/settings';
+import { normalizeTaskAutomationRules } from '../../src/shared/task-automations';
 
 export interface EncryptionAdapter {
   isAvailable(): boolean;
@@ -146,6 +147,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       ...value?.agentCapabilities,
     },
     persona: { ...defaultSettings.persona, ...value?.persona },
+    automations: normalizeTaskAutomationRules(value?.automations),
     schemaVersion: 1,
   };
   // Early alpha builds defaulted to Relay even though no Relay service was
@@ -489,6 +491,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       reminderStrength: merged.persona.reminderStrength,
       syncWithPet: merged.persona.syncWithPet !== false,
     },
+    automations: normalizeTaskAutomationRules(merged.automations),
     permissionMode: merged.permissionMode,
     onboardingComplete: merged.onboardingComplete,
   };
@@ -528,6 +531,7 @@ export class SettingsService {
         raw.pet?.proactiveDailyLimit !== this.#settings.pet.proactiveDailyLimit ||
         raw.pet?.inputReactionsEnabled !== this.#settings.pet.inputReactionsEnabled ||
         raw.pet?.vacationMode !== this.#settings.pet.vacationMode ||
+        raw.automations === undefined ||
         raw.floating?.selectedTab !== this.#settings.floating.selectedTab ||
         raw.floating?.scalePercent !== this.#settings.floating.scalePercent ||
         raw.floating?.mousePassthrough !== this.#settings.floating.mousePassthrough ||

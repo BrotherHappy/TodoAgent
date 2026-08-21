@@ -130,6 +130,13 @@ import {
   type PetTab,
   type TaskUrgencyWeights,
 } from "../shared/settings";
+import {
+  createTaskAutomationRule,
+  taskAutomationActionLabel,
+  taskAutomationTriggerLabel,
+  type TaskAutomationAction,
+  type TaskAutomationTrigger,
+} from "../shared/task-automations";
 import { AGENT_CAPABILITY_DESCRIPTORS } from "../shared/agent-capabilities";
 import { withBossMode } from "../shared/boss-mode";
 import type {
@@ -7556,6 +7563,7 @@ type SettingsSection =
   | "general"
   | "floating"
   | "notifications"
+  | "automations"
   | "integrations"
   | "ai"
   | "permissions"
@@ -9471,6 +9479,15 @@ function SettingsPage({
   });
   const [markdownIncludesHistory, setMarkdownIncludesHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [automationName, setAutomationName] = useState("");
+  const [automationTrigger, setAutomationTrigger] =
+    useState<TaskAutomationTrigger>("task-created");
+  const [automationActionKind, setAutomationActionKind] =
+    useState<TaskAutomationAction["kind"]>("set-flagged");
+  const [automationActionValue, setAutomationActionValue] = useState("");
+  const [automationConditionSource, setAutomationConditionSource] =
+    useState<"all" | "local" | "feishu">("all");
+  const [automationConditionTag, setAutomationConditionTag] = useState("");
   const activeAiProvider =
     appSettings.ai.routing === "local-only"
       ? appSettings.ai.fallback
@@ -9529,6 +9546,84 @@ function SettingsPage({
   };
   const update = (patch: Partial<AppSettings>, message?: string) =>
     void persist({ ...appSettings, ...patch }, message);
+  const automationActionValueOrNull = (value: string): string | null =>
+    value.trim() || null;
+  const buildAutomationAction = (): TaskAutomationAction => {
+    switch (automationActionKind) {
+      case "set-flagged":
+        return { kind: "set-flagged", value: automationActionValue !== "false" };
+      case "set-project":
+      case "set-list":
+      case "set-section":
+        return {
+          kind: automationActionKind,
+          value: automationActionValueOrNull(automationActionValue),
+        } as TaskAutomationAction;
+      case "set-defer-until":
+        return {
+          kind: "set-defer-until",
+          value: automationActionValue.trim() || null,
+        };
+      case "add-tag":
+      case "remove-tag":
+      case "add-context":
+      case "remove-context":
+        return { kind: automationActionKind, value: automationActionValue.trim() };
+    }
+  };
+  const addAutomation = async (): Promise<void> => {
+    if (appSettings.automations.length >= 50) {
+      notify("最多保存 50 条任务自动化规则", "error");
+      return;
+    }
+    try {
+      const rule = createTaskAutomationRule({
+        name: automationName,
+        trigger: automationTrigger,
+        condition: {
+          ...(automationConditionSource === "all"
+            ? {}
+            : { source: automationConditionSource }),
+          ...(automationConditionTag.trim()
+            ? { tag: automationConditionTag.trim() }
+            : {}),
+        },
+        action: buildAutomationAction(),
+      });
+      const saved = await persist(
+        { ...appSettings, automations: [...appSettings.automations, rule] },
+        "自动化规则已保存",
+      );
+      if (!saved) return;
+      setAutomationName("");
+      setAutomationActionValue("");
+      setAutomationConditionTag("");
+    } catch (reason) {
+      notify(
+        reason instanceof Error && reason.message === "INVALID_TASK_AUTOMATION_RULE"
+          ? "请填写有效的规则名称和动作值"
+          : "自动化规则无效",
+        "error",
+      );
+    }
+  };
+  const toggleAutomation = (id: string, enabled: boolean): void => {
+    const automations = appSettings.automations.map((rule) =>
+      rule.id === id
+        ? { ...rule, enabled, updatedAt: new Date().toISOString() }
+        : rule,
+    );
+    void persist({ ...appSettings, automations }, enabled ? "自动化已启用" : "自动化已暂停");
+  };
+  const removeAutomation = (id: string): void => {
+    void persist(
+      {
+        ...appSettings,
+        automations: appSettings.automations.filter((rule) => rule.id !== id),
+      },
+      "自动化规则已删除",
+    );
+  };
   const updateModelPricing = (
     provider: "primary" | "fallback",
     field: keyof ModelPricing,
@@ -9982,6 +10077,7 @@ function SettingsPage({
     ["general", <Settings size={17} />, "通用"],
     ["floating", <PanelTop size={17} />, "Todo Pet"],
     ["notifications", <Bell size={17} />, "提醒"],
+    ["automations", <ListChecks size={17} />, "任务自动化"],
     ["integrations", <Cloud size={17} />, "飞书"],
     ["ai", <Sparkles size={17} />, "模型与 Agent"],
     ["permissions", <ShieldCheck size={17} />, "权限中心"],
@@ -11334,6 +11430,182 @@ function SettingsPage({
                   </button>
                 </div>
               )}
+          </section>
+        )}
+        {section === "automations" && (
+          <section className="settings-section">
+            <h1>任务自动化</h1>
+            <p>
+              把重复的小动作交给本机规则。最多保存 50 条；规则只改 Todo Agent 的私有字段，生成普通可撤销记录，不会把项目、标签或分组写回飞书。
+            </p>
+            <div className="settings-note-quiet">
+              <ListChecks size={16} aria-hidden="true" />
+              <span>触发器目前支持“新建任务”和“完成任务”。规则不执行脚本、不联网，也不会在后台替你创建任务。</span>
+            </div>
+            <div className="settings-subsection">
+              <div className="settings-subsection-heading">
+                <strong>新建规则</strong>
+                <span>{appSettings.automations.length}/50</span>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>规则名称</strong>
+                  <p>用一句话说明这条规则做什么</p>
+                </div>
+                <input
+                  className="settings-input"
+                  aria-label="自动化规则名称"
+                  placeholder="例如：新任务自动标记重点"
+                  value={automationName}
+                  onChange={(event) => setAutomationName(event.target.value)}
+                />
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>什么时候</strong>
+                  <p>只在事实发生的瞬间执行一次</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化触发器"
+                  value={automationTrigger}
+                  onChange={(event) => setAutomationTrigger(event.target.value as TaskAutomationTrigger)}
+                >
+                  <option value="task-created">任务新建时</option>
+                  <option value="task-completed">任务完成时</option>
+                </select>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>来源条件</strong>
+                  <p>可限制为本地任务或飞书任务</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化来源条件"
+                  value={automationConditionSource}
+                  onChange={(event) => setAutomationConditionSource(event.target.value as "all" | "local" | "feishu")}
+                >
+                  <option value="all">所有来源</option>
+                  <option value="local">仅本地</option>
+                  <option value="feishu">仅飞书</option>
+                </select>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>标签条件（可选）</strong>
+                  <p>只有带这个标签的任务会匹配</p>
+                </div>
+                <input
+                  className="settings-input"
+                  aria-label="自动化标签条件"
+                  placeholder="例如：发布"
+                  value={automationConditionTag}
+                  onChange={(event) => setAutomationConditionTag(event.target.value)}
+                />
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>执行动作</strong>
+                  <p>动作只作用于本地私有上下文</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化执行动作"
+                  value={automationActionKind}
+                  onChange={(event) => {
+                    setAutomationActionKind(event.target.value as TaskAutomationAction["kind"]);
+                    setAutomationActionValue("");
+                  }}
+                >
+                  <option value="set-flagged">设置重点标记</option>
+                  <option value="add-tag">添加标签</option>
+                  <option value="remove-tag">移除标签</option>
+                  <option value="add-context">添加情境</option>
+                  <option value="remove-context">移除情境</option>
+                  <option value="set-project">设置本地项目</option>
+                  <option value="set-list">设置本地清单</option>
+                  <option value="set-section">设置分组标题</option>
+                  <option value="set-defer-until">设置稍后日期</option>
+                </select>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>动作值</strong>
+                  <p>
+                    {automationActionKind === "set-flagged"
+                      ? "选择是否标记为重点"
+                      : automationActionKind === "set-defer-until"
+                        ? "留空表示清除稍后日期"
+                        : "留空表示清除该字段（标签/情境动作除外）"}
+                  </p>
+                </div>
+                {automationActionKind === "set-flagged" ? (
+                  <select
+                    className="settings-input"
+                    aria-label="自动化重点标记值"
+                    value={automationActionValue || "true"}
+                    onChange={(event) => setAutomationActionValue(event.target.value)}
+                  >
+                    <option value="true">标记为重点</option>
+                    <option value="false">取消重点标记</option>
+                  </select>
+                ) : (
+                  <input
+                    className="settings-input"
+                    type={automationActionKind === "set-defer-until" ? "date" : "text"}
+                    aria-label="自动化动作值"
+                    placeholder={automationActionKind === "set-defer-until" ? "选择日期" : "填写值"}
+                    value={automationActionValue}
+                    onChange={(event) => setAutomationActionValue(event.target.value)}
+                  />
+                )}
+              </div>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={saving || appSettings.automations.length >= 50}
+                  onClick={() => void addAutomation()}
+                >
+                  <Plus size={15} /> 保存规则
+                </button>
+                <span className="settings-hint">执行时会在任务历史里留下可撤销的普通更新。</span>
+              </div>
+            </div>
+            <div className="settings-subheading">已保存规则</div>
+            {appSettings.automations.length === 0 ? (
+              <div className="settings-note-quiet">还没有规则。可以先试试“任务新建时 → 设置重点标记”。</div>
+            ) : (
+              appSettings.automations.map((rule) => (
+                <div className="settings-row" key={rule.id}>
+                  <div>
+                    <strong>{rule.name}</strong>
+                    <p>
+                      {taskAutomationTriggerLabel(rule.trigger)} · {taskAutomationActionLabel(rule.action)}
+                      {rule.condition.source ? ` · ${rule.condition.source === "local" ? "仅本地" : "仅飞书"}` : ""}
+                      {rule.condition.tag ? ` · 标签：${rule.condition.tag}` : ""}
+                    </p>
+                  </div>
+                  <div className="settings-row-actions">
+                    <Switch
+                      checked={rule.enabled}
+                      onChange={(value) => toggleAutomation(rule.id, value)}
+                      label={`${rule.name}自动化`}
+                    />
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`删除${rule.name}`}
+                      disabled={saving}
+                      onClick={() => removeAutomation(rule.id)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </section>
         )}
         {section === "integrations" && (

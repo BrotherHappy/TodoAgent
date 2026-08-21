@@ -41,6 +41,7 @@ import { registerDesktopIpc } from "./ipc-router";
 import { LocalStore } from "./services/local-store";
 import { SettingsService } from "./services/settings-service";
 import { TaskService } from "./services/task-service";
+import { TaskAutomationService } from "./services/task-automation-service";
 import { TrayManager, type TrayStatus } from "./tray-manager";
 import { buildTrayTodaySummary } from "./tray-task-preview";
 import { WindowManager } from "./window-manager";
@@ -600,6 +601,15 @@ async function startApplication(): Promise<void> {
         };
   settingsService = new SettingsService(userDataPath, settingsEncryption);
   await settingsService.load();
+  // Keep one settled task snapshot for deterministic local automation edges.
+  // Rules are evaluated only after the settings file is loaded, so a malformed
+  // older settings file cannot execute anything during startup.
+  const taskAutomationService = new TaskAutomationService(
+    tasks,
+    () => settingsService?.get().automations ?? [],
+  );
+  let taskAutomationSnapshot = await tasks.listTasks({ includeDeleted: true });
+  let taskChangeQueue: Promise<void> = Promise.resolve();
   nativeTheme.themeSource = settingsService.get().theme;
   applyLoginItemSetting(settingsService.get().launchAtLogin);
 
@@ -879,7 +889,17 @@ async function startApplication(): Promise<void> {
         );
       });
   };
-  const handleTasksChanged = (): void => {
+  const processTasksChanged = async (): Promise<void> => {
+    const previous = taskAutomationSnapshot;
+    const current = await tasks.listTasks({ includeDeleted: true });
+    const automation = await taskAutomationService.applyTransition(previous, current);
+    if (automation.failures.length > 0) {
+      console.warn("Some local task automations could not be applied", automation.failures);
+    }
+    taskAutomationSnapshot = automation.applied > 0
+      ? await tasks.listTasks({ includeDeleted: true })
+      : current;
+
     windows?.broadcast(DESKTOP_CHANNELS.eventTasksChanged);
     tray?.refresh();
     refreshFloatingFocusMode();
@@ -903,6 +923,16 @@ async function startApplication(): Promise<void> {
           );
         });
     }
+  };
+  const handleTasksChanged = (): void => {
+    taskChangeQueue = taskChangeQueue
+      .then(processTasksChanged)
+      .catch((error: unknown) => {
+        console.error(
+          "Failed to process task change",
+          error instanceof Error ? error.message : error,
+        );
+      });
   };
   const agentWorkspace = path.join(userDataPath, "agent-workspace");
   await mkdir(agentWorkspace, { recursive: true });

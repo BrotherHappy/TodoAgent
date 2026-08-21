@@ -1,0 +1,120 @@
+import type { Task, TaskId, UpdateTaskInput } from "../../src/shared/models";
+import {
+  matchesTaskAutomation,
+  taskAutomationPatch,
+  taskAutomationTaskIds,
+  taskAutomationTrigger,
+  type TaskAutomationRule,
+} from "../../src/shared/task-automations";
+
+export interface TaskAutomationWriter {
+  updateTask(
+    id: TaskId,
+    patch: UpdateTaskInput,
+  ): Promise<{ task?: Task } | unknown>;
+}
+
+export interface TaskAutomationFailure {
+  taskId: TaskId;
+  ruleId: string;
+  error: string;
+}
+
+export interface TaskAutomationRunResult {
+  applied: number;
+  taskIds: TaskId[];
+  ruleIds: string[];
+  failures: TaskAutomationFailure[];
+}
+
+/**
+ * Applies the small local automation language after a task snapshot changes.
+ * The caller owns serialization and supplies the previous settled snapshot;
+ * this service itself performs no timers, network requests or recursive event
+ * dispatch. That keeps a Feishu pull deterministic and prevents a rule from
+ * becoming an unattended Agent workflow.
+ */
+export class TaskAutomationService {
+  readonly #writer: TaskAutomationWriter;
+  readonly #rules: () => readonly TaskAutomationRule[];
+
+  constructor(
+    writer: TaskAutomationWriter,
+    rules: () => readonly TaskAutomationRule[],
+  ) {
+    this.#writer = writer;
+    this.#rules = rules;
+  }
+
+  async applyTransition(
+    previous: readonly Task[],
+    current: readonly Task[],
+  ): Promise<TaskAutomationRunResult> {
+    const previousById = new Map(previous.map((task) => [task.id, task]));
+    const currentById = new Map(current.map((task) => [task.id, task]));
+    const result: TaskAutomationRunResult = {
+      applied: 0,
+      taskIds: [],
+      ruleIds: [],
+      failures: [],
+    };
+    const appliedTaskIds = new Set<TaskId>();
+    const appliedRuleIds = new Set<string>();
+    const rules = [...this.#rules()];
+
+    for (const id of taskAutomationTaskIds(previous, current)) {
+      const original = currentById.get(id);
+      const trigger = taskAutomationTrigger(previousById.get(id), original);
+      if (!original || !trigger) continue;
+      let working = original;
+      for (const rule of rules) {
+        if (!rule.enabled || rule.trigger !== trigger || !matchesTaskAutomation(rule, original)) {
+          continue;
+        }
+        const patch = taskAutomationPatch(rule, working);
+        if (!patch) continue;
+        try {
+          const mutation = await this.#writer.updateTask(id, patch);
+          const nextTask =
+            mutation !== null && typeof mutation === "object" &&
+            "task" in mutation &&
+            mutation.task !== undefined &&
+            typeof mutation.task === "object"
+              ? mutation.task as Task
+              : undefined;
+          working = nextTask ?? applyLocalPatch(working, patch);
+          result.applied += 1;
+          appliedTaskIds.add(id);
+          appliedRuleIds.add(rule.id);
+        } catch (error) {
+          result.failures.push({
+            taskId: id,
+            ruleId: rule.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          // A later action could depend on the failed write. Stop this task's
+          // chain but allow independent tasks/rules to continue.
+          break;
+        }
+      }
+    }
+    result.taskIds = [...appliedTaskIds];
+    result.ruleIds = [...appliedRuleIds];
+    return result;
+  }
+}
+
+/** Only used to evaluate a second rule in the same run; the real persisted
+ * task always comes from TaskService.updateTask. */
+function applyLocalPatch(task: Task, patch: UpdateTaskInput): Task {
+  const next = structuredClone(task);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    if (value === null) {
+      delete (next as unknown as Record<string, unknown>)[key];
+    } else {
+      (next as unknown as Record<string, unknown>)[key] = structuredClone(value);
+    }
+  }
+  return next;
+}
