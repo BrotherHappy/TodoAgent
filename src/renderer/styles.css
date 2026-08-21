@@ -3399,6 +3399,30 @@ select {
   color: var(--app-text-faint);
   font-size: 11px;
 }
+.dependency-chain-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.dependency-graph-toggle {
+  border: 1px solid color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--app-surface);
+  color: var(--app-brand-strong);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.dependency-graph-toggle:hover,
+.dependency-graph-toggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--app-brand) 48%, var(--app-line));
+  background: var(--app-brand-soft);
+}
+.dependency-graph-toggle:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 2px;
+}
 .dependency-chain-track {
   display: flex;
   align-items: stretch;
@@ -3463,6 +3487,122 @@ select {
   color: var(--app-warning-strong, var(--app-warning));
   font-size: 11px;
   line-height: 1.4;
+}
+.dependency-graph {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 13%, var(--app-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-surface) 88%, var(--app-brand-soft));
+}
+.dependency-graph-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.dependency-graph-lanes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 7px;
+}
+.dependency-graph-lane {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+.dependency-graph-lane h4 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--app-text-soft);
+  font-size: 10px;
+  font-weight: 600;
+}
+.dependency-graph-lane h4 small {
+  color: var(--app-text-faint);
+  font-size: 10px;
+  font-weight: 500;
+}
+.dependency-graph-node {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--app-line);
+  border-radius: 10px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  text-align: left;
+}
+button.dependency-graph-node {
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+button.dependency-graph-node:hover {
+  border-color: var(--app-brand);
+  background: var(--app-brand-soft);
+  transform: translateY(-1px);
+}
+button.dependency-graph-node:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 2px;
+}
+.dependency-graph-node.is-current {
+  border-color: color-mix(in srgb, var(--app-brand) 44%, var(--app-line));
+  background: var(--app-brand-soft);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--app-brand) 10%, transparent);
+}
+.dependency-graph-node.is-complete {
+  border-color: color-mix(in srgb, var(--app-success) 35%, var(--app-line));
+  background: color-mix(in srgb, var(--app-success-soft) 55%, var(--app-surface));
+}
+.dependency-graph-node.is-missing {
+  border-style: dashed;
+  color: var(--app-warning-strong, var(--app-warning));
+}
+.dependency-graph-node small {
+  color: var(--app-text-faint);
+  font-size: 9px;
+  font-weight: 600;
+}
+.dependency-graph-node span {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dependency-graph-arrow {
+  align-self: center;
+  color: var(--app-brand);
+  font-size: 18px;
+  font-weight: 600;
+}
+.dependency-graph-empty {
+  margin: 0;
+  padding: 8px 5px;
+  border: 1px dashed var(--app-line);
+  border-radius: 9px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+  text-align: center;
+}
+@media (max-width: 560px) {
+  .dependency-graph-lanes {
+    grid-template-columns: 1fr;
+  }
+  .dependency-graph-arrow {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
 }
 
 .detail-group {

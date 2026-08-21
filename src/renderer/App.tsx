@@ -239,7 +239,10 @@ import {
   CommandPalette,
   type CommandPaletteAction,
 } from "./CommandPalette";
-import { buildDependencyChain } from "./dependency-chain";
+import {
+  buildDependencyChain,
+  buildDependencyGraph,
+} from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
 import { CalendarActionItemsSheet } from "./CalendarActionItemsSheet";
 import { AgentActionItemsSheet } from "./AgentActionItemsSheet";
@@ -3419,6 +3422,7 @@ function TaskInspector({
       dirtyFieldsRef.current.delete(field);
   };
   const [showActions, setShowActions] = useState(false);
+  const [showDependencyGraph, setShowDependencyGraph] = useState(false);
   const [relatedTasks, setRelatedTasks] = useState<Task[]>([]);
   const [subtaskTitle, setSubtaskTitle] = useState("");
   const [pendingPatch, setPendingPatch] =
@@ -3641,6 +3645,9 @@ function TaskInspector({
       active = false;
     };
   }, [controller.tasks, task?.id]);
+  useEffect(() => {
+    setShowDependencyGraph(false);
+  }, [task?.id]);
   if (!task)
     return (
       <aside className="inspector inspector-empty" aria-label="任务详情">
@@ -4435,6 +4442,16 @@ function TaskInspector({
       "completed",
   ).length;
   const dependencyChain = buildDependencyChain(task, relatedTasks);
+  const dependencyGraph = buildDependencyGraph(task, relatedTasks);
+  const graphAncestors = dependencyGraph.nodes.filter(
+    (node) => node.kind === "ancestor" || node.kind === "missing",
+  );
+  const graphCurrent = dependencyGraph.nodes.filter(
+    (node) => node.kind === "current",
+  );
+  const graphDownstream = dependencyGraph.nodes.filter(
+    (node) => node.kind === "downstream",
+  );
   const pendingTemporalChange = Boolean(
     pendingPatch &&
       ["plannedDate", "startAt", "dueAt", "timeBlock", "reminders"].some(
@@ -4840,13 +4857,23 @@ function TaskInspector({
                   <GitBranch size={14} aria-hidden="true" />
                   执行关系
                 </span>
-                <small>
-                  {dependencyChain.ancestors.length > 0
-                    ? `先做 ${dependencyChain.ancestors.length} 项`
-                    : dependencyChain.downstream.length > 0
-                      ? `后续 ${dependencyChain.downstream.length} 项`
-                      : "需要检查"}
-                </small>
+                <div className="dependency-chain-heading-actions">
+                  <small>
+                    {dependencyChain.ancestors.length > 0
+                      ? `先做 ${dependencyChain.ancestors.length} 项`
+                      : dependencyChain.downstream.length > 0
+                        ? `后续 ${dependencyChain.downstream.length} 项`
+                        : "需要检查"}
+                  </small>
+                  <button
+                    type="button"
+                    className="dependency-graph-toggle"
+                    aria-expanded={showDependencyGraph}
+                    onClick={() => setShowDependencyGraph((value) => !value)}
+                  >
+                    {showDependencyGraph ? "收起关系图" : "查看关系图"}
+                  </button>
+                </div>
               </div>
               <div className="dependency-chain-track">
                 {dependencyChain.ancestors.map((item) => (
@@ -4878,6 +4905,68 @@ function TaskInspector({
                   </button>
                 ))}
               </div>
+              {showDependencyGraph && (
+                <div className="dependency-graph" aria-label="依赖关系图">
+                  <div className="dependency-graph-caption">
+                    <span>从左到右：先做 → 当前 → 解锁</span>
+                    <small>{dependencyGraph.edges.length} 条关系</small>
+                  </div>
+                  <div className="dependency-graph-lanes">
+                    <section className="dependency-graph-lane" aria-label="前置任务">
+                      <h4>先做 <small>{graphAncestors.length}</small></h4>
+                      {graphAncestors.length > 0 ? graphAncestors.map((node) =>
+                        node.kind === "missing" ? (
+                          <div
+                            className="dependency-graph-node is-missing"
+                            key={`graph-${node.id}`}
+                            role="status"
+                          >
+                            <small>缺失依赖</small>
+                            <span>{node.title}</span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`dependency-graph-node ${node.status === "completed" ? "is-complete" : ""}`}
+                            key={`graph-${node.id}`}
+                            onClick={() => controller.select(node.id)}
+                            title="打开前置任务"
+                          >
+                            <small>{node.depth > 1 ? `前置 · 第 ${node.depth} 层` : "前置"}</small>
+                            <span>{node.title}</span>
+                          </button>
+                        ),
+                      ) : <p className="dependency-graph-empty">没有可见前置</p>}
+                    </section>
+                    <span className="dependency-graph-arrow" aria-hidden="true">→</span>
+                    <section className="dependency-graph-lane" aria-label="当前任务">
+                      <h4>当前 <small>1</small></h4>
+                      {graphCurrent.map((node) => (
+                        <div className="dependency-graph-node is-current" key={`graph-${node.id}`}>
+                          <small>当前任务</small>
+                          <span>{node.title}</span>
+                        </div>
+                      ))}
+                    </section>
+                    <span className="dependency-graph-arrow" aria-hidden="true">→</span>
+                    <section className="dependency-graph-lane" aria-label="后续任务">
+                      <h4>解锁 <small>{graphDownstream.length}</small></h4>
+                      {graphDownstream.length > 0 ? graphDownstream.map((node) => (
+                        <button
+                          type="button"
+                          className={`dependency-graph-node ${node.status === "completed" ? "is-complete" : ""}`}
+                          key={`graph-${node.id}`}
+                          onClick={() => controller.select(node.id)}
+                          title="打开后续任务"
+                        >
+                          <small>{node.depth > 1 ? `后续 · 第 ${node.depth} 层` : "后续"}</small>
+                          <span>{node.title}</span>
+                        </button>
+                      )) : <p className="dependency-graph-empty">暂无后续任务</p>}
+                    </section>
+                  </div>
+                </div>
+              )}
               {dependencyChain.missingDependencyIds.length > 0 && (
                 <p className="dependency-chain-warning">
                   还有 {dependencyChain.missingDependencyIds.length} 项依赖暂时不可见，关系已保留。
@@ -10169,13 +10258,13 @@ function SettingsPage({
     });
   };
   const persistModelPricing = () => void persist(appSettings, "模型价格已更新");
-  const saveApiKey = async () => {
+  const saveApiKey = async (): Promise<boolean> => {
     if (
       appSettings.ai.authMode === "none" ||
       !apiKey.trim() ||
       !window.desktopApi
     )
-      return;
+      return false;
     setSaving(true);
     try {
       const credential = await window.desktopApi.settings.setCredential({
@@ -10183,19 +10272,22 @@ function SettingsPage({
         value: apiKey,
         id: appSettings.ai.credentialId,
       });
-      await persist(
+      const saved = await persist(
         {
           ...appSettings,
           ai: { ...appSettings.ai, credentialId: credential.id },
         },
         "API Key 已加密保存",
       );
+      if (!saved) return false;
       setApiKey("");
+      return true;
     } catch (reason) {
       notify(
         reason instanceof Error ? reason.message : "安全存储不可用",
         "error",
       );
+      return false;
     } finally {
       setSaving(false);
     }
@@ -10263,6 +10355,12 @@ function SettingsPage({
     setSaving(true);
     setConnectionTest(undefined);
     try {
+      // If the user just entered a replacement key, do not silently test the
+      // previous credential. Persist it through OS secure storage first.
+      if (appSettings.ai.authMode === "bearer" && apiKey.trim()) {
+        const saved = await saveApiKey();
+        if (!saved) return;
+      }
       const result = await window.desktopApi.agent.testModelConnection();
       setConnectionTest(result);
       setModelUsage(result.usage);
@@ -13066,8 +13164,8 @@ function SettingsPage({
                   {appSettings.ai.authMode === "none"
                     ? "当前不会读取、发送或要求 API Key"
                     : appSettings.ai.credentialId
-                    ? "已安全保存；输入新值可替换"
-                    : "不会进入提示词、日志或导出"}
+                      ? "已安全保存；输入新值后测试会先替换"
+                      : "不会进入提示词、日志或导出"}
                 </p>
               </div>
               <input

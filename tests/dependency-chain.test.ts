@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { buildDependencyChain } from "../src/renderer/dependency-chain";
+import {
+  buildDependencyChain,
+  buildDependencyGraph,
+} from "../src/renderer/dependency-chain";
 import type { Task } from "../src/shared/models";
 
 const task = (
@@ -46,5 +49,28 @@ describe("dependency chain projection", () => {
     expect(result.cycleDetected).toBe(true);
     expect(result.ancestors.map((item) => item.task.id)).toContain("b");
     expect(result.ancestors.map((item) => item.task.id)).not.toContain("a");
+  });
+
+  it("projects an advanced graph without hiding missing edges", () => {
+    const result = buildDependencyGraph(task("ship", ["review"]), [
+      task("draft"),
+      task("review", ["draft", "missing"], "completed"),
+      task("ship", ["review"]),
+      task("announce", ["ship"]),
+    ]);
+
+    expect(result.nodes.map((node) => [node.id, node.kind])).toEqual([
+      ["draft", "ancestor"],
+      ["review", "ancestor"],
+      ["missing", "missing"],
+      ["ship", "current"],
+      ["announce", "downstream"],
+    ]);
+    expect(result.edges).toEqual([
+      { from: "draft", to: "review" },
+      { from: "missing", to: "review" },
+      { from: "review", to: "ship" },
+      { from: "ship", to: "announce" },
+    ]);
   });
 });
