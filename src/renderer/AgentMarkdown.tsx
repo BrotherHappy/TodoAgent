@@ -1,4 +1,4 @@
-import { Check, Clipboard, ListChecks, Sparkles } from "lucide-react";
+import { BookOpen, Check, Clipboard, ListChecks, Sparkles } from "lucide-react";
 import { useEffect, useState, type MouseEvent, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -21,10 +21,12 @@ export function AgentMarkdown({
   text,
   streaming = false,
   onExtractActionItems,
+  onSaveResearchCard,
 }: {
   text: string;
   streaming?: boolean;
   onExtractActionItems?: (text: string) => void;
+  onSaveResearchCard?: (text: string) => void;
 }): ReactElement {
   const [savedContext, setSavedContext] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -78,6 +80,19 @@ export function AgentMarkdown({
           >
             <ListChecks size={12} />
             <span>提取行动项</span>
+          </button>
+        )}
+        {onSaveResearchCard && (
+          <button
+            type="button"
+            className="agent-research-card-button"
+            aria-label="保存到当前任务研究卡"
+            title="先编辑并确认，再保存为当前任务的私人研究卡"
+            disabled={streaming || !text.trim()}
+            onClick={() => onSaveResearchCard(text.trim())}
+          >
+            <BookOpen size={12} />
+            <span>保存研究卡</span>
           </button>
         )}
         <button

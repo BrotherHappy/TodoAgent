@@ -9006,6 +9006,29 @@ select {
   cursor: not-allowed;
   opacity: 0.48;
 }
+.agent-research-card-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--app-text-faint);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 650;
+}
+.agent-research-card-button:hover:not(:disabled),
+.agent-research-card-button:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 64%, transparent);
+}
+.agent-research-card-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
 .agent-reply-copy-button:hover:not(:disabled),
 .agent-reply-copy-button:focus-visible {
   border-color: color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
@@ -9305,6 +9328,14 @@ select {
   grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: start;
 }
+.agent-research-card-sheet .modal-header {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: start;
+}
+.agent-research-card-sheet .modal-header .feature-icon {
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
 .calendar-action-items-context {
   display: grid;
   gap: 4px;
@@ -9330,6 +9361,45 @@ select {
   display: block;
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+.agent-research-card-context span {
+  display: block;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.agent-research-card-form {
+  display: grid;
+  gap: 12px;
+}
+.agent-research-card-form > label {
+  display: grid;
+  gap: 5px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+.agent-research-card-form > label small {
+  color: var(--app-text-faint);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: right;
+}
+.agent-research-card-url-field {
+  position: relative;
+  display: block;
+}
+.agent-research-card-url-field > svg {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  color: var(--app-text-faint);
+  transform: translateY(-50%);
+}
+.agent-research-card-url-field .field-input {
+  padding-left: 32px;
+}
+.agent-research-card-actions-input {
+  min-height: 112px;
 }
 .calendar-action-item-list {
   display: grid;

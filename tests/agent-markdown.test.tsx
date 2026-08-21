@@ -117,14 +117,36 @@ describe("AgentMarkdown", () => {
     expect(onExtractActionItems).toHaveBeenCalledWith("## 行动项\n\n- 验证来源");
   });
 
+  it("only asks the parent to open a confirmed research-card draft", () => {
+    const onSaveResearchCard = vi.fn();
+    render(
+      <AgentMarkdown
+        text={"## 研究结论\n\n- 保留来源"}
+        onSaveResearchCard={onSaveResearchCard}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "保存到当前任务研究卡" }));
+    expect(onSaveResearchCard).toHaveBeenCalledWith("## 研究结论\n\n- 保留来源");
+  });
+
   it("does not save or speak a partial streaming reply", () => {
-    render(<AgentMarkdown text="正在生成" streaming />);
+    render(
+      <AgentMarkdown
+        text="正在生成"
+        streaming
+        onSaveResearchCard={vi.fn()}
+      />,
+    );
 
     expect(screen.getByRole("button", { name: "复制 Markdown 回复" })).toBeDisabled();
     expect(
       screen.queryByRole("button", { name: "从 Agent 回复提取行动项" }),
     ).toBeNull();
     expect(screen.getByRole("button", { name: "保存到最近上下文" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "保存到当前任务研究卡" }),
+    ).toBeDisabled();
     expect(screen.getByRole("button", { name: "朗读回答" })).toBeDisabled();
     expect(window.localStorage.getItem("todo-agent:context-capture-history:v1")).toBeNull();
   });

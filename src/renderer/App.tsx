@@ -205,6 +205,11 @@ import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
 import { CalendarActionItemsSheet } from "./CalendarActionItemsSheet";
 import { AgentActionItemsSheet } from "./AgentActionItemsSheet";
+import {
+  AgentResearchCardSheet,
+  buildAgentResearchCardDraft,
+  type AgentResearchCardInput,
+} from "./AgentResearchCardSheet";
 import { readCalendarEvents, writeCalendarEvents } from "./calendar-store";
 import { buildMorningCalendarSummary } from "./morning-calendar";
 import { suggestMorningRollover } from "./morning-rollover";
@@ -5739,6 +5744,12 @@ function AgentPage({
     sourceText: string;
     drafts: CalendarActionItemDraft[];
   }>();
+  const [agentResearchCard, setAgentResearchCard] = useState<{
+    taskId: string;
+    taskTitle: string;
+    sourceText: string;
+    draft: ReturnType<typeof buildAgentResearchCardDraft>;
+  }>();
   const [agentCapabilities, setAgentCapabilities] = useState(
     defaultSettings.agentCapabilities,
   );
@@ -5868,6 +5879,50 @@ function AgentPage({
       return;
     }
     setAgentActionItems({ sourceText: text, drafts });
+  };
+  const openAgentResearchCard = (text: string): void => {
+    const task = controller.selected;
+    if (!task) {
+      notify("请先在任务页选中要关联的任务", "info");
+      return;
+    }
+    if ((task.researchCards ?? []).length >= 20) {
+      notify("当前任务最多保留 20 张研究卡", "error");
+      return;
+    }
+    setAgentResearchCard({
+      taskId: task.id,
+      taskTitle: task.title,
+      sourceText: text,
+      draft: buildAgentResearchCardDraft(text, dateKey()),
+    });
+  };
+  const saveAgentResearchCard = async (
+    input: AgentResearchCardInput,
+  ): Promise<void> => {
+    const capture = agentResearchCard;
+    if (!capture) return;
+    const task =
+      controller.selected?.id === capture.taskId
+        ? controller.selected
+        : controller.tasks.find((candidate) => candidate.id === capture.taskId);
+    if (!task) throw new Error("关联任务已不存在，请重新选择任务后再试");
+    const existingCards = task.researchCards ?? [];
+    if (existingCards.length >= 20)
+      throw new Error("当前任务最多保留 20 张研究卡");
+    const card: TaskResearchCard = {
+      id: crypto.randomUUID(),
+      title: input.title,
+      ...(input.url ? { url: input.url } : {}),
+      summary: input.summary,
+      actionItems: input.actionItems,
+      capturedAt: new Date().toISOString(),
+    };
+    await controller.update(task.id, {
+      researchCards: [...existingCards, card],
+    });
+    notify(`研究卡已保存到“${task.title}”`, "success");
+    setAgentResearchCard(undefined);
   };
   useEffect(() => {
     if (!initialPrompt) return;
@@ -6134,6 +6189,9 @@ function AgentPage({
                   text={message.text}
                   streaming={message.streaming}
                   onExtractActionItems={openAgentActionItems}
+                  onSaveResearchCard={
+                    controller.selected ? openAgentResearchCard : undefined
+                  }
                 />
               ) : (
                 <span className="streaming-indicator" role="status">
@@ -6370,6 +6428,15 @@ function AgentPage({
             notify(`已创建 ${created} 项本地行动任务`, "success");
             setAgentActionItems(undefined);
           }}
+        />
+      )}
+      {agentResearchCard && (
+        <AgentResearchCardSheet
+          taskTitle={agentResearchCard.taskTitle}
+          sourceText={agentResearchCard.sourceText}
+          draft={agentResearchCard.draft}
+          onClose={() => setAgentResearchCard(undefined)}
+          onConfirm={saveAgentResearchCard}
         />
       )}
       {approval && (
