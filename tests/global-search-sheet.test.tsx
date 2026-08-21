@@ -4,6 +4,7 @@ import { GlobalSearchSheet } from "../src/renderer/GlobalSearchSheet";
 import { clearGlobalSearchHistory, rememberGlobalSearch } from "../src/renderer/global-search-history";
 import { clearGlobalSearchPresets, saveGlobalSearchPreset } from "../src/renderer/global-search-presets";
 import type { Task } from "../src/shared/models";
+import type { CalendarEvent } from "../src/shared/calendar-events";
 
 const task = (id: string, title: string): Task => ({
   id,
@@ -28,10 +29,11 @@ const task = (id: string, title: string): Task => ({
   updatedAt: "2026-08-21T08:00:00.000Z",
 });
 
-const props = (onSelect = vi.fn()) => ({
+const props = (onSelect = vi.fn(), calendarEvents: readonly CalendarEvent[] = []) => ({
   tasks: [task("task-1", "整理发布清单")],
   projects: [],
   lists: [],
+  calendarEvents,
   conversations: [],
   onClose: vi.fn(),
   onSelect,
@@ -106,5 +108,26 @@ describe("GlobalSearchSheet", () => {
     saveGlobalSearchPreset("今天要做", "今天", "todo-agent:global-search-presets:v1");
     render(<GlobalSearchSheet {...props()} />);
     expect(screen.getByRole("button", { name: "打开快捷搜索：今天要做" })).toBeVisible();
+  });
+
+  it("opens a local calendar result from the 日历 filter", () => {
+    const onSelect = vi.fn();
+    const event = {
+      id: "calendar-1",
+      summary: "产品同步会",
+      description: "发布窗口确认",
+      startAt: "2026-08-22T10:00:00+08:00",
+      endAt: "2026-08-22T11:00:00+08:00",
+      allDay: false,
+      sourceName: "工作日历",
+    };
+    render(<GlobalSearchSheet {...props(onSelect, [event])} />);
+    const input = screen.getByRole("combobox", { name: "全局搜索" });
+    fireEvent.change(input, { target: { value: "产品同步" } });
+    fireEvent.click(screen.getByRole("option", { name: /产品同步会/ }));
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "calendar",
+      calendarEvent: event,
+    }));
   });
 });

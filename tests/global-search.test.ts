@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Task, TaskList, TaskProject } from "../src/shared/models";
 import { searchGlobalWorkspace } from "../src/shared/global-search";
+import type { CalendarEvent } from "../src/shared/calendar-events";
 
 const task = (id: string, patch: Partial<Task> = {}): Task => ({
   id,
@@ -45,6 +46,16 @@ const list = (id: string, name: string): TaskList => ({
   createdAt: "2026-08-21T08:00:00.000Z",
   updatedAt: "2026-08-21T08:00:00.000Z",
 });
+
+const calendarEvent: CalendarEvent = {
+  id: "calendar-1",
+  summary: "产品同步会",
+  description: "讨论发布窗口和行动项",
+  startAt: "2026-08-22T10:00:00+08:00",
+  endAt: "2026-08-22T11:00:00+08:00",
+  allDay: false,
+  sourceName: "工作日历",
+};
 
 describe("global workspace search", () => {
   it("ranks an exact task title ahead of metadata matches", () => {
@@ -110,6 +121,19 @@ describe("global workspace search", () => {
     );
     expect(results.find((result) => result.kind === "list")?.title).toBe("本周评审");
     expect(results.find((result) => result.kind === "conversation")?.conversationId).toBe("conversation-1");
+  });
+
+  it("searches local calendar events and keeps the event for navigation", () => {
+    const results = searchGlobalWorkspace({
+      tasks: [],
+      projects: [],
+      lists: [],
+      calendarEvents: [calendarEvent],
+      query: "发布窗口",
+    });
+    expect(results[0]?.kind).toBe("calendar");
+    expect(results[0]?.calendarEvent).toEqual(calendarEvent);
+    expect(results[0]?.subtitle).toContain("工作日历");
   });
 
   it("requires every query token, is case-insensitive and respects the limit", () => {

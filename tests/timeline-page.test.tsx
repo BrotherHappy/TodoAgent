@@ -71,6 +71,14 @@ describe("TimelinePage", () => {
     expect(screen.getByText("待安排 1 项")).toBeVisible();
   });
 
+  it("focuses the requested date when opened from a calendar search result", async () => {
+    const targetDate = addLocalDays(date, 2);
+    render(<TimelinePage {...props({ focusDate: targetDate })} />);
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: `${targetDate} 的时间线` })).toBeVisible();
+    });
+  });
+
   it("shows the live clock line and offers a jump-to-now action", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 19, 10, 17));

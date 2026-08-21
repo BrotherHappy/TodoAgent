@@ -10498,6 +10498,10 @@ select {
   color: var(--app-green, #21865f);
   background: color-mix(in srgb, #dff5e8 72%, var(--app-surface-raised));
 }
+.global-search-result-icon.is-calendar {
+  color: var(--app-teal, #168c8c);
+  background: color-mix(in srgb, #d9f4f2 72%, var(--app-surface-raised));
+}
 .global-search-result-icon.is-conversation {
   color: var(--app-amber, #b96b1d);
   background: color-mix(in srgb, #fff0d5 74%, var(--app-surface-raised));

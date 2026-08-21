@@ -4,6 +4,7 @@ import {
   Bookmark,
   Check,
   ClipboardCheck,
+  CalendarDays,
   Command,
   CornerDownLeft,
   FolderKanban,
@@ -23,6 +24,7 @@ import {
   type GlobalSearchResultKind,
 } from "../shared/global-search";
 import type { Task, TaskList, TaskProject } from "../shared/models";
+import type { CalendarEvent } from "../shared/calendar-events";
 import {
   clearGlobalSearchHistory,
   readGlobalSearchHistory,
@@ -42,6 +44,7 @@ interface GlobalSearchSheetProps {
   tasks: readonly Task[];
   projects: readonly TaskProject[];
   lists: readonly TaskList[];
+  calendarEvents: readonly CalendarEvent[];
   conversations: readonly GlobalSearchConversation[];
   loading?: boolean;
   error?: string;
@@ -55,6 +58,7 @@ const filters: Array<{ id: SearchFilter; label: string }> = [
   { id: "task", label: "任务" },
   { id: "project", label: "项目" },
   { id: "list", label: "清单" },
+  { id: "calendar", label: "日历" },
   { id: "conversation", label: "会话" },
 ];
 
@@ -62,12 +66,14 @@ const kindLabel: Record<GlobalSearchResultKind, string> = {
   task: "任务",
   project: "项目",
   list: "清单",
+  calendar: "日历",
   conversation: "Agent 会话",
 };
 
 const resultIcon = (kind: GlobalSearchResultKind) => {
   if (kind === "project") return <FolderKanban size={17} />;
   if (kind === "list") return <ListChecks size={17} />;
+  if (kind === "calendar") return <CalendarDays size={17} />;
   if (kind === "conversation") return <MessageCircle size={17} />;
   return <ClipboardCheck size={17} />;
 };
@@ -76,6 +82,7 @@ export function GlobalSearchSheet({
   tasks,
   projects,
   lists,
+  calendarEvents,
   conversations,
   loading = false,
   error,
@@ -94,8 +101,8 @@ export function GlobalSearchSheet({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const searchInput: GlobalSearchInput = useMemo(
-    () => ({ tasks, projects, lists, conversations, query, limit: 36 }),
-    [conversations, lists, projects, query, tasks],
+    () => ({ tasks, projects, lists, calendarEvents, conversations, query, limit: 36 }),
+    [calendarEvents, conversations, lists, projects, query, tasks],
   );
   const allResults = useMemo(() => searchGlobalWorkspace(searchInput), [searchInput]);
   const results = useMemo(
@@ -172,7 +179,7 @@ export function GlobalSearchSheet({
           </div>
           <div>
             <strong id="global-search-title">全局查找</strong>
-            <span>任务、项目、清单和本机会话，一次找到</span>
+            <span>任务、日历、项目、清单和本机会话，一次找到</span>
           </div>
           <button
             type="button"
@@ -217,7 +224,7 @@ export function GlobalSearchSheet({
                 selectActive();
               }
             }}
-            placeholder="搜索任务标题、备注、项目、会话内容…"
+            placeholder="搜索任务、日历、项目、会话内容…"
             aria-label="全局搜索"
             role="combobox"
             aria-expanded="true"

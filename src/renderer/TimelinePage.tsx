@@ -62,6 +62,7 @@ export interface TimelinePageProps {
   onMove: (taskId: string, patch: UpdateTaskInput) => Promise<string | undefined>;
   onUndo: (operationId: string) => void;
   notify: (message: string, kind?: ToastKind, action?: { label: string; run: () => void }) => void;
+  focusDate?: string;
   calendarEvents?: readonly CalendarEvent[];
   onCalendarEventsChange?: (events: CalendarEvent[]) => void;
   onCreateFollowUp?: (event: CalendarEvent) => void;
@@ -107,6 +108,7 @@ export function TimelinePage({
   onMove,
   onUndo,
   notify,
+  focusDate,
   calendarEvents = [],
   onCalendarEventsChange,
   onCreateFollowUp,
@@ -225,6 +227,12 @@ export function TimelinePage({
     (total, day) => total + day.busyMinutes,
     0,
   );
+
+  useEffect(() => {
+    if (!focusDate || !/^\d{4}-\d{2}-\d{2}$/u.test(focusDate) || focusDate === date) return;
+    setDate(focusDate);
+    setViewMode("day");
+  }, [date, focusDate]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30_000);

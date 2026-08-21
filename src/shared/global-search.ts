@@ -4,8 +4,9 @@ import type {
   TaskList,
   TaskProject,
 } from "./models";
+import type { CalendarEvent } from "./calendar-events";
 
-export type GlobalSearchResultKind = "task" | "project" | "list" | "conversation";
+export type GlobalSearchResultKind = "task" | "project" | "list" | "calendar" | "conversation";
 
 /** The small, renderer-safe shape used for locally persisted Agent sessions. */
 export interface GlobalSearchConversation {
@@ -27,6 +28,7 @@ export interface GlobalSearchResult {
   task?: Task;
   project?: TaskProject;
   list?: TaskList;
+  calendarEvent?: CalendarEvent;
   conversationId?: string;
 }
 
@@ -34,6 +36,7 @@ export interface GlobalSearchInput {
   tasks: readonly Task[];
   projects: readonly TaskProject[];
   lists: readonly TaskList[];
+  calendarEvents?: readonly CalendarEvent[];
   conversations?: readonly GlobalSearchConversation[];
   query: string;
   limit?: number;
@@ -55,7 +58,8 @@ const KIND_ORDER: Record<GlobalSearchResultKind, number> = {
   task: 0,
   project: 1,
   list: 2,
-  conversation: 3,
+  calendar: 3,
+  conversation: 4,
 };
 
 const STATUS_LABEL: Record<Task["status"], string> = {
@@ -162,6 +166,31 @@ const conversationFields = (conversation: GlobalSearchConversation): SearchField
     field(conversation.messages.join(" "), 26),
   );
 
+const calendarDateLabel = (value: string): string => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const calendarFields = (event: CalendarEvent): SearchField[] =>
+  fields(
+    field(event.summary, 112),
+    field(event.description, 48),
+    field(event.sourceName, 58),
+    field(calendarDateLabel(event.startAt), 24, false),
+    field(calendarDateLabel(event.endAt), 20, false),
+    field(event.allDay ? "全天" : "有时间", 18, false),
+  );
+
+const calendarSubtitle = (event: CalendarEvent): string => {
+  const date = calendarDateLabel(event.startAt) || "未定日期";
+  const timeLabel = event.allDay ? "全天" : "有时间";
+  return `日历 · ${event.sourceName || "本地日历"} · ${date} · ${timeLabel}`;
+};
+
 const scoreCandidate = (candidate: SearchCandidate, tokens: readonly string[]): number | undefined => {
   const normalizedFields = candidate.fields.map((entry) => ({
     entry,
@@ -248,6 +277,17 @@ export function searchGlobalWorkspace(input: GlobalSearchInput): GlobalSearchRes
       order: order++,
     });
   }
+  for (const event of input.calendarEvents ?? []) {
+    candidates.push({
+      id: event.id,
+      kind: "calendar",
+      title: event.summary || "无标题日程",
+      subtitle: calendarSubtitle(event),
+      fields: calendarFields(event),
+      calendarEvent: event,
+      order: order++,
+    });
+  }
   for (const conversation of input.conversations ?? []) {
     candidates.push({
       id: conversation.id,
@@ -273,6 +313,7 @@ export function searchGlobalWorkspace(input: GlobalSearchInput): GlobalSearchRes
         task: candidate.task,
         project: candidate.project,
         list: candidate.list,
+        calendarEvent: candidate.calendarEvent,
         conversationId: candidate.conversationId,
         order: candidate.order,
       }];

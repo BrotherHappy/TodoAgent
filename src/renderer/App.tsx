@@ -14668,6 +14668,7 @@ function MainWindow() {
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchTasks, setGlobalSearchTasks] = useState<Task[]>([]);
   const [globalSearchConversations, setGlobalSearchConversations] = useState<GlobalSearchConversation[]>([]);
+  const [timelineFocusDate, setTimelineFocusDate] = useState<string>();
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
   const [globalSearchError, setGlobalSearchError] = useState<string>();
   const [pendingAgentConversationId, setPendingAgentConversationId] = useState<string>();
@@ -14774,6 +14775,12 @@ function MainWindow() {
       if (result.kind === "conversation" && result.conversationId) {
         setPendingAgentConversationId(result.conversationId);
         navigate("agent");
+        return;
+      }
+      if (result.kind === "calendar" && result.calendarEvent) {
+        const eventDate = new Date(result.calendarEvent.startAt);
+        if (!Number.isNaN(eventDate.getTime())) setTimelineFocusDate(dateKey(eventDate));
+        navigate("timeline");
         return;
       }
       if (result.kind === "project") {
@@ -15265,6 +15272,7 @@ function MainWindow() {
                   void timelineController.undo(operationId);
                 }}
                 notify={notify}
+                focusDate={timelineFocusDate}
                 calendarEvents={calendarEvents}
                 onCalendarEventsChange={updateCalendarEvents}
                 onCreateFollowUp={(event) => {
@@ -15460,6 +15468,7 @@ function MainWindow() {
             tasks={globalSearchTasks}
             projects={projectState.projects}
             lists={listState.lists}
+            calendarEvents={calendarEvents}
             conversations={globalSearchConversations}
             loading={globalSearchLoading}
             error={globalSearchError}
