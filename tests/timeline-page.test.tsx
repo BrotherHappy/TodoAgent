@@ -301,6 +301,17 @@ describe("TimelinePage", () => {
     expect(screen.getByText(date)).toBeVisible();
   });
 
+  it("opens the read-only Gantt route and keeps task selection connected", () => {
+    const onSelect = vi.fn();
+    const task = makeTask("甘特任务", { projectId: "发布", plannedDate: date });
+    render(<TimelinePage {...props({ tasks: [task], onSelect })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "甘特" }));
+    expect(screen.getByRole("region", { name: "甘特视图" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /甘特任务，/u }));
+    expect(onSelect).toHaveBeenCalledWith(task.id);
+  });
+
   it("shows estimated-versus-actual review and links back to a task", () => {
     const onSelect = vi.fn();
     render(

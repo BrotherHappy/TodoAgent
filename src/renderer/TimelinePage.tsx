@@ -50,6 +50,8 @@ import {
   setCalendarSourceColor,
   writeCalendarSourceColors,
 } from "./calendar-source-preferences";
+import { GanttView } from "./GanttView";
+import { buildGanttPlan } from "./timeline-gantt";
 
 type ToastKind = "success" | "error" | "info";
 
@@ -115,7 +117,7 @@ export function TimelinePage({
   onExtractActionItems,
 }: TimelinePageProps) {
   const [date, setDate] = useState(() => localDateKey());
-  const [viewMode, setViewMode] = useState<"day" | "week" | "board">("day");
+  const [viewMode, setViewMode] = useState<"day" | "week" | "board" | "gantt">("day");
   const [boardProjectId, setBoardProjectId] = useState("all");
   const [draggingId, setDraggingId] = useState<string>();
   const [movingId, setMovingId] = useState<string>();
@@ -172,6 +174,10 @@ export function TimelinePage({
         boardProjectId === "all" ? undefined : boardProjectId,
       ),
     [boardProjectId, tasks],
+  );
+  const ganttPlan = useMemo(
+    () => buildGanttPlan(tasks, date, boardProjectId),
+    [boardProjectId, date, tasks],
   );
   const calendarSourceNames = useMemo(() => {
     const names = new Map<string, string>();
@@ -332,7 +338,8 @@ export function TimelinePage({
   };
 
   const shiftDate = (amount: number) => {
-    setDate((value) => addLocalDays(value, viewMode === "week" ? amount * 7 : amount));
+    const step = viewMode === "week" ? 7 : viewMode === "gantt" ? 14 : 1;
+    setDate((value) => addLocalDays(value, amount * step));
   };
 
   const changeWeeklyCapacity = (value: string) => {
@@ -429,7 +436,7 @@ export function TimelinePage({
           <p>把任务放进真实可用的时间，而不是只写一个截止日期</p>
         </div>
         <div className="timeline-date-actions" aria-label="切换日期">
-          <button type="button" className="icon-button" disabled={viewMode === "board"} aria-label={viewMode === "week" ? "上一周" : "前一天"} onClick={() => shiftDate(-1)}>
+          <button type="button" className="icon-button" disabled={viewMode === "board"} aria-label={viewMode === "week" ? "上一周" : viewMode === "gantt" ? "上一组甘特" : "前一天"} onClick={() => shiftDate(-1)}>
             <ChevronLeft size={17} />
           </button>
           <button type="button" className="soft-button" onClick={() => setDate(localDateKey())}>
@@ -449,8 +456,9 @@ export function TimelinePage({
             <button type="button" className={viewMode === "day" ? "active" : ""} onClick={() => setViewMode("day")}>日</button>
             <button type="button" className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>周</button>
             <button type="button" className={viewMode === "board" ? "active" : ""} onClick={() => setViewMode("board")}>项目</button>
+            <button type="button" className={viewMode === "gantt" ? "active" : ""} onClick={() => setViewMode("gantt")}>甘特</button>
           </div>
-          <button type="button" className="icon-button" disabled={viewMode === "board"} aria-label={viewMode === "week" ? "下一周" : "后一天"} onClick={() => shiftDate(1)}>
+          <button type="button" className="icon-button" disabled={viewMode === "board"} aria-label={viewMode === "week" ? "下一周" : viewMode === "gantt" ? "下一组甘特" : "后一天"} onClick={() => shiftDate(1)}>
             <ChevronRight size={17} />
           </button>
         </div>
@@ -458,8 +466,8 @@ export function TimelinePage({
 
       <section className="timeline-summary" aria-label="时间线摘要">
         <div className="timeline-summary-date">
-            <strong>{viewMode === "week" ? "本周概览" : viewMode === "board" ? "项目看板" : formatTimelineDate(date)}</strong>
-            <span>{viewMode === "week" ? weekLabel : viewMode === "board" ? "同一任务，不同项目状态视图" : date}</span>
+            <strong>{viewMode === "week" ? "本周概览" : viewMode === "board" ? "项目看板" : viewMode === "gantt" ? "项目路线" : formatTimelineDate(date)}</strong>
+            <span>{viewMode === "week" ? weekLabel : viewMode === "board" ? "同一任务，不同项目状态视图" : viewMode === "gantt" ? `${ganttPlan.startDate} — ${ganttPlan.endDate}` : date}</span>
         </div>
         <div className="timeline-summary-metrics">
           {viewMode === "week" ? (
@@ -474,6 +482,12 @@ export function TimelinePage({
             <>
               <span><Inbox size={14} /> 项目 {projectIds.length} 个</span>
               <span><Clock3 size={14} /> 卡片 {boardColumns.reduce((total, column) => total + column.tasks.length, 0)} 张</span>
+            </>
+          ) : viewMode === "gantt" ? (
+            <>
+              <span><Clock3 size={14} /> 有日期 {ganttPlan.datedTaskCount} 项</span>
+              <span><Inbox size={14} /> 未安排 {ganttPlan.unscheduledTasks.length} 项</span>
+              {ganttPlan.blockedCount > 0 && <span><Sparkles size={14} /> 阻塞 {ganttPlan.blockedCount} 项</span>}
             </>
           ) : (
             <>
@@ -558,6 +572,14 @@ export function TimelinePage({
             </div>
           )}
         </section>
+      ) : viewMode === "gantt" ? (
+        <GanttView
+          plan={ganttPlan}
+          projectId={boardProjectId}
+          projectIds={projectIds}
+          onProjectChange={setBoardProjectId}
+          onSelect={onSelect}
+        />
       ) : viewMode === "week" ? (
         <>
           <section className={`timeline-work-cycle ${workCycleMetrics.overloadMinutes ? "is-overloaded" : ""}`} aria-labelledby="timeline-work-cycle-title">

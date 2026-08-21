@@ -2236,6 +2236,369 @@ select {
   align-items: center;
   gap: 5px;
 }
+.timeline-gantt {
+  margin-bottom: 14px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 20%, var(--app-line));
+  border-radius: 20px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--app-brand-soft) 68%, transparent), transparent 42%),
+    color-mix(in srgb, var(--app-glass-strong) 58%, transparent);
+}
+.timeline-gantt-heading,
+.timeline-gantt-title,
+.timeline-gantt-meta,
+.timeline-gantt-unplanned-heading {
+  display: flex;
+  align-items: center;
+}
+.timeline-gantt-heading {
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 9px;
+}
+.timeline-gantt-title {
+  gap: 7px;
+}
+.timeline-gantt-title h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.timeline-gantt-heading p {
+  margin: 4px 0 0;
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.timeline-gantt-mark {
+  width: 24px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
+  border-radius: 7px;
+  background: var(--app-brand-soft);
+}
+.timeline-gantt-mark i {
+  height: 3px;
+  display: block;
+  border-radius: 999px;
+  background: var(--app-brand);
+}
+.timeline-gantt-mark i:nth-child(1) { width: 9px; }
+.timeline-gantt-mark i:nth-child(2) { width: 13px; background: var(--app-accent, var(--app-brand)); }
+.timeline-gantt-mark i:nth-child(3) { width: 7px; background: var(--app-success, var(--app-brand)); }
+.timeline-gantt-project-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--app-text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.timeline-gantt-project-filter select {
+  min-width: 132px;
+  border: 1px solid var(--app-line);
+  border-radius: 9px;
+  padding: 6px 8px;
+  color: var(--app-text);
+  background: var(--app-surface-raised);
+  font-size: 11px;
+}
+.timeline-gantt-meta {
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 11px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-gantt-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.timeline-gantt-meta .is-warning {
+  color: var(--app-warning-strong, var(--app-warning));
+}
+.timeline-gantt-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--app-line);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--app-surface-raised) 60%, transparent);
+}
+.timeline-gantt-grid {
+  min-width: 980px;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(720px, 2.15fr);
+  align-items: stretch;
+}
+.timeline-gantt-corner,
+.timeline-gantt-day-head {
+  min-height: 46px;
+  border-bottom: 1px solid var(--app-line);
+  background: color-mix(in srgb, var(--app-brand-soft) 30%, var(--app-surface-raised));
+}
+.timeline-gantt-corner {
+  display: flex;
+  align-items: center;
+  padding: 0 11px;
+  color: var(--app-text-faint);
+  font-size: 11px;
+  font-weight: 700;
+}
+.timeline-gantt-day-head {
+  display: grid;
+  grid-template-columns: repeat(var(--gantt-days), minmax(42px, 1fr));
+}
+.timeline-gantt-day {
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  border-left: 1px solid color-mix(in srgb, var(--app-line) 76%, transparent);
+  color: var(--app-text-faint);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.timeline-gantt-day span {
+  font-size: 9px;
+}
+.timeline-gantt-day strong {
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.timeline-gantt-day.is-weekend {
+  background: color-mix(in srgb, var(--app-text) 3%, transparent);
+}
+.timeline-gantt-day.is-today {
+  background: color-mix(in srgb, var(--app-brand) 10%, transparent);
+}
+.timeline-gantt-group,
+.timeline-gantt-row {
+  display: contents;
+}
+.timeline-gantt-group-label {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 29px;
+  padding: 7px 11px 5px;
+  border-top: 1px solid color-mix(in srgb, var(--app-brand) 16%, var(--app-line));
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-brand-soft) 24%, transparent);
+  font-size: 11px;
+  font-weight: 750;
+}
+.timeline-gantt-group-label small {
+  color: var(--app-text-faint);
+  font-size: 10px;
+  font-weight: 600;
+}
+.timeline-gantt-task {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--app-line) 74%, transparent);
+  border-left: 3px solid var(--app-brand);
+  padding: 7px 9px;
+  color: var(--app-text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.timeline-gantt-task:hover,
+.timeline-gantt-task:focus-visible {
+  background: color-mix(in srgb, var(--app-brand-soft) 44%, transparent);
+}
+.timeline-gantt-task:focus-visible,
+.timeline-gantt-bar:focus-visible,
+.timeline-gantt-unplanned-list button:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: -2px;
+}
+.timeline-gantt-task.is-high { border-left-color: var(--app-danger); }
+.timeline-gantt-task.is-medium { border-left-color: var(--app-warning); }
+.timeline-gantt-task.is-low { border-left-color: var(--app-success); }
+.timeline-gantt-task > svg {
+  flex: 0 0 auto;
+  color: var(--app-warning-strong, var(--app-warning));
+}
+.timeline-gantt-task-title {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.timeline-gantt-task-title strong,
+.timeline-gantt-task-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-gantt-task-title strong {
+  font-size: 11px;
+}
+.timeline-gantt-task-title small {
+  color: var(--app-text-faint);
+  font-size: 9px;
+}
+.timeline-gantt-track {
+  position: relative;
+  min-height: 43px;
+  border-top: 1px solid color-mix(in srgb, var(--app-line) 74%, transparent);
+  overflow: hidden;
+}
+.timeline-gantt-track-days {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--gantt-days), minmax(42px, 1fr));
+  pointer-events: none;
+}
+.timeline-gantt-track-days i {
+  border-left: 1px solid color-mix(in srgb, var(--app-line) 70%, transparent);
+}
+.timeline-gantt-track-days i.is-weekend {
+  background: color-mix(in srgb, var(--app-text) 3%, transparent);
+}
+.timeline-gantt-track-days i.is-today {
+  background: color-mix(in srgb, var(--app-brand) 8%, transparent);
+}
+.timeline-gantt-bar {
+  position: absolute;
+  top: 9px;
+  left: calc(var(--gantt-start) / var(--gantt-days) * 100% + 3px);
+  width: max(22px, calc(var(--gantt-span) / var(--gantt-days) * 100% - 6px));
+  height: 25px;
+  display: block;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 34%, var(--app-line));
+  border-left: 3px solid var(--app-brand);
+  border-radius: 8px;
+  padding: 0 8px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 78%, var(--app-surface-raised));
+  text-align: left;
+  cursor: pointer;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+.timeline-gantt-bar:hover {
+  border-color: var(--app-brand);
+  background: color-mix(in srgb, var(--app-brand-soft) 92%, var(--app-surface-raised));
+  transform: translateY(-1px);
+}
+.timeline-gantt-bar.is-high { border-left-color: var(--app-danger); }
+.timeline-gantt-bar.is-medium { border-left-color: var(--app-warning); }
+.timeline-gantt-bar.is-low { border-left-color: var(--app-success); }
+.timeline-gantt-bar.is-completed {
+  color: var(--app-text-soft);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--app-text) 9%, var(--app-surface-raised));
+}
+.timeline-gantt-bar.is-blocked {
+  border-style: dotted;
+  background: color-mix(in srgb, var(--app-warning) 12%, var(--app-surface-raised));
+}
+.timeline-gantt-bar-progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 0;
+  background: color-mix(in srgb, var(--app-brand) 18%, transparent);
+  pointer-events: none;
+}
+.timeline-gantt-bar-label {
+  position: relative;
+  z-index: 1;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 700;
+}
+.timeline-gantt-empty,
+.timeline-gantt-unplanned {
+  border: 1px solid var(--app-line);
+  border-radius: 13px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--app-surface-raised) 62%, transparent);
+}
+.timeline-gantt-empty {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--app-text-faint);
+}
+.timeline-gantt-empty div {
+  display: grid;
+  gap: 3px;
+}
+.timeline-gantt-empty strong {
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.timeline-gantt-empty span {
+  font-size: 11px;
+}
+.timeline-gantt-unplanned {
+  margin-top: 11px;
+}
+.timeline-gantt-unplanned-heading {
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.timeline-gantt-unplanned-heading div {
+  display: grid;
+  gap: 3px;
+}
+.timeline-gantt-unplanned-heading strong {
+  font-size: 12px;
+}
+.timeline-gantt-unplanned-heading span,
+.timeline-gantt-unplanned-more {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.timeline-gantt-unplanned-heading small {
+  color: var(--app-text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.timeline-gantt-unplanned-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.timeline-gantt-unplanned-list button {
+  max-width: 280px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: var(--app-text-soft);
+  background: var(--app-glass-soft);
+  font-size: 10px;
+  cursor: pointer;
+}
+.timeline-gantt-unplanned-list button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-gantt-unplanned-list button:hover {
+  border-color: color-mix(in srgb, var(--app-brand) 40%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.timeline-gantt-unplanned-more {
+  display: block;
+  margin-top: 8px;
+}
 .timeline-calendar-agenda {
   margin-bottom: 14px;
   border: 1px solid color-mix(in srgb, var(--app-brand) 20%, var(--app-line));
@@ -13489,6 +13852,22 @@ button.dependency-graph-node:focus-visible {
   }
   .timeline-summary-metrics {
     margin-left: 0;
+  }
+  .timeline-gantt {
+    border-radius: 17px;
+    padding: 10px;
+  }
+  .timeline-gantt-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .timeline-gantt-project-filter {
+    align-self: stretch;
+    justify-content: space-between;
+  }
+  .timeline-gantt-project-filter select {
+    flex: 1;
+    min-width: 0;
   }
   .timeline-heading {
     align-items: flex-start;
