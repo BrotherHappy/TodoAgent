@@ -5,6 +5,7 @@ describe("parseSmartViewQuery", () => {
   const options = {
     projects: ["研究项目", "个人"],
     tags: ["论文", "发布"],
+    sections: ["本周发布", "下周整理"],
     contexts: ["办公室", "家"],
   };
 
@@ -18,6 +19,7 @@ describe("parseSmartViewQuery", () => {
       flagged: false,
       projectId: "研究项目",
       tag: "论文",
+      sectionId: "all",
       context: "all",
       dateFilter: "next-7-days",
       sort: "manual",
@@ -39,6 +41,27 @@ describe("parseSmartViewQuery", () => {
     if (result.kind !== "suggestion") return;
     expect(result.value.filters.context).toBe("办公室");
     expect(result.value.filters.sort).toBe("due");
+  });
+
+  it("supports a local section heading and fails closed for unknown headings", () => {
+    const result = parseSmartViewQuery("分组：本周发布 按标题", options);
+    expect(result).toMatchObject({
+      kind: "suggestion",
+      value: {
+        filters: { sectionId: "本周发布", sort: "title" },
+        summary: ["按标题", "分组：本周发布"],
+      },
+    });
+    expect(parseSmartViewQuery("分组标题：本周发布", options)).toMatchObject({
+      kind: "suggestion",
+      value: { filters: { sectionId: "本周发布" } },
+    });
+    expect(parseSmartViewQuery("分组：不存在", options)).toMatchObject({
+      kind: "error",
+      value: {
+        message: "没有找到分组标题“不存在”，请先在任务中使用已有分组标题。",
+      },
+    });
   });
 
   it("recognizes the private attention marker", () => {

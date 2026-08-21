@@ -401,6 +401,30 @@ describe("task Agent tools", () => {
     });
   });
 
+  it("lets Agent query a local section heading without treating it as Feishu metadata", async () => {
+    await tasks.createTask({ title: "发布组任务", sectionId: "本周发布" });
+    await tasks.createTask({ title: "未分组任务" });
+    const list = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    }).find((tool) => tool.name === "task_list")!;
+    const output = await list.execute(
+      {
+        view: "all",
+        text: null,
+        source: null,
+        sectionId: "本周发布",
+        flagged: false,
+        limit: 100,
+      },
+      executionContext("task_list-section"),
+    );
+    expect(output.data).toMatchObject({
+      count: 1,
+      tasks: [expect.objectContaining({ title: "发布组任务", sectionId: "本周发布" })],
+    });
+  });
+
   it("lets Agent defer and restore a task without a Feishu write", async () => {
     const tools = createTaskTools({
       tasks,

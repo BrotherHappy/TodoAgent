@@ -1036,6 +1036,12 @@ export class TaskService {
       )
         return false;
       if (
+        filter.sectionIds !== undefined &&
+        (task.sectionId === undefined ||
+          !filter.sectionIds.includes(task.sectionId))
+      )
+        return false;
+      if (
         filter.priorities !== undefined &&
         !filter.priorities.includes(task.priority)
       )

@@ -1032,3 +1032,4 @@ Todo Pet 的差异化不是“比 Todoist 多一个可爱的皮肤”，而是�
 | 2026-08-21 | v2.37 | 吸收 Things 3 / Taskwarrior waiting / Microsoft To Do 的“稍后安排”语义：任务新增本地 `deferUntil` 可用日期，未来日期前从 Today 隐藏并进入侧栏“稍后安排”，到期后回到普通开放集合；任务行、新建/详情和 Agent 支持设置、查询与清除，飞书任务只保存私人字段，绝不改写飞书截止时间、状态或同步 payload；安全 JSON 与可读 Markdown 保持该字段，旧任务按无 defer 兼容 |
 | 2026-08-21 | v2.38 | 吸收 Things 3 / Superlist 的 Areas / Projects / Headings 低噪声组织方式：任务新增可选本地“分组标题”入口，列表在非手动 Today 排序时按标题聚合并显示数量，任务行、新建/详情和 Agent 支持设置与清除；继续复用现有 `sectionId` 私人字段，不新增第二套实体、不把自由文本误认为飞书 tasklist/section GUID，飞书任务与同步状态保持不变 |
 | 2026-08-21 | v2.39 | 延伸 Things 3 / Superlist 的低噪声列表交互：分组标题现在可一键折叠/展开，标题和数量在折叠后仍保留；按任务视图与来源分别记忆本机折叠状态，重启后恢复。折叠只改变当前列表投影，不影响任务筛选、批量选择、宠物/Agent 数据范围或飞书同步 |
+| 2026-08-21 | v2.40 | 延伸 Superlist / Todoist 的组织与检索闭环：任务筛选、保存视图和 Todo Pet 视图支持按本地分组标题精确过滤；Filter Assist 支持 `分组：标题` 并对未知标题 fail-closed，Agent `task_list` 复用同一过滤条件。标题始终是本地私人文本，不被解释为飞书 section GUID，也不进入远端写回 |

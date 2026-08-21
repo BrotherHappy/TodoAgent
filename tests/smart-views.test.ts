@@ -32,6 +32,7 @@ describe("smart views and explainable priority", () => {
     expect(view?.name).toBe("本周高优先级");
     expect(view?.sourceType).toBe("feishu");
     expect(view?.context).toBe("all");
+    expect(view?.sectionId).toBe("all");
     writeSmartViews([view!, { bad: true } as never]);
     expect(readSmartViews()).toEqual([view]);
     window.localStorage.setItem(SMART_VIEWS_STORAGE_KEY, "not-json");
@@ -67,11 +68,12 @@ describe("smart views and explainable priority", () => {
       projectId: "发布",
       tag: "release",
       context: "办公室",
+      sectionId: "本周发布",
       dateFilter: "overdue",
     }, "2026-08-20T08:00:00.000Z");
-    expect(current).toMatchObject({ tag: "release", context: "办公室", dateFilter: "overdue" });
+    expect(current).toMatchObject({ tag: "release", context: "办公室", sectionId: "本周发布", dateFilter: "overdue" });
     writeSmartViews([current!]);
-    expect(readSmartViews()[0]).toMatchObject({ tag: "release", context: "办公室", dateFilter: "overdue" });
+    expect(readSmartViews()[0]).toMatchObject({ tag: "release", context: "办公室", sectionId: "本周发布", dateFilter: "overdue" });
 
     window.localStorage.setItem(
       SMART_VIEWS_STORAGE_KEY,
@@ -92,6 +94,7 @@ describe("smart views and explainable priority", () => {
       tag: "all",
       flagged: false,
       context: "all",
+      sectionId: "all",
       dateFilter: "any",
       sort: "manual",
     });

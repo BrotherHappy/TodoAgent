@@ -2008,11 +2008,13 @@ function TaskListPage({
   const [flaggedFilter, setFlaggedFilter] = useState(false);
   const [projectFilter, setProjectFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
+  const [sectionFilter, setSectionFilter] = useState("all");
   const [contextFilter, setContextFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState<SmartViewDateFilter>("any");
   const [sortFilter, setSortFilter] = useState<SmartViewSort>("manual");
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
   const [tagOptions, setTagOptions] = useState<string[]>([]);
+  const [sectionOptions, setSectionOptions] = useState<string[]>([]);
   const [contextOptions, setContextOptions] = useState<string[]>([]);
   const [taskSnapshot, setTaskSnapshot] = useState<Task[]>([]);
   const [smartViews, setSmartViews] = useState<SmartViewDefinition[]>(() => readSmartViews());
@@ -2032,6 +2034,7 @@ function TaskListPage({
     setFlaggedFilter(false);
     setProjectFilter("all");
     setTagFilter("all");
+    setSectionFilter("all");
     setContextFilter("all");
     setDateFilter("any");
     setSortFilter("manual");
@@ -2067,6 +2070,7 @@ function TaskListPage({
     setFlaggedFilter(view.flagged === true);
     setProjectFilter(view.projectId);
     setTagFilter(view.tag);
+    setSectionFilter(view.sectionId ?? "all");
     setContextFilter(view.context);
     setDateFilter(view.dateFilter);
     setSortFilter(view.sort);
@@ -2082,6 +2086,7 @@ function TaskListPage({
       flagged: flaggedFilter,
       projectId: projectFilter,
       tag: tagFilter,
+      sectionId: sectionFilter,
       context: contextFilter,
       dateFilter,
       sort: sortFilter,
@@ -2112,6 +2117,7 @@ function TaskListPage({
     const result = parseSmartViewQuery(smartViewQuery, {
       projects: projectOptions,
       tags: tagOptions,
+      sections: sectionOptions,
       contexts: contextOptions,
     });
     setSmartViewQueryResult(result);
@@ -2124,6 +2130,7 @@ function TaskListPage({
     setFlaggedFilter(filters.flagged === true);
     setProjectFilter(filters.projectId);
     setTagFilter(filters.tag);
+    setSectionFilter(filters.sectionId);
     setContextFilter(filters.context);
     setDateFilter(filters.dateFilter);
     setSortFilter(filters.sort);
@@ -2153,6 +2160,7 @@ function TaskListPage({
                 (!flaggedFilter || task.flagged === true) &&
                 (projectFilter === "all" || task.projectId === projectFilter) &&
                 (tagFilter === "all" || task.tags.includes(tagFilter)) &&
+                (sectionFilter === "all" || task.sectionId === sectionFilter) &&
                 (contextFilter === "all" ||
                   (task.contexts ?? []).some(
                     (context) =>
@@ -2171,6 +2179,7 @@ function TaskListPage({
       flaggedFilter,
       projectFilter,
       tagFilter,
+      sectionFilter,
       contextFilter,
       dateFilter,
       sortFilter,
@@ -2335,6 +2344,10 @@ function TaskListPage({
         [...new Set(tasks.flatMap((task) => task.tags))]
           .sort((a, b) => a.localeCompare(b, "zh-CN")),
       );
+      setSectionOptions(
+        [...new Set(tasks.map((task) => task.sectionId).filter((value): value is string => Boolean(value?.trim())))]
+          .sort((a, b) => a.localeCompare(b, "zh-CN")),
+      );
       setContextOptions(
         [...new Set(tasks.flatMap((task) => task.contexts ?? []))]
           .sort((a, b) => a.localeCompare(b, "zh-CN")),
@@ -2431,7 +2444,7 @@ function TaskListPage({
           <div className="filter-anchor">
             <button
             type="button"
-              className={`icon-button ${priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? "active" : ""}`}
+              className={`icon-button ${priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? "active" : ""}`}
               aria-label="筛选"
               aria-expanded={filterOpen}
               onClick={() => setFilterOpen((value) => !value)}
@@ -2476,7 +2489,7 @@ function TaskListPage({
                     </button>
                   </div>
                   <small id="smart-view-query-hint">
-                    只生成筛选预览，不修改任务；支持重点标记、日期、优先级、来源、项目、标签和情境。
+                    只生成筛选预览，不修改任务；支持重点标记、日期、优先级、来源、项目、分组标题、标签和情境。
                   </small>
                   {smartViewQueryResult?.kind === "suggestion" && (
                     <div className="filter-assist-preview" role="status">
@@ -2559,6 +2572,24 @@ function TaskListPage({
                     {tagOptions.map((tag) => (
                       <option key={tag} value={tag}>
                         {tag}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="filter-select-label">
+                  分组标题
+                  <select
+                    className="field-select"
+                    value={sectionFilter}
+                    onChange={(event) => {
+                      setSectionFilter(event.target.value);
+                      setActiveSmartViewId(undefined);
+                    }}
+                  >
+                    <option value="all">全部分组</option>
+                    {sectionOptions.map((section) => (
+                      <option key={section} value={section}>
+                        {section}
                       </option>
                     ))}
                   </select>
@@ -2661,6 +2692,7 @@ function TaskListPage({
                       setPriorityFilter("all");
                       setProjectFilter("all");
                       setTagFilter("all");
+                      setSectionFilter("all");
                       setContextFilter("all");
                       setDateFilter("any");
                       setSortFilter("manual");
@@ -2920,7 +2952,7 @@ function TaskListPage({
             <h2>
               {search
                 ? `没有匹配“${search}”的任务`
-                : priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
+                : priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
                   ? "没有符合筛选的任务"
                   : route === "completed"
                     ? "还没有已完成任务"
@@ -2931,7 +2963,7 @@ function TaskListPage({
             <p>
               {search
                 ? "试试其他关键词，或清除搜索后查看这个列表中的全部任务。"
-                : priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
+                : priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
                   ? "调整或清除当前筛选后再看看。"
                   : route === "trash"
                     ? "删除的任务会先保留在这里。"
@@ -2939,7 +2971,7 @@ function TaskListPage({
                       ? "这里放尚未安排日期、项目或清单的任务；稍后再决定怎么处理。"
                       : "记录一件下一步要做的小事。"}
             </p>
-            {search || priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? (
+            {search || priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? (
               <button
                 type="button"
                 className="soft-button"
@@ -2949,12 +2981,13 @@ function TaskListPage({
                   setFlaggedFilter(false);
                   setProjectFilter("all");
                   setTagFilter("all");
+                  setSectionFilter("all");
                   setContextFilter("all");
                   setDateFilter("any");
                   setActiveSmartViewId(undefined);
                 }}
               >
-                {search && (priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual")
+                {search && (priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual")
                   ? "清除搜索和筛选"
                   : search
                     ? "清除搜索"

@@ -97,6 +97,9 @@ export const filterTasksForPetView = (
       (!view.flagged || task.flagged === true) &&
       (view.projectId === "all" || task.projectId === view.projectId) &&
       (view.tag === "all" || task.tags.includes(view.tag)) &&
+      (view.sectionId === undefined ||
+        view.sectionId === "all" ||
+        task.sectionId === view.sectionId) &&
       (view.context === "all" ||
         (task.contexts ?? []).some(
           (context) => context.toLocaleLowerCase() === view.context.toLocaleLowerCase(),

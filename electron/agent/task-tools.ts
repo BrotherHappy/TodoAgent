@@ -113,6 +113,8 @@ const listArgumentsSchema = z.strictObject({
   view: taskViewSchema.nullable(),
   text: z.string().max(1_000).nullable(),
   source: sourceSchema.nullable(),
+  // Local heading text only; never interpreted as a Feishu section GUID.
+  sectionId: sectionSchema.nullable().optional().default(null),
   flagged: z.boolean().optional().default(false),
   limit: z.number().int().min(1).max(500),
 });
@@ -866,7 +868,7 @@ export const createTaskTools = (
     taskTool({
       name: "task_list",
       description:
-        "List and search tasks. Use this before deciding which tasks to edit. Always provide all four arguments: view, text, source, and limit. Use null for an unused nullable filter and 100 for a normal default limit.",
+        "List and search tasks. Use this before deciding which tasks to edit. Always provide view, text, source, sectionId, and limit. Use null for an unused nullable filter and 100 for a normal default limit. sectionId is a local heading text, never a Feishu section GUID.",
       schema: listArgumentsSchema,
       analyze: (args) => {
         assertTaskCapability();
@@ -883,6 +885,7 @@ export const createTaskTools = (
             action: "list-tasks",
             view: args.view,
             source: args.source,
+            sectionId: args.sectionId,
             flagged: args.flagged,
             limit: args.limit,
           },
@@ -900,6 +903,7 @@ export const createTaskTools = (
             : options.getAgentCapabilities?.().feishuSync === false
               ? ["local"]
               : undefined,
+          sectionIds: args.sectionId ? [args.sectionId] : undefined,
           flagged: args.flagged === true,
         };
         const tasks = (await options.tasks.listTasks(filter)).slice(

@@ -37,6 +37,7 @@ export interface SmartViewDefinition {
   flagged?: boolean;
   projectId: string | "all";
   tag: string | "all";
+  sectionId?: string | "all";
   /** A manual, local-only context such as office or home. */
   context: string | "all";
   dateFilter: SmartViewDateFilter;
@@ -53,6 +54,7 @@ export interface SmartViewDraft {
   flagged?: boolean;
   projectId: string | "all";
   tag?: string | "all";
+  sectionId?: string | "all";
   context?: string | "all";
   dateFilter?: SmartViewDateFilter;
   sort?: SmartViewSort;
@@ -107,6 +109,7 @@ const valid = (value: unknown): value is SmartViewDefinition => {
     (item.flagged === undefined || typeof item.flagged === "boolean") &&
     (item.projectId === "all" || typeof item.projectId === "string") &&
     (item.tag === undefined || item.tag === "all" || typeof item.tag === "string") &&
+    (item.sectionId === undefined || item.sectionId === "all" || typeof item.sectionId === "string") &&
     (item.context === undefined || item.context === "all" || typeof item.context === "string") &&
     (item.dateFilter === undefined || isDateFilter(item.dateFilter)) &&
     (item.sort === undefined || isSort(item.sort)) &&
@@ -130,6 +133,7 @@ export const readSmartViews = (): SmartViewDefinition[] => {
         // Views written before v1.33 did not have tag/date fields. Keep them
         // usable rather than discarding a user's saved filters on upgrade.
         tag: item.tag ?? "all",
+        sectionId: item.sectionId ?? "all",
         flagged: item.flagged === true,
         context: item.context ?? "all",
         dateFilter: item.dateFilter ?? "any",
@@ -174,6 +178,7 @@ export const createSmartView = (
     flagged: draft.flagged === true,
     projectId: draft.projectId,
     tag: draft.tag ?? "all",
+    sectionId: draft.sectionId ?? "all",
     context: draft.context ?? "all",
     dateFilter: draft.dateFilter ?? "any",
     sort: draft.sort ?? "manual",

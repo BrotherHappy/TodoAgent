@@ -267,6 +267,7 @@ describe("TaskService views and task data", () => {
       priority: "high",
       plannedDate: "2026-08-11",
       dueAt: "2026-08-12T12:00:00.000Z",
+      sectionId: "本周发布",
     });
     await service.createTask({ title: "Buy milk", tags: ["personal"] });
 
@@ -276,6 +277,7 @@ describe("TaskService views and task data", () => {
       accountIds: ["work-account"],
       projectIds: ["product"],
       listIds: ["planning"],
+      sectionIds: ["本周发布"],
       tags: ["review", "desktop"],
       tagMode: "all",
       contexts: ["办公室", "深度工作"],

@@ -383,6 +383,8 @@ export interface TaskFilter {
   accountIds?: string[];
   projectIds?: string[];
   listIds?: string[];
+  /** Keep only tasks with one of these local section headings. */
+  sectionIds?: string[];
   tags?: string[];
   tagMode?: 'any' | 'all';
   contexts?: string[];

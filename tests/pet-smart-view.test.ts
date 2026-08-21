@@ -46,12 +46,12 @@ const view = (overrides: Partial<SmartViewDefinition> = {}): SmartViewDefinition
 describe("filterTasksForPetView", () => {
   it("filters by project, source, tag and case-insensitive context", () => {
     const tasks = [
-      task({ id: "match", title: "办公室发布", projectId: "work", tags: ["发布"], contexts: ["办公室"], source: { type: "feishu" } }),
+      task({ id: "match", title: "办公室发布", projectId: "work", sectionId: "本周发布", tags: ["发布"], contexts: ["办公室"], source: { type: "feishu" } }),
       task({ id: "other-project", title: "私人发布", projectId: "home", tags: ["发布"], contexts: ["办公室"], source: { type: "feishu" } }),
       task({ id: "other-source", title: "本地发布", projectId: "work", tags: ["发布"], contexts: ["办公室"], source: { type: "local" } }),
     ];
-    expect(filterTasksForPetView(tasks, view({ projectId: "work", tag: "发布", context: "办公室", sourceType: "feishu" }))).toHaveLength(1);
-    expect(filterTasksForPetView(tasks, view({ projectId: "work", tag: "发布", context: "办公室", sourceType: "feishu" }))[0]?.id).toBe("match");
+    expect(filterTasksForPetView(tasks, view({ projectId: "work", sectionId: "本周发布", tag: "发布", context: "办公室", sourceType: "feishu" }))).toHaveLength(1);
+    expect(filterTasksForPetView(tasks, view({ projectId: "work", sectionId: "本周发布", tag: "发布", context: "办公室", sourceType: "feishu" }))[0]?.id).toBe("match");
   });
 
   it("applies date filters and stable saved-view sorting", () => {
