@@ -2325,6 +2325,97 @@ select {
 .timeline-gantt-meta .timeline-gantt-critical-meta {
   color: var(--app-accent, var(--app-brand));
 }
+.timeline-gantt-critical-routes {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 11px;
+  border: 1px solid color-mix(in srgb, var(--app-accent, var(--app-brand)) 20%, var(--app-line));
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--app-accent, var(--app-brand)) 5%, var(--app-surface-raised));
+}
+.timeline-gantt-critical-heading,
+.timeline-gantt-critical-chain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.timeline-gantt-critical-heading {
+  justify-content: space-between;
+}
+.timeline-gantt-critical-heading div {
+  display: grid;
+  gap: 2px;
+}
+.timeline-gantt-critical-heading strong {
+  color: var(--app-text);
+  font-size: 11px;
+}
+.timeline-gantt-critical-heading span,
+.timeline-gantt-critical-more {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.timeline-gantt-critical-heading small {
+  color: var(--app-accent, var(--app-brand));
+  font-variant-numeric: tabular-nums;
+}
+.timeline-gantt-critical-list {
+  display: grid;
+  gap: 6px;
+}
+.timeline-gantt-critical-chain {
+  min-width: 0;
+  align-items: flex-start;
+}
+.timeline-gantt-critical-project {
+  flex: 0 0 54px;
+  overflow: hidden;
+  padding-top: 5px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-gantt-critical-nodes {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.timeline-gantt-critical-node-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.timeline-gantt-critical-arrow {
+  color: var(--app-accent, var(--app-brand));
+  font-size: 12px;
+}
+.timeline-gantt-critical-node {
+  max-width: 220px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--app-accent, var(--app-brand)) 28%, var(--app-line));
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--app-text);
+  background: var(--app-surface-raised);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.timeline-gantt-critical-node:hover,
+.timeline-gantt-critical-node:focus-visible {
+  border-color: var(--app-accent, var(--app-brand));
+  color: var(--app-accent, var(--app-brand-strong));
+  background: var(--app-brand-soft);
+}
+.timeline-gantt-critical-more {
+  display: block;
+}
 .timeline-gantt-scroll {
   overflow-x: auto;
   border: 1px solid var(--app-line);

@@ -37,6 +37,12 @@ export interface GanttGroup {
   rows: GanttRow[];
 }
 
+export interface GanttCriticalChain {
+  projectId: string;
+  label: string;
+  taskIds: string[];
+}
+
 export interface GanttPlan {
   startDate: string;
   endDate: string;
@@ -46,6 +52,7 @@ export interface GanttPlan {
   datedTaskCount: number;
   blockedCount: number;
   criticalCount: number;
+  criticalChains: GanttCriticalChain[];
 }
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"] as const;
@@ -127,10 +134,10 @@ const progressFor = (task: Task): number | undefined => {
  * A chain is only marked when it has at least two tasks; isolated tasks are
  * useful work, but calling every task "critical" would make the signal noisy.
  */
-const criticalTaskIdsFor = (
+const criticalRoutesFor = (
   tasks: readonly Task[],
   spans: ReadonlyMap<string, { startDate: string; endDate: string }>,
-): ReadonlySet<string> => {
+): { ids: ReadonlySet<string>; chains: GanttCriticalChain[] } => {
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const datedIds = new Set(spans.keys());
   const memo = new Map<string, number>();
@@ -167,6 +174,8 @@ const criticalTaskIdsFor = (
   }
   const terminals = tasks.filter((task) => datedIds.has(task.id) && !(successors.get(task.id)?.length));
   const critical = new Set<string>();
+  const chains: GanttCriticalChain[] = [];
+  const seenChains = new Set<string>();
   for (const terminal of terminals) {
     const chain: string[] = [];
     const seen = new Set<string>();
@@ -183,9 +192,25 @@ const criticalTaskIdsFor = (
         });
       current = candidates.length ? byId.get(candidates[0]) : undefined;
     }
-    if (chain.length >= 2) chain.forEach((taskId) => critical.add(taskId));
+    if (chain.length >= 2) {
+      chain.forEach((taskId) => critical.add(taskId));
+      const chainKey = chain.join("\u0000");
+      if (!seenChains.has(chainKey)) {
+        seenChains.add(chainKey);
+        chains.push({
+          projectId: taskProjectId(terminal),
+          label: taskProjectLabel(terminal),
+          taskIds: chain.reverse(),
+        });
+      }
+    }
   }
-  return critical;
+  chains.sort((left, right) =>
+    left.label.localeCompare(right.label, "zh-CN") ||
+    right.taskIds.length - left.taskIds.length ||
+    left.taskIds.join("\u0000").localeCompare(right.taskIds.join("\u0000")),
+  );
+  return { ids: critical, chains };
 };
 
 /**
@@ -220,7 +245,7 @@ export const buildGanttPlan = (
     if (end < startDate || start > endDate) continue;
     spans.set(task.id, { startDate: start, endDate: end });
   }
-  const criticalTaskIds = criticalTaskIdsFor(
+  const criticalRoutes = criticalRoutesFor(
     tasks.filter((task) => !task.deletedAt && (projectId === "all" || taskProjectId(task) === projectId)),
     spans,
   );
@@ -245,7 +270,7 @@ export const buildGanttPlan = (
         return !dependency || dependency.status !== "completed";
       });
     if (blocked) blockedCount += 1;
-    const critical = criticalTaskIds.has(task.id);
+    const critical = criticalRoutes.ids.has(task.id);
     const groupId = taskProjectId(task);
     const group = groupMap.get(groupId) ?? {
       projectId: groupId,
@@ -292,6 +317,7 @@ export const buildGanttPlan = (
     unscheduledTasks,
     datedTaskCount,
     blockedCount,
-    criticalCount: criticalTaskIds.size,
+    criticalCount: criticalRoutes.ids.size,
+    criticalChains: criticalRoutes.chains,
   };
 };

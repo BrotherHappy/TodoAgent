@@ -76,18 +76,23 @@ describe("GanttView", () => {
     const start = makeTask("路线起点", { projectId: "发布", plannedDate: "2026-08-19" });
     const finish = makeTask("路线终点", { projectId: "发布", plannedDate: "2026-08-20", dependencyIds: [start.id] });
     const plan = buildGanttPlan([start, finish], "2026-08-19", "all", "2026-08-19");
+    const onSelect = vi.fn();
     render(
       <GanttView
         plan={plan}
         projectId="all"
         projectIds={["发布"]}
         onProjectChange={vi.fn()}
-        onSelect={vi.fn()}
+        onSelect={onSelect}
       />,
     );
 
     expect(screen.getByText("关键路线 2 项")).toBeVisible();
-    expect(screen.getAllByText(/关键路线/u)).toHaveLength(3);
+    const routes = screen.getByRole("region", { name: "关键路线" });
+    expect(within(routes).getByRole("button", { name: "路线起点" })).toBeVisible();
+    expect(within(routes).getByText("→")).toBeVisible();
+    fireEvent.click(within(routes).getByRole("button", { name: "路线终点" }));
+    expect(onSelect).toHaveBeenCalledWith("路线终点");
     expect(screen.getByRole("button", { name: /路线终点，2026-08-20 至 2026-08-20，进行中，关键路线/u })).toBeVisible();
   });
 });

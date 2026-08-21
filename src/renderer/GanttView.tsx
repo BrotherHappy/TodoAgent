@@ -39,6 +39,7 @@ export function GanttView({
 }: GanttViewProps) {
   const totalRows = plan.groups.reduce((total, group) => total + group.rows.length, 0);
   const projectOptions = projectIds.filter((value) => value.trim().length > 0);
+  const taskById = new Map(plan.groups.flatMap((group) => group.rows.map((row) => [row.task.id, row.task] as const)));
   return (
     <section className="timeline-gantt" aria-label="甘特视图">
       <div className="timeline-gantt-heading">
@@ -60,6 +61,35 @@ export function GanttView({
         {plan.criticalCount > 0 && <span className="timeline-gantt-critical-meta"><Sparkles size={13} /> 关键路线 {plan.criticalCount} 项</span>}
         {plan.blockedCount > 0 && <span className="is-warning"><AlertTriangle size={13} /> {plan.blockedCount} 项被前置依赖阻塞</span>}
       </div>
+      {plan.criticalChains.length > 0 && (
+        <section className="timeline-gantt-critical-routes" aria-label="关键路线">
+          <div className="timeline-gantt-critical-heading">
+            <div><strong>关键路线</strong><span>沿着依赖最长链，先完成左侧任务</span></div>
+            <small>{plan.criticalChains.length} 条</small>
+          </div>
+          <div className="timeline-gantt-critical-list">
+            {plan.criticalChains.slice(0, 6).map((chain) => (
+              <div className="timeline-gantt-critical-chain" key={`${chain.projectId}:${chain.taskIds.join("/")}`}>
+                <span className="timeline-gantt-critical-project">{chain.label}</span>
+                <div className="timeline-gantt-critical-nodes">
+                  {chain.taskIds.map((taskId, index) => {
+                    const task = taskById.get(taskId);
+                    return (
+                      <span className="timeline-gantt-critical-node-wrap" key={taskId}>
+                        {index > 0 && <span className="timeline-gantt-critical-arrow" aria-hidden="true">→</span>}
+                        <button type="button" className="timeline-gantt-critical-node" onClick={() => onSelect(taskId)} title={task?.title ?? taskId}>
+                          {task?.title ?? taskId}
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          {plan.criticalChains.length > 6 && <small className="timeline-gantt-critical-more">还有 {plan.criticalChains.length - 6} 条路线</small>}
+        </section>
+      )}
       {totalRows > 0 ? (
         <div className="timeline-gantt-scroll">
           <div className="timeline-gantt-grid" style={{ "--gantt-days": String(plan.days.length) } as CSSProperties}>
