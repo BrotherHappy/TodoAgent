@@ -159,6 +159,10 @@ import type {
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { ResearchCardMarkdown } from "./ResearchCardMarkdown";
+import {
+  ResearchCardActionList,
+  researchCardActionKey,
+} from "./ResearchCardActionList";
 import { SpeechOutputButton } from "./SpeechOutputButton";
 import { AgentRunActivity } from "./AgentRunActivity";
 import { PetWeatherForecast } from "./PetWeatherForecast";
@@ -237,6 +241,7 @@ import {
   toLocalDateTimeInput,
 } from "./local-datetime";
 import { feishuCreationBlockedMessage } from "./feishu-create-guard";
+import { buildResearchActionTaskInput } from "../shared/research-card-actions";
 import {
   PetCharacter,
   type PetMood,
@@ -2914,6 +2919,10 @@ function TaskInspector({
   const [researchUrlInput, setResearchUrlInput] = useState("");
   const [researchSummaryInput, setResearchSummaryInput] = useState("");
   const [researchActionsInput, setResearchActionsInput] = useState("");
+  const [researchActionBusyKey, setResearchActionBusyKey] = useState<string>();
+  const [createdResearchActionKeys, setCreatedResearchActionKeys] = useState<
+    Set<string>
+  >(() => new Set());
   const [customFieldKey, setCustomFieldKey] = useState("");
   const [customFieldValue, setCustomFieldValue] = useState("");
   const [customFieldType, setCustomFieldType] = useState<CustomFieldType>("text");
@@ -3026,6 +3035,8 @@ function TaskInspector({
     setResearchUrlInput("");
     setResearchSummaryInput("");
     setResearchActionsInput("");
+    setResearchActionBusyKey(undefined);
+    setCreatedResearchActionKeys(new Set());
     setCustomFieldKey("");
     setCustomFieldValue("");
     setCustomFieldType("text");
@@ -3559,6 +3570,35 @@ function TaskInspector({
     setResearchSummaryInput("");
     setResearchActionsInput("");
     notify("研究卡已保存到本机", "success");
+  };
+  const createResearchActionTask = async (
+    card: TaskResearchCard,
+    actionItem: string,
+    index: number,
+  ): Promise<void> => {
+    if (!task) return;
+    const key = researchCardActionKey(card.id, index);
+    if (researchActionBusyKey || createdResearchActionKeys.has(key)) return;
+    setResearchActionBusyKey(key);
+    try {
+      await controller.create(
+        buildResearchActionTaskInput(task, card, actionItem),
+        { selectCreated: false },
+      );
+      setCreatedResearchActionKeys((current) => {
+        const next = new Set(current);
+        next.add(key);
+        return next;
+      });
+      notify("已创建本地行动任务，不会写回飞书", "success");
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "创建行动任务失败",
+        "error",
+      );
+    } finally {
+      setResearchActionBusyKey(undefined);
+    }
   };
   const removeResearchCard = async (cardId: string): Promise<void> => {
     const saved = await save({
@@ -4332,9 +4372,14 @@ function TaskInspector({
                     )}
                     {card.summary && <ResearchCardMarkdown text={card.summary} />}
                     {card.actionItems.length > 0 && (
-                      <ul className="research-card-actions">
-                        {card.actionItems.map((item, index) => <li key={`${card.id}-${index}`}>{item}</li>)}
-                      </ul>
+                      <ResearchCardActionList
+                        card={card}
+                        createdKeys={createdResearchActionKeys}
+                        busyKey={researchActionBusyKey}
+                        onCreate={(nextCard, item, index) => {
+                          void createResearchActionTask(nextCard, item, index);
+                        }}
+                      />
                     )}
                     <div className="research-card-footer">
                       <time dateTime={card.capturedAt}>记录于 {formatDateTime(card.capturedAt)}</time>

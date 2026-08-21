@@ -3540,6 +3540,46 @@ select {
   margin: 0;
   padding-left: 17px;
 }
+.research-card-action-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding-left: 2px;
+}
+.research-card-action-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.research-card-action-create {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--app-text-faint);
+  background: var(--app-surface);
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.research-card-action-create:hover:not(:disabled),
+.research-card-action-create:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 35%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.research-card-action-create:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+.research-card-action-create.is-created {
+  border-color: color-mix(in srgb, var(--app-success) 30%, var(--app-line));
+  color: var(--app-success);
+  background: color-mix(in srgb, var(--app-success-soft) 42%, var(--app-surface));
+}
 .research-card-footer {
   display: flex;
   align-items: center;
