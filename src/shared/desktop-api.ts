@@ -105,6 +105,7 @@ export interface TaskDesktopApi {
   update(request: UpdateTaskRequest): Promise<TaskMutationResult>;
   complete(request: CompleteTaskRequest): Promise<TaskMutationResult>;
   reopen(id: TaskId): Promise<TaskMutationResult>;
+  skipRecurring(id: TaskId): Promise<TaskMutationResult>;
   moveToToday(request: MoveToTodayRequest): Promise<TaskMutationResult>;
   startFocus(id: TaskId): Promise<TaskMutationResult>;
   pauseFocus(id: TaskId): Promise<TaskMutationResult>;
@@ -788,6 +789,7 @@ export const DESKTOP_CHANNELS = {
   taskUpdate: "tasks:update",
   taskComplete: "tasks:complete",
   taskReopen: "tasks:reopen",
+  taskSkipRecurring: "tasks:skip-recurring",
   taskMoveToToday: "tasks:move-to-today",
   taskStartFocus: "tasks:start-focus",
   taskPauseFocus: "tasks:pause-focus",

@@ -380,6 +380,9 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.taskReopen, (_event, input) =>
     changed(() => dependencies.tasks.reopenTask(idSchema.parse(input))),
   );
+  handle(DESKTOP_CHANNELS.taskSkipRecurring, (_event, input) =>
+    changed(() => dependencies.tasks.skipRecurringTask(idSchema.parse(input))),
+  );
   handle(DESKTOP_CHANNELS.taskMoveToToday, (_event, input) => {
     const request = z
       .object({

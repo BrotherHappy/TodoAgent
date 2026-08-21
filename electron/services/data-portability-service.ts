@@ -773,7 +773,7 @@ const validateOperation = (value: unknown, path: string): TaskOperation => {
   expectId(operation.id, `${path}.id`);
   expectEnum(operation.kind, [
     'create', 'update', 'complete', 'reopen', 'bulk', 'move-to-today', 'focus',
-    'reorder-today', 'plan-today', 'trash', 'restore', 'purge',
+    'skip-recurring', 'reorder-today', 'plan-today', 'trash', 'restore', 'purge',
   ] as const, `${path}.kind`);
   expectIsoDateTime(operation.createdAt, `${path}.createdAt`);
   expectOptional(operation, 'undoneAt', path, expectIsoDateTime);
@@ -1650,6 +1650,7 @@ const markdownOperationLabels: Record<TaskOperation['kind'], string> = {
   bulk: '批量操作',
   'move-to-today': '移到今天',
   focus: '专注记录',
+  'skip-recurring': '跳过本次循环',
   'reorder-today': '调整今日顺序',
   'plan-today': '安排今日计划',
   trash: '移入回收站',

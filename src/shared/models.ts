@@ -449,6 +449,7 @@ export type TaskOperationKind =
   | 'bulk'
   | 'move-to-today'
   | 'focus'
+  | 'skip-recurring'
   | 'reorder-today'
   | 'plan-today'
   | 'trash'

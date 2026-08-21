@@ -37,7 +37,13 @@ import type {
   UpdateProjectInput,
 } from "../../src/shared/models";
 import { LocalStore } from "./local-store";
-import { createNextRecurringTask, validateRecurrenceRule } from "./recurrence";
+import {
+  createNextRecurringTask,
+  getNextOccurrence,
+  getTaskRecurrenceAnchor,
+  shiftTemporal,
+  validateRecurrenceRule,
+} from "./recurrence";
 
 export interface TaskServiceOptions {
   clock?: () => Date;
@@ -1257,6 +1263,82 @@ export class TaskService {
         generatedTask:
           generatedTask === undefined ? undefined : deepClone(generatedTask),
       };
+    });
+  }
+
+  /**
+   * Move an open local recurring task to its next occurrence without creating
+   * a second task. This mirrors the “skip this occurrence” affordance found in
+   * mature recurring-task products while keeping the task identity, notes and
+   * history intact. Provider-owned Feishu recurrences remain read-only.
+   */
+  async skipRecurringTask(id: TaskId): Promise<TaskMutationResult> {
+    return this.store.transact((state) => {
+      const task = this.requireTask(state, id);
+      this.requireNotDeleted(task);
+      if (task.source.type !== "local") {
+        throw new TaskStateError(
+          "飞书循环由飞书负责生成，请在飞书中跳过本次。",
+        );
+      }
+      if (task.recurrence === undefined) {
+        throw new TaskStateError(`Task is not recurring: ${id}`);
+      }
+      if (task.status !== "open") {
+        throw new TaskStateError("只有未完成的循环任务可以跳过本次。");
+      }
+      if (task.focusStartedAt !== undefined) {
+        throw new TaskStateError("请先暂停专注，再跳过本次循环。");
+      }
+      const anchor = getTaskRecurrenceAnchor(task);
+      if (anchor === undefined) {
+        throw new TaskStateError("这项循环任务没有可用日期，无法跳过本次。");
+      }
+      const currentIndex = task.recurrenceIndex ?? 0;
+      const nextAnchor = getNextOccurrence(
+        anchor,
+        task.recurrence,
+        currentIndex,
+      );
+      if (nextAnchor === undefined) {
+        throw new TaskStateError("这已经是循环的最后一次，无法再跳过。");
+      }
+
+      const now = this.now();
+      const before = deepClone(task);
+      const patch: UpdateTaskInput = {
+        recurrenceIndex: currentIndex + 1,
+      };
+      if (task.plannedDate !== undefined) {
+        patch.plannedDate = shiftTemporal(task.plannedDate, anchor, nextAnchor);
+      }
+      if (task.startAt !== undefined) {
+        patch.startAt = shiftTemporal(task.startAt, anchor, nextAnchor);
+      }
+      if (task.dueAt !== undefined) {
+        patch.dueAt = shiftTemporal(task.dueAt, anchor, nextAnchor);
+      }
+      if (task.timeBlock !== undefined) {
+        patch.timeBlock = {
+          startAt: shiftTemporal(task.timeBlock.startAt, anchor, nextAnchor),
+          endAt: shiftTemporal(task.timeBlock.endAt, anchor, nextAnchor),
+        };
+      }
+      if (task.reminders.length > 0) {
+        patch.reminders = task.reminders.map((reminder) => ({
+          ...reminder,
+          at: shiftTemporal(reminder.at, anchor, nextAnchor),
+        }));
+      }
+      const updated = this.applyPatch(task, patch, now, false);
+      state.tasks[id] = updated;
+      const operation = this.recordOperation(
+        state,
+        "skip-recurring",
+        [this.change(before, updated)],
+        now,
+      );
+      return { task: deepClone(updated), operationId: operation.id };
     });
   }
 

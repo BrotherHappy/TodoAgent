@@ -65,6 +65,8 @@ const desktopApi: DesktopApi = {
     complete: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskComplete, request),
     reopen: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskReopen, id),
+    skipRecurring: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskSkipRecurring, id),
     moveToToday: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskMoveToToday, request),
     startFocus: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskStartFocus, id),

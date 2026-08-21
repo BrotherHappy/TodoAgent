@@ -3978,6 +3978,30 @@ select {
 .recurrence-actions {
   flex-wrap: wrap;
 }
+.recurrence-skip-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--app-brand) 5%, transparent);
+}
+.recurrence-skip-card > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.recurrence-skip-card strong {
+  font-size: 12px;
+}
+.recurrence-skip-card small {
+  color: var(--app-text-faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
 .reminder-presets {
   display: flex;
   flex-wrap: wrap;

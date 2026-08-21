@@ -56,6 +56,7 @@ import {
   Settings,
   ShieldAlert,
   ShieldCheck,
+  SkipForward,
   Sparkles,
   Square,
   Sun,
@@ -599,6 +600,7 @@ const taskHistoryOperationLabels: Record<TaskHistoryEntry["kind"], string> = {
   bulk: "批量操作",
   "move-to-today": "移到今天",
   focus: "专注记录",
+  "skip-recurring": "跳过本次循环",
   "reorder-today": "调整今日顺序",
   "plan-today": "安排今日计划",
   trash: "移入回收站",
@@ -3013,6 +3015,7 @@ function TaskInspector({
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
   const [showTemplateSave, setShowTemplateSave] = useState(false);
+  const [skipRecurringBusy, setSkipRecurringBusy] = useState(false);
   const editingTaskIdRef = useRef<string | undefined>(undefined);
   // A native input can emit a second blur save before the first IPC reply.
   // Per-field revisions stop the older completion from clearing a newer
@@ -3127,6 +3130,7 @@ function TaskInspector({
     setEditingCommentBody("");
     setCommentBusy(false);
     setShowTemplateSave(false);
+    setSkipRecurringBusy(false);
     setTimeBlockStart(toLocalDateTimeInput(task.timeBlock?.startAt));
     setTimeBlockEnd(toLocalDateTimeInput(task.timeBlock?.endAt));
     void window.desktopApi.tasks
@@ -3363,6 +3367,25 @@ function TaskInspector({
       return false;
     }
     return applySave(patch);
+  };
+  const skipRecurring = async (): Promise<void> => {
+    if (
+      task.source.type !== "local" ||
+      task.recurrence === undefined ||
+      task.status !== "open" ||
+      skipRecurringBusy
+    ) {
+      return;
+    }
+    setSkipRecurringBusy(true);
+    try {
+      await controller.skipRecurring(task.id);
+      notify("已跳过本次，下一个循环已安排", "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "跳过本次失败", "error");
+    } finally {
+      setSkipRecurringBusy(false);
+    }
   };
   const commitPlannedDate = async (value = plannedDateInput): Promise<void> => {
     if (!dirtyFieldsRef.current.has("plannedDate")) return;
@@ -4959,6 +4982,40 @@ function TaskInspector({
                       : "月"}
                 </span>
               </div>
+            </div>
+          )}
+          {task.source.type === "local" && task.recurrence && (
+            <div className="recurrence-skip-card">
+              <div>
+                <strong>本次不做？</strong>
+                <small>
+                  跳过后会把日期、时间块和本地提醒一起移到下一次，不会新建重复任务。
+                </small>
+              </div>
+              <button
+                type="button"
+                className="soft-button"
+                disabled={
+                  skipRecurringBusy ||
+                  task.status !== "open" ||
+                  task.focusStartedAt !== undefined ||
+                  !(
+                    task.dueAt ||
+                    task.plannedDate ||
+                    task.startAt ||
+                    task.timeBlock?.startAt
+                  )
+                }
+                title={
+                  task.focusStartedAt !== undefined
+                    ? "请先暂停专注"
+                    : "将本次循环平移到下一次"
+                }
+                onClick={() => void skipRecurring()}
+              >
+                <SkipForward size={15} />
+                {skipRecurringBusy ? "正在跳过…" : "跳过本次"}
+              </button>
             </div>
           )}
           {task.source.type === "feishu" && (

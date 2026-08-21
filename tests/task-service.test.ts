@@ -1272,6 +1272,102 @@ describe("TaskService mutations, recovery, and recurrence", () => {
     expect(finalOccurrence.generatedTask).toBeUndefined();
   });
 
+  it("skips one local recurrence in place, shifts its schedule, and undoes atomically", async () => {
+    const { service } = await createFixture();
+    const recurring = await service.createTask({
+      title: "跳过本次的周报",
+      plannedDate: "2026-08-09",
+      startAt: "2026-08-09T09:00:00.000Z",
+      dueAt: "2026-08-09T10:00:00.000Z",
+      timeBlock: {
+        startAt: "2026-08-09T09:00:00.000Z",
+        endAt: "2026-08-09T10:30:00.000Z",
+      },
+      reminders: [
+        {
+          id: "weekly-reminder",
+          at: "2026-08-09T08:45:00.000Z",
+          enabled: true,
+          source: "local",
+        },
+      ],
+      recurrence: { frequency: "weekly", interval: 1, weekdays: [0] },
+    });
+
+    const skipped = await service.skipRecurringTask(recurring.task.id);
+
+    expect(skipped.task).toMatchObject({
+      id: recurring.task.id,
+      status: "open",
+      recurrenceIndex: 1,
+      plannedDate: "2026-08-16",
+      startAt: "2026-08-16T09:00:00.000Z",
+      dueAt: "2026-08-16T10:00:00.000Z",
+      timeBlock: {
+        startAt: "2026-08-16T09:00:00.000Z",
+        endAt: "2026-08-16T10:30:00.000Z",
+      },
+    });
+    expect(skipped.task.reminders[0]?.at).toBe(
+      "2026-08-16T08:45:00.000Z",
+    );
+    expect(skipped.operationId).toBeTruthy();
+    expect((await service.getOperations(1))[0]?.kind).toBe("skip-recurring");
+    expect((await service.listTasks({ includeDeleted: true })).map((task) => task.id)).toEqual([
+      recurring.task.id,
+    ]);
+
+    await service.undo(skipped.operationId);
+    expect(await service.getTask(recurring.task.id)).toMatchObject({
+      recurrenceIndex: 0,
+      plannedDate: "2026-08-09",
+      startAt: "2026-08-09T09:00:00.000Z",
+      dueAt: "2026-08-09T10:00:00.000Z",
+    });
+    expect((await service.getTask(recurring.task.id))?.reminders[0]?.at).toBe(
+      "2026-08-09T08:45:00.000Z",
+    );
+  });
+
+  it("keeps provider recurrences and unsafe states fail-closed", async () => {
+    const { service } = await createFixture();
+    const remote = await service.createTask({
+      title: "飞书循环",
+      dueAt: "2026-08-09T10:00:00.000Z",
+      recurrence: { frequency: "daily", interval: 1 },
+      source: { type: "feishu", accountId: "primary", externalId: "remote-repeat" },
+      sync: { status: "synced" },
+    });
+    await expect(service.skipRecurringTask(remote.task.id)).rejects.toThrow(
+      "飞书循环由飞书负责生成",
+    );
+    expect(await service.getTask(remote.task.id)).toMatchObject({
+      dueAt: "2026-08-09T10:00:00.000Z",
+      recurrenceIndex: 0,
+      sync: { status: "synced" },
+    });
+
+    const final = await service.createTask({
+      title: "最后一次",
+      plannedDate: "2026-08-09",
+      recurrence: { frequency: "daily", interval: 1, maxOccurrences: 1 },
+    });
+    await expect(service.skipRecurringTask(final.task.id)).rejects.toThrow(
+      "最后一次",
+    );
+
+    const focused = await service.createTask({
+      title: "专注中的循环",
+      plannedDate: "2026-08-09",
+      recurrence: { frequency: "daily", interval: 1 },
+    });
+    await service.startFocus(focused.task.id);
+    await expect(service.skipRecurringTask(focused.task.id)).rejects.toThrow(
+      "请先暂停专注",
+    );
+    expect((await service.getTask(focused.task.id))?.recurrenceIndex).toBe(0);
+  });
+
   it("edits one occurrence, future occurrences, or the entire recurrence series", async () => {
     const { service } = await createFixture();
     const first = await service.createTask({

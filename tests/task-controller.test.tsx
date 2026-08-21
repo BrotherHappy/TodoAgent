@@ -393,4 +393,47 @@ describe("useTaskController", () => {
     expect(result.current.selectedId).toBeUndefined();
     expect(get).toHaveBeenCalledWith(task.id, true);
   });
+
+  it("routes skip recurring through the desktop API and refreshes the same task", async () => {
+    const task = {
+      ...makeTask("2026-08-10T10:00:00.000Z"),
+      recurrence: { frequency: "daily" as const, interval: 1 },
+      recurrenceSeriesId: "task-date-refresh",
+      recurrenceIndex: 0,
+      plannedDate: "2026-08-10",
+    };
+    const skipped = {
+      ...task,
+      recurrenceIndex: 1,
+      plannedDate: "2026-08-11",
+      updatedAt: "2026-08-10T00:01:00.000Z",
+    };
+    const sections = vi
+      .fn<() => Promise<TaskViewSection[]>>()
+      .mockResolvedValueOnce([{ id: "due-today", tasks: [task] }])
+      .mockResolvedValueOnce([{ id: "upcoming", tasks: [skipped] }]);
+    const skipRecurring = vi.fn().mockResolvedValue({
+      task: skipped,
+      operationId: "operation-skip-recurring",
+    });
+    window.desktopApi = {
+      tasks: { sections, skipRecurring },
+      events: { onTasksChanged: () => () => undefined },
+    } as unknown as DesktopApi;
+
+    const { result } = renderHook(() => useTaskController("all", ""));
+    await waitFor(() => expect(result.current.selected?.id).toBe(task.id));
+
+    await act(async () => {
+      await result.current.skipRecurring(task.id);
+    });
+
+    expect(skipRecurring).toHaveBeenCalledWith(task.id);
+    expect(result.current.selected).toMatchObject({
+      id: task.id,
+      recurrenceIndex: 1,
+      plannedDate: "2026-08-11",
+    });
+    expect(result.current.lastOperationId).toBe("operation-skip-recurring");
+  });
 });

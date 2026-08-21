@@ -145,6 +145,7 @@ export interface TaskController {
     task: Task,
     options?: { selectUpdated?: boolean },
   ): Promise<string | undefined>;
+  skipRecurring(id: TaskId): Promise<string | undefined>;
   moveToToday(id: TaskId): Promise<string | undefined>;
   startFocus(id: TaskId): Promise<string | undefined>;
   pauseFocus(id: TaskId): Promise<string | undefined>;
@@ -535,13 +536,14 @@ export function useTaskController(
       });
       return undefined;
     },
-    [api, applyFallback, refresh],
+    [api, applyFallback, fallback, refresh],
   );
 
   const runMutation = useCallback(
     async (
       name:
         | "moveToToday"
+        | "skipRecurring"
         | "startFocus"
         | "pauseFocus"
         | "resetFocus"
@@ -574,6 +576,14 @@ export function useTaskController(
       }
       if (name === "moveToToday")
         applyFallback(id, { plannedDate: localDate() });
+      if (name === "skipRecurring") {
+        const task = fallback.find((candidate) => candidate.id === id);
+        if (task?.recurrence !== undefined) {
+          applyFallback(id, {
+            recurrenceIndex: (task.recurrenceIndex ?? 0) + 1,
+          });
+        }
+      }
       if (name === "startFocus")
         applyFallback(id, { focusStartedAt: new Date().toISOString() });
       if (name === "pauseFocus")
@@ -644,6 +654,7 @@ export function useTaskController(
       update,
       toggleComplete,
       moveToToday: (id) => runMutation("moveToToday", id),
+      skipRecurring: (id) => runMutation("skipRecurring", id),
       startFocus: (id) => runMutation("startFocus", id),
       pauseFocus: (id) => runMutation("pauseFocus", id),
       resetFocus: (id) => runMutation("resetFocus", id),
