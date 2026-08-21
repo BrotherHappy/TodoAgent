@@ -76,6 +76,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -218,6 +219,7 @@ import {
   buildTaskAgentPrompt,
 } from "./task-agent-context";
 import { groupTasksBySection } from "./task-sections";
+import { moveTaskBefore } from "./today-reorder";
 import {
   readTaskSectionCollapseState,
   taskSectionGroupKey,
@@ -1757,6 +1759,13 @@ function TaskRow({
   notify,
   moveUp,
   moveDown,
+  reorderable = false,
+  dragging = false,
+  dropTarget = false,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
   selectionMode = false,
   selectedForBulk = false,
   onToggleBulk,
@@ -1774,6 +1783,13 @@ function TaskRow({
   ) => void;
   moveUp?: () => void;
   moveDown?: () => void;
+  reorderable?: boolean;
+  dragging?: boolean;
+  dropTarget?: boolean;
+  onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragOver?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDrop?: (event: ReactDragEvent<HTMLDivElement>) => void;
   selectionMode?: boolean;
   selectedForBulk?: boolean;
   onToggleBulk?: () => void;
@@ -1822,6 +1838,7 @@ function TaskRow({
   const subtaskLabel = subtaskProgressLabel(subtaskProgress);
   const classes = [
     "task-row",
+    reorderable ? "is-reorderable" : "",
     selectionMode ? "bulk-mode" : "",
     selectedForBulk ? "bulk-selected" : "",
     selected ? "selected" : "",
@@ -1829,9 +1846,30 @@ function TaskRow({
     task.sync.status === "pending" ? "pending" : "",
     task.sync.status === "conflict" ? "conflict" : "",
     taskSyncVisualState(task.sync.status) === "error" ? "sync-error" : "",
+    dragging ? "is-dragging" : "",
+    dropTarget ? "is-drop-target" : "",
   ].join(" ");
   return (
-    <div className={classes} data-task-id={task.id}>
+    <div
+      className={classes}
+      data-task-id={task.id}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      {reorderable && !selectionMode && (
+        <button
+          type="button"
+          className="task-drag-handle"
+          draggable={!interactionDisabled}
+          disabled={interactionDisabled}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          aria-label={`拖动调整${task.title}的今日顺序`}
+          title="拖动调整今日顺序"
+        >
+          <GripVertical size={16} aria-hidden="true" />
+        </button>
+      )}
       {selectionMode && onToggleBulk && (
         <input
           className="bulk-select-checkbox"
@@ -2032,6 +2070,9 @@ function TaskListPage({
   }>();
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [draggingTaskId, setDraggingTaskId] = useState<string>();
+  const [dropTargetTaskId, setDropTargetTaskId] = useState<string>();
+  const [reorderBusy, setReorderBusy] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">(
     "all",
   );
@@ -2096,6 +2137,9 @@ function TaskListPage({
     setBulkPreview(undefined);
     setBulkAutomationPreview(undefined);
     setBulkEditOpen(false);
+    setDraggingTaskId(undefined);
+    setDropTargetTaskId(undefined);
+    setReorderBusy(false);
     setInboxTriageOpen(false);
     setSmartViewQuery("");
     setSmartViewQueryResult(undefined);
@@ -2503,6 +2547,74 @@ function TaskListPage({
         ? { label: "撤销", run: () => void controller.undo(operationId) }
         : undefined,
     );
+  };
+  const beginTodayDrag = (
+    taskId: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => {
+    if (reorderBusy || !orderedTodayIds.includes(taskId)) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", taskId);
+    setDraggingTaskId(taskId);
+    setDropTargetTaskId(undefined);
+  };
+  const endTodayDrag = () => {
+    if (reorderBusy) return;
+    setDraggingTaskId(undefined);
+    setDropTargetTaskId(undefined);
+  };
+  const dragOverTodayTask = (
+    taskId: string,
+    event: ReactDragEvent<HTMLDivElement>,
+  ) => {
+    if (
+      reorderBusy ||
+      !draggingTaskId ||
+      draggingTaskId === taskId ||
+      !orderedTodayIds.includes(taskId)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dropTargetTaskId !== taskId) setDropTargetTaskId(taskId);
+  };
+  const dropTodayTask = async (
+    targetTaskId: string,
+    event: ReactDragEvent<HTMLDivElement>,
+  ) => {
+    if (reorderBusy || !orderedTodayIds.includes(targetTaskId)) return;
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData("text/plain") || draggingTaskId;
+    if (!draggedId || draggedId === targetTaskId) {
+      endTodayDrag();
+      return;
+    }
+    const next = moveTaskBefore(orderedTodayIds, draggedId, targetTaskId);
+    if (next.every((id, index) => id === orderedTodayIds[index])) {
+      endTodayDrag();
+      return;
+    }
+    setReorderBusy(true);
+    try {
+      const operationId = await controller.reorderToday(next);
+      notify(
+        "Today 顺序已更新",
+        "success",
+        operationId
+          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          : undefined,
+      );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "暂时无法调整 Today 顺序",
+        "error",
+      );
+    } finally {
+      setReorderBusy(false);
+      setDraggingTaskId(undefined);
+      setDropTargetTaskId(undefined);
+    }
   };
   const askToReplan = () =>
     onAskAgent(
@@ -3269,9 +3381,16 @@ function TaskListPage({
                             selectionMode={bulkMode}
                             selectedForBulk={bulkSelection.has(task.id)}
                             onToggleBulk={() => toggleBulkSelection(task.id)}
-                            interactionDisabled={bulkBusy}
+                            interactionDisabled={bulkBusy || reorderBusy}
                             subtaskProgress={subtaskProgress.get(task.id)}
                             onAskAgent={onAskAgent}
+                            reorderable={canReorder && !bulkMode && task.status === "open"}
+                            dragging={draggingTaskId === task.id}
+                            dropTarget={dropTargetTaskId === task.id}
+                            onDragStart={(event) => beginTodayDrag(task.id, event)}
+                            onDragEnd={endTodayDrag}
+                            onDragOver={(event) => dragOverTodayTask(task.id, event)}
+                            onDrop={(event) => void dropTodayTask(task.id, event)}
                             moveUp={
                               canReorder && sectionIndex > 0
                                 ? () =>
