@@ -11503,6 +11503,71 @@ select {
 .automation-alternative-field .settings-input {
   width: 100%;
 }
+.automation-preview-card {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 4px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 28%, var(--app-line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-brand-soft) 24%, var(--app-surface));
+}
+.automation-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.automation-preview-heading strong {
+  color: var(--app-text);
+  font-size: 13px;
+}
+.automation-preview-heading p {
+  margin: 3px 0 0;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.automation-preview-summary {
+  color: var(--app-text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.automation-preview-hint,
+.automation-preview-empty,
+.automation-preview-more {
+  color: var(--app-text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.automation-preview-list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.automation-preview-list li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--app-text);
+  background: color-mix(in srgb, var(--app-surface) 72%, transparent);
+  font-size: 12px;
+}
+.automation-preview-list li > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.automation-preview-status {
+  flex: 0 0 auto;
+  width: 14px;
+  color: var(--app-brand-strong);
+  text-align: center;
+}
 .markdown-export-history-option {
   display: inline-flex;
   align-items: center;

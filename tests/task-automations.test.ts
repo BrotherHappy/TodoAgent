@@ -5,6 +5,7 @@ import {
   matchesTaskAutomation,
   normalizeTaskAutomationRules,
   taskAutomationPatch,
+  taskAutomationPreviewTasks,
   taskAutomationDeadlineDue,
   taskAutomationDeadlineLabel,
   taskAutomationScheduleDue,
@@ -141,6 +142,25 @@ describe("task automation rules", () => {
     expect(taskAutomationTrigger(open, completed)).toBe("task-completed");
     expect(taskAutomationTrigger(completed, completed)).toBeUndefined();
     expect(taskAutomationTrigger(open, task("t", { deletedAt: "2026-08-21T10:00:00.000Z" }))).toBeUndefined();
+  });
+
+  it("previews only eligible tasks for timer rules without writing", () => {
+    const open = task("open", { dueAt: "2026-08-21T09:30:00.000Z" });
+    const completed = task("done", { status: "completed", dueAt: open.dueAt });
+    const scheduled = rule({
+      trigger: "scheduled",
+      schedule: { frequency: "daily", time: "09:00" },
+    });
+    expect(taskAutomationPreviewTasks(scheduled, [open, completed])).toEqual([open]);
+    const deadline = rule({
+      trigger: "deadline-approaching",
+      deadlineWindowMinutes: 60,
+    });
+    expect(taskAutomationPreviewTasks(
+      deadline,
+      [open, completed],
+      new Date("2026-08-21T09:00:00.000Z"),
+    )).toEqual([open]);
   });
 
   it("keeps manual rules out of background transition execution", async () => {

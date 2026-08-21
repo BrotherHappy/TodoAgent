@@ -415,6 +415,27 @@ export function matchesTaskAutomation(
   return anyOf === undefined || anyOf.some(matchesBranch);
 }
 
+/** Preview the current task snapshot against a rule without performing any
+ * write. Event triggers are shown as condition matches; scheduled and
+ * deadline rules additionally mirror their open-task eligibility so the
+ * preview does not promise work the timer would skip. */
+export function taskAutomationPreviewTasks(
+  rule: TaskAutomationRule,
+  tasks: readonly Task[],
+  now = new Date(),
+): Task[] {
+  return tasks.filter((task) => {
+    if (!matchesTaskAutomation(rule, task)) return false;
+    if (rule.trigger === "scheduled") {
+      return task.deletedAt === undefined && task.status === "open";
+    }
+    if (rule.trigger === "deadline-approaching") {
+      return taskAutomationDeadlineDue(rule, task, now);
+    }
+    return true;
+  });
+}
+
 /** Return the edge represented by a pair of snapshots. */
 export function taskAutomationTrigger(
   previous: Task | undefined,

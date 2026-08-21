@@ -137,6 +137,7 @@ import {
   taskAutomationPatch,
   taskAutomationActionLabel,
   taskAutomationDeadlineLabel,
+  taskAutomationPreviewTasks,
   taskAutomationScheduleLabel,
   taskAutomationTriggerLabel,
   type TaskAutomationAction,
@@ -9787,6 +9788,11 @@ function SettingsPage({
   const [automationAlternativeConditions, setAutomationAlternativeConditions] =
     useState<AutomationConditionDraft[]>([]);
   const [automationAlternativesOpen, setAutomationAlternativesOpen] = useState(false);
+  const [automationPreview, setAutomationPreview] = useState<{
+    rule: TaskAutomationRule;
+    tasks: Task[];
+    draftKey: string;
+  }>();
   const automationProjectOptions = useMemo(() => {
     const options = new Map<string, string>();
     for (const project of automationProjectState.projects) {
@@ -9965,71 +9971,115 @@ function SettingsPage({
     };
     return Object.keys(branch).length > 0 ? branch : undefined;
   };
-  const addAutomation = async (): Promise<void> => {
-    if (appSettings.automations.length >= 50) {
-      notify("最多保存 50 条任务自动化规则", "error");
-      return;
-    }
+  const automationDraftKey = JSON.stringify({
+    name: automationName,
+    trigger: automationTrigger,
+    scheduleFrequency: automationScheduleFrequency,
+    scheduleTime: automationScheduleTime,
+    scheduleWeekdays: automationScheduleWeekdays,
+    deadlineWindowMinutes: automationDeadlineWindowMinutes,
+    conditionSource: automationConditionSource,
+    conditionProject: automationConditionProject,
+    conditionList: automationConditionList,
+    conditionSection: automationConditionSection,
+    conditionTag: automationConditionTag,
+    conditionContext: automationConditionContext,
+    alternatives: automationAlternativeConditions,
+    actionKind: automationActionKind,
+    actionValue: automationActionValue,
+  });
+  const buildAutomationRule = (): TaskAutomationRule => {
     if (automationTrigger === "scheduled" && !/^([01]\d|2[0-3]):[0-5]\d$/u.test(automationScheduleTime)) {
-      notify("请填写有效的计划时间", "error");
-      return;
+      throw new Error("INVALID_AUTOMATION_SCHEDULE_TIME");
     }
     if (
       automationTrigger === "scheduled" &&
       automationScheduleFrequency === "weekly" &&
       automationScheduleWeekdays.length === 0
     ) {
-      notify("每周计划至少选择一天", "error");
-      return;
+      throw new Error("INVALID_AUTOMATION_WEEKDAYS");
     }
     const alternativeConditions = automationAlternativeConditions
       .map(buildAutomationConditionBranch)
       .filter((branch): branch is TaskAutomationConditionBranch => branch !== undefined);
     if (alternativeConditions.length !== automationAlternativeConditions.length) {
-      notify("请完整填写每个任一条件组，或移除空白条件组", "error");
+      throw new Error("INVALID_AUTOMATION_ALTERNATIVE");
+    }
+    return createTaskAutomationRule({
+      name: automationName,
+      trigger: automationTrigger,
+      condition: {
+        ...(automationConditionSource === "all"
+          ? {}
+          : { source: automationConditionSource }),
+        ...(automationConditionProject.trim()
+          ? { projectId: automationConditionProject.trim() }
+          : {}),
+        ...(automationConditionList.trim()
+          ? { listId: automationConditionList.trim() }
+          : {}),
+        ...(automationConditionSection.trim()
+          ? { sectionId: automationConditionSection.trim() }
+          : {}),
+        ...(automationConditionTag.trim()
+          ? { tag: automationConditionTag.trim() }
+          : {}),
+        ...(automationConditionContext.trim()
+          ? { context: automationConditionContext.trim() }
+          : {}),
+        ...(alternativeConditions.length ? { anyOf: alternativeConditions } : {}),
+      },
+      action: buildAutomationAction(),
+      ...(automationTrigger === "scheduled"
+        ? {
+            schedule: {
+              frequency: automationScheduleFrequency,
+              time: automationScheduleTime,
+              ...(automationScheduleFrequency === "weekly"
+                ? { weekdays: automationScheduleWeekdays }
+                : {}),
+            },
+          }
+        : {}),
+      ...(automationTrigger === "deadline-approaching"
+        ? { deadlineWindowMinutes: Number(automationDeadlineWindowMinutes) }
+        : {}),
+    });
+  };
+  const automationErrorMessage = (reason: unknown): string => {
+    if (!(reason instanceof Error)) return "自动化规则无效";
+    if (reason.message === "INVALID_AUTOMATION_SCHEDULE_TIME") return "请填写有效的计划时间";
+    if (reason.message === "INVALID_AUTOMATION_WEEKDAYS") return "每周计划至少选择一天";
+    if (reason.message === "INVALID_AUTOMATION_ALTERNATIVE") return "请完整填写每个任一条件组，或移除空白条件组";
+    if (reason.message === "INVALID_TASK_AUTOMATION_RULE") return "请填写有效的规则名称和动作值";
+    return "自动化规则无效";
+  };
+  const automationPreviewTriggerHint = (rule: TaskAutomationRule): string => {
+    if (rule.trigger === "scheduled") return "计划触发只会处理仍未完成的任务。";
+    if (rule.trigger === "deadline-approaching") {
+      return "临近截止预览按当前时间窗口计算；实际执行仍会由后台定时检查。";
+    }
+    if (rule.trigger === "task-created") return "新建触发器只会在新任务创建时执行。";
+    if (rule.trigger === "task-completed") return "完成触发器只会在任务完成时执行。";
+    return "这里展示的是当前任务快照的条件匹配，不会模拟或执行动作。";
+  };
+  const previewAutomation = (): void => {
+    try {
+      const rule = buildAutomationRule();
+      const tasks = taskAutomationPreviewTasks(rule, projectController.tasks, new Date());
+      setAutomationPreview({ rule, tasks, draftKey: automationDraftKey });
+      notify(`试运行完成：当前有 ${tasks.length} 项任务符合条件`, "success");
+    } catch (reason) {
+      notify(automationErrorMessage(reason), "error");
+    }
+  };
+  const addAutomation = async (): Promise<void> => {
+    if (appSettings.automations.length >= 50) {
+      notify("最多保存 50 条任务自动化规则", "error");
       return;
     }
     try {
-      const rule = createTaskAutomationRule({
-        name: automationName,
-        trigger: automationTrigger,
-        condition: {
-          ...(automationConditionSource === "all"
-            ? {}
-            : { source: automationConditionSource }),
-          ...(automationConditionProject.trim()
-            ? { projectId: automationConditionProject.trim() }
-            : {}),
-          ...(automationConditionList.trim()
-            ? { listId: automationConditionList.trim() }
-            : {}),
-          ...(automationConditionSection.trim()
-            ? { sectionId: automationConditionSection.trim() }
-            : {}),
-          ...(automationConditionTag.trim()
-            ? { tag: automationConditionTag.trim() }
-            : {}),
-          ...(automationConditionContext.trim()
-            ? { context: automationConditionContext.trim() }
-            : {}),
-          ...(alternativeConditions.length ? { anyOf: alternativeConditions } : {}),
-        },
-        action: buildAutomationAction(),
-        ...(automationTrigger === "scheduled"
-          ? {
-              schedule: {
-                frequency: automationScheduleFrequency,
-                time: automationScheduleTime,
-                ...(automationScheduleFrequency === "weekly"
-                  ? { weekdays: automationScheduleWeekdays }
-                  : {}),
-              },
-            }
-          : {}),
-        ...(automationTrigger === "deadline-approaching"
-          ? { deadlineWindowMinutes: Number(automationDeadlineWindowMinutes) }
-          : {}),
-      });
+      const rule = buildAutomationRule();
       const saved = await persist(
         { ...appSettings, automations: [...appSettings.automations, rule] },
         "自动化规则已保存",
@@ -10050,13 +10100,9 @@ function SettingsPage({
       setAutomationConditionContext("");
       setAutomationAlternativeConditions([]);
       setAutomationAlternativesOpen(false);
+      setAutomationPreview(undefined);
     } catch (reason) {
-      notify(
-        reason instanceof Error && reason.message === "INVALID_TASK_AUTOMATION_RULE"
-          ? "请填写有效的规则名称和动作值"
-          : "自动化规则无效",
-        "error",
-      );
+      notify(automationErrorMessage(reason), "error");
     }
   };
   const toggleAutomation = (id: string, enabled: boolean): void => {
@@ -12363,7 +12409,56 @@ function SettingsPage({
                   />
                 )}
               </div>
+              {automationPreview?.draftKey === automationDraftKey && (
+                <div className="automation-preview-card" role="status" aria-live="polite">
+                  <div className="automation-preview-heading">
+                    <div>
+                      <strong>试运行预览</strong>
+                      <p>
+                        {describeAutomationCondition(automationPreview.rule)} · {taskAutomationActionLabel(automationPreview.rule.action)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="清除自动化预览"
+                      onClick={() => setAutomationPreview(undefined)}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                  <div className="automation-preview-summary">
+                    当前有 <strong>{automationPreview.tasks.length}</strong> 项任务会匹配。这里只读取本机任务，不会修改任务、飞书或同步队列。
+                  </div>
+                  <div className="automation-preview-hint">{automationPreviewTriggerHint(automationPreview.rule)}</div>
+                  {automationPreview.tasks.length > 0 ? (
+                    <ul className="automation-preview-list">
+                      {automationPreview.tasks.slice(0, 5).map((task) => (
+                        <li key={task.id}>
+                          <span className="automation-preview-status" aria-hidden="true">
+                            {task.status === "completed" ? "✓" : "○"}
+                          </span>
+                          <span>{task.title}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="automation-preview-empty">当前没有匹配任务；条件满足后，规则仍会按触发器运行。</div>
+                  )}
+                  {automationPreview.tasks.length > 5 && (
+                    <div className="automation-preview-more">仅展示前 5 项。</div>
+                  )}
+                </div>
+              )}
               <div className="settings-actions">
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={saving}
+                  onClick={previewAutomation}
+                >
+                  <Eye size={15} /> 试运行预览
+                </button>
                 <button
                   type="button"
                   className="primary-button"
@@ -12372,7 +12467,7 @@ function SettingsPage({
                 >
                   <Plus size={15} /> 保存规则
                 </button>
-                <span className="settings-hint">执行时会在任务历史里留下可撤销的普通更新。</span>
+                <span className="settings-hint">预览不会写入任务；保存后才会启用，执行时会在任务历史里留下可撤销的普通更新。</span>
               </div>
             </div>
             <div className="settings-subheading">已保存规则</div>
