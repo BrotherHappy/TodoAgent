@@ -6,6 +6,7 @@ import {
   normalizeTaskAutomationRules,
   taskAutomationPatch,
   taskAutomationTrigger,
+  taskAutomationTriggerLabel,
 } from "../src/shared/task-automations";
 import { TaskAutomationService } from "../electron/services/task-automation-service";
 
@@ -76,6 +77,22 @@ describe("task automation rules", () => {
     expect(taskAutomationTrigger(open, completed)).toBe("task-completed");
     expect(taskAutomationTrigger(completed, completed)).toBeUndefined();
     expect(taskAutomationTrigger(open, task("t", { deletedAt: "2026-08-21T10:00:00.000Z" }))).toBeUndefined();
+  });
+
+  it("keeps manual rules out of background transition execution", async () => {
+    const target = task("target");
+    const calls: unknown[] = [];
+    const manual = rule({
+      trigger: "manual",
+      action: { kind: "set-flagged", value: true },
+    });
+    const service = new TaskAutomationService(
+      { updateTask: async (_id, patch) => { calls.push(patch); return { task: target }; } },
+      () => [manual],
+    );
+    expect(taskAutomationTriggerLabel("manual")).toBe("手动应用时");
+    expect((await service.applyTransition([], [target])).applied).toBe(0);
+    expect(calls).toEqual([]);
   });
 
   it("creates private patches and skips no-ops", () => {

@@ -18,7 +18,10 @@ export const TASK_AUTOMATION_MAX_RULES = 50;
 export const TASK_AUTOMATION_MAX_NAME_LENGTH = 80;
 export const TASK_AUTOMATION_MAX_VALUE_LENGTH = 80;
 
-export type TaskAutomationTrigger = "task-created" | "task-completed";
+export type TaskAutomationTrigger =
+  | "task-created"
+  | "task-completed"
+  | "manual";
 
 export interface TaskAutomationCondition {
   source?: TaskSourceType;
@@ -65,6 +68,7 @@ export interface CreateTaskAutomationRuleInput {
 const triggers = new Set<TaskAutomationTrigger>([
   "task-created",
   "task-completed",
+  "manual",
 ]);
 const sourceTypes = new Set<TaskSourceType>(["local", "feishu"]);
 const actionKinds = new Set<TaskAutomationAction["kind"]>([
@@ -326,7 +330,9 @@ export function taskAutomationActionLabel(action: TaskAutomationAction): string 
 }
 
 export function taskAutomationTriggerLabel(trigger: TaskAutomationTrigger): string {
-  return trigger === "task-created" ? "任务新建时" : "任务完成时";
+  if (trigger === "task-created") return "任务新建时";
+  if (trigger === "task-completed") return "任务完成时";
+  return "手动应用时";
 }
 
 export function taskAutomationTaskIds(

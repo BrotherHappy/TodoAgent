@@ -65,7 +65,7 @@ const taskAutomationRuleSchema = z
     id: idSchema.max(160),
     name: z.string().trim().min(1).max(80),
     enabled: z.boolean(),
-    trigger: z.enum(["task-created", "task-completed"]),
+    trigger: z.enum(["task-created", "task-completed", "manual"]),
     condition: taskAutomationConditionSchema,
     action: taskAutomationActionSchema,
     createdAt: z.string().datetime(),

@@ -132,9 +132,12 @@ import {
 } from "../shared/settings";
 import {
   createTaskAutomationRule,
+  matchesTaskAutomation,
+  taskAutomationPatch,
   taskAutomationActionLabel,
   taskAutomationTriggerLabel,
   type TaskAutomationAction,
+  type TaskAutomationRule,
   type TaskAutomationTrigger,
 } from "../shared/task-automations";
 import { AGENT_CAPABILITY_DESCRIPTORS } from "../shared/agent-capabilities";
@@ -3141,7 +3144,11 @@ function TaskInspector({
   controller: TaskController;
   projects?: TaskProject[];
   lists?: TaskList[];
-  notify: (message: string, kind?: ToastKind) => void;
+  notify: (
+    message: string,
+    kind?: ToastKind,
+    action?: ToastState["action"],
+  ) => void;
   onAskAgent: (prompt: string) => void;
   onClose?: () => void;
 }) {
@@ -3204,6 +3211,10 @@ function TaskInspector({
   const [commentBusy, setCommentBusy] = useState(false);
   const [showTemplateSave, setShowTemplateSave] = useState(false);
   const [skipRecurringBusy, setSkipRecurringBusy] = useState(false);
+  const [manualAutomations, setManualAutomations] = useState<
+    readonly TaskAutomationRule[]
+  >([]);
+  const [automationBusy, setAutomationBusy] = useState<string>();
   const editingTaskIdRef = useRef<string | undefined>(undefined);
   // A native input can emit a second blur save before the first IPC reply.
   // Per-field revisions stop the older completion from clearing a newer
@@ -3238,6 +3249,21 @@ function TaskInspector({
   const [timeBlockEnd, setTimeBlockEnd] = useState(
     toLocalDateTimeInput(task?.timeBlock?.endAt),
   );
+  useEffect(() => {
+    if (!window.desktopApi) {
+      setManualAutomations([]);
+      return undefined;
+    }
+    const apply = (settings: AppSettings): void => {
+      setManualAutomations(
+        settings.automations.filter(
+          (rule) => rule.enabled && rule.trigger === "manual",
+        ),
+      );
+    };
+    void window.desktopApi.settings.get().then(apply).catch(() => undefined);
+    return window.desktopApi.events.onSettingsChanged(apply);
+  }, []);
   useEffect(() => {
     let active = true;
     const taskChanged = editingTaskIdRef.current !== task?.id;
@@ -3325,6 +3351,7 @@ function TaskInspector({
     setCommentBusy(false);
     setShowTemplateSave(false);
     setSkipRecurringBusy(false);
+    setAutomationBusy(undefined);
     setTimeBlockStart(toLocalDateTimeInput(task.timeBlock?.startAt));
     setTimeBlockEnd(toLocalDateTimeInput(task.timeBlock?.endAt));
     void window.desktopApi.tasks
@@ -4162,6 +4189,39 @@ function TaskInspector({
       },
     });
   };
+  const runManualAutomation = async (
+    rule: TaskAutomationRule,
+  ): Promise<void> => {
+    if (!task || automationBusy) return;
+    if (!matchesTaskAutomation(rule, task)) {
+      notify(`“${rule.name}”的条件不匹配当前任务`, "info");
+      return;
+    }
+    const patch = taskAutomationPatch(rule, task);
+    if (!patch) {
+      notify(`“${rule.name}”对当前任务没有需要改变的内容`, "info");
+      return;
+    }
+    setAutomationBusy(rule.id);
+    setShowActions(false);
+    try {
+      const operationId = await controller.update(task.id, patch);
+      notify(
+        `已应用“${rule.name}” · ${taskAutomationActionLabel(rule.action)}`,
+        "success",
+        operationId
+          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          : undefined,
+      );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "自动化应用失败",
+        "error",
+      );
+    } finally {
+      setAutomationBusy(undefined);
+    }
+  };
   const descendantIds = new Set<string>();
   let frontier = [task.id];
   while (frontier.length > 0) {
@@ -4294,6 +4354,33 @@ function TaskInspector({
               <button type="button" onClick={() => void saveToPetDiary()}>
                 写入宠物日记
               </button>
+              {manualAutomations.length > 0 && (
+                <div className="inspector-menu-group" aria-label="手动自动化">
+                  <span className="inspector-menu-label">手动自动化</span>
+                  {manualAutomations.map((rule) => {
+                    const matches = matchesTaskAutomation(rule, task);
+                    const hasPatch = taskAutomationPatch(rule, task) !== undefined;
+                    return (
+                      <button
+                        type="button"
+                        key={rule.id}
+                        disabled={Boolean(automationBusy) || !matches || !hasPatch}
+                        title={
+                          !matches
+                            ? "当前任务不满足这条规则的条件"
+                            : !hasPatch
+                              ? "当前任务已经是目标状态"
+                              : undefined
+                        }
+                        onClick={() => void runManualAutomation(rule)}
+                      >
+                        <WandSparkles size={14} aria-hidden="true" />
+                        {automationBusy === rule.id ? "正在应用…" : rule.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {task.deletedAt && (
                 <button
                   type="button"
@@ -11440,7 +11527,7 @@ function SettingsPage({
             </p>
             <div className="settings-note-quiet">
               <ListChecks size={16} aria-hidden="true" />
-              <span>触发器目前支持“新建任务”和“完成任务”。规则不执行脚本、不联网，也不会在后台替你创建任务。</span>
+              <span>触发器支持“新建任务”“完成任务”和任务详情里的“手动应用”。规则不执行脚本、不联网，也不会在后台替你创建任务。</span>
             </div>
             <div className="settings-subsection">
               <div className="settings-subsection-heading">
@@ -11473,6 +11560,7 @@ function SettingsPage({
                 >
                   <option value="task-created">任务新建时</option>
                   <option value="task-completed">任务完成时</option>
+                  <option value="manual">手动应用时</option>
                 </select>
               </div>
               <div className="settings-row">
@@ -11575,7 +11663,7 @@ function SettingsPage({
             </div>
             <div className="settings-subheading">已保存规则</div>
             {appSettings.automations.length === 0 ? (
-              <div className="settings-note-quiet">还没有规则。可以先试试“任务新建时 → 设置重点标记”。</div>
+              <div className="settings-note-quiet">还没有规则。可以先试试“任务新建时 → 设置重点标记”，或创建“手动应用时”规则，在任务详情的更多操作里点一下执行。</div>
             ) : (
               appSettings.automations.map((rule) => (
                 <div className="settings-row" key={rule.id}>
