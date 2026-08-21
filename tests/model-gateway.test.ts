@@ -221,6 +221,45 @@ describe("OpenAIChatCompletionsGateway", () => {
     expect(completion.assistantMessage.tool_calls?.[0].id).toBe("call-1");
   });
 
+  it("accepts an explicit null tool_calls field from compatible gateways", async () => {
+    const gateway = new OpenAIChatCompletionsGateway({
+      baseUrl: "http://10.40.0.2",
+      model: "gpt-5.6-sol",
+      credentialRef: "model.default",
+      secretResolver: { resolve: async () => "provider-key" },
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            id: "resp-null-tool-calls",
+            choices: [
+              {
+                finish_reason: "stop",
+                message: {
+                  role: "assistant",
+                  content: "OK",
+                  tool_calls: null,
+                },
+              },
+            ],
+            usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await expect(
+      gateway.complete({
+        messages: [{ role: "user", content: "Reply with exactly OK." }],
+        tools: [],
+        toolChoice: "none",
+      }),
+    ).resolves.toMatchObject({
+      assistantMessage: { content: "OK" },
+      toolCalls: [],
+      usage: { totalTokens: 3 },
+    });
+  });
+
   it("omits Authorization and does not resolve a key in explicit no-auth mode", async () => {
     const resolver = vi.fn(async () => "must-not-be-read");
     const requestInits: RequestInit[] = [];

@@ -34,7 +34,10 @@ const responseSchema = z
               .object({
                 role: z.literal("assistant").optional(),
                 content: z.string().nullable().optional(),
-                tool_calls: z.array(toolCallSchema).optional(),
+                // OpenAI-compatible gateways differ here: some omit
+                // `tool_calls` when there are no calls, while others return
+                // an explicit JSON null. Both mean the same thing.
+                tool_calls: z.array(toolCallSchema).nullable().optional(),
               })
               .passthrough(),
           })
@@ -82,6 +85,7 @@ const streamChunkSchema = z
                     })
                     .passthrough(),
                 )
+                .nullable()
                 .optional(),
             })
             .passthrough()
