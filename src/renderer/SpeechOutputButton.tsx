@@ -12,6 +12,7 @@ interface SpeechOutputButtonProps {
   label?: string;
   ariaLabel?: string;
   className?: string;
+  disabled?: boolean;
 }
 
 /**
@@ -24,6 +25,7 @@ export function SpeechOutputButton({
   label = "朗读",
   ariaLabel,
   className = "agent-speak-button",
+  disabled = false,
 }: SpeechOutputButtonProps): ReactElement {
   const [speaking, setSpeaking] = useState(false);
   const speakingRef = useRef(false);
@@ -81,7 +83,7 @@ export function SpeechOutputButton({
       className={className}
       aria-label={speaking ? activeLabel : idleLabel}
       title={supported ? (speaking ? activeLabel : idleLabel) : "当前环境不支持朗读"}
-      disabled={!supported || !text.trim()}
+      disabled={disabled || !supported || !text.trim()}
       aria-pressed={speaking}
       onClick={toggleSpeech}
     >

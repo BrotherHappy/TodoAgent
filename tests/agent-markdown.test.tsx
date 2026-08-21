@@ -1,11 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentMarkdown } from "../src/renderer/AgentMarkdown";
 import type { DesktopApi } from "../src/shared/desktop-api";
 
 afterEach(() => {
+  cleanup();
   delete window.desktopApi;
+  window.localStorage.clear();
 });
 
 describe("AgentMarkdown", () => {
@@ -68,5 +70,29 @@ describe("AgentMarkdown", () => {
     fireEvent.click(screen.getByRole("link", { name: "查看资料" }));
 
     expect(openExternal).toHaveBeenCalledWith("https://example.com/docs");
+  });
+
+  it("saves an explicit completed reply to local recent context", () => {
+    render(<AgentMarkdown text={"## 研究结论\n\n- 先验证来源"} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存到最近上下文" }));
+
+    expect(screen.getByRole("button", { name: "已保存到最近上下文" })).toBeDisabled();
+    const saved = JSON.parse(
+      window.localStorage.getItem("todo-agent:context-capture-history:v1") ?? "[]",
+    ) as Array<{ kind: string; text: string; label: string }>;
+    expect(saved[0]).toMatchObject({
+      kind: "agent-reply",
+      text: "## 研究结论\n\n- 先验证来源",
+      label: "Agent：研究结论 先验证来源",
+    });
+  });
+
+  it("does not save or speak a partial streaming reply", () => {
+    render(<AgentMarkdown text="正在生成" streaming />);
+
+    expect(screen.getByRole("button", { name: "保存到最近上下文" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "朗读回答" })).toBeDisabled();
+    expect(window.localStorage.getItem("todo-agent:context-capture-history:v1")).toBeNull();
   });
 });

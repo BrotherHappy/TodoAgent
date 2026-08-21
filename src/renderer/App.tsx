@@ -6091,7 +6091,7 @@ function AgentPage({
           >
             {message.role === "assistant" ? (
               message.text ? (
-                <AgentMarkdown text={message.text} />
+                <AgentMarkdown text={message.text} streaming={message.streaming} />
               ) : (
                 <span className="streaming-indicator" role="status">
                   <i />
@@ -17403,7 +17403,7 @@ function FloatingWindow() {
                     >
                       {message.role === "assistant" ? (
                         message.text ? (
-                          <AgentMarkdown text={message.text} />
+                          <AgentMarkdown text={message.text} streaming={message.streaming} />
                         ) : (
                           <span className="streaming-indicator" role="status">
                             <i />

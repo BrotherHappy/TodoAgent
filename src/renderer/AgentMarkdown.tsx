@@ -1,7 +1,9 @@
-import { type MouseEvent, type ReactElement } from "react";
+import { Sparkles } from "lucide-react";
+import { useEffect, useState, type MouseEvent, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SpeechOutputButton } from "./SpeechOutputButton";
+import { rememberContextCapture } from "./context-capture-history";
 
 const safeExternalUrl = (value: string | undefined): string | undefined => {
   if (!value) return undefined;
@@ -15,11 +17,56 @@ const safeExternalUrl = (value: string | undefined): string | undefined => {
   }
 };
 
-export function AgentMarkdown({ text }: { text: string }): ReactElement {
+export function AgentMarkdown({
+  text,
+  streaming = false,
+}: {
+  text: string;
+  streaming?: boolean;
+}): ReactElement {
+  const [savedContext, setSavedContext] = useState(false);
+  useEffect(() => {
+    setSavedContext(false);
+  }, [text]);
+  const saveContext = () => {
+    const normalized = text.trim();
+    if (streaming || !normalized || savedContext) return;
+    const labelText = normalized
+      .replace(/[#*_~`]/gu, "")
+      .replace(/^\s{0,3}#{1,6}\s*/gmu, "")
+      .replace(/^\s*[-*+]\s+/gmu, "")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, 44);
+    rememberContextCapture({
+      id: `context-${crypto.randomUUID()}`,
+      kind: "agent-reply",
+      label: labelText ? `Agent：${labelText}` : "Agent 回复",
+      text: normalized,
+      createdAt: new Date().toISOString(),
+    });
+    setSavedContext(true);
+  };
   return (
     <div className="agent-markdown">
       <div className="agent-markdown-toolbar">
-        <SpeechOutputButton text={text} label="朗读" ariaLabel="朗读回答" />
+        <button
+          type="button"
+          className="agent-context-save-button"
+          aria-label={savedContext ? "已保存到最近上下文" : "保存到最近上下文"}
+          title={streaming ? "回答完成后才能保存" : "仅保存到本机最近上下文"}
+          disabled={streaming || savedContext || !text.trim()}
+          onClick={saveContext}
+        >
+          <Sparkles size={12} />
+          <span>{savedContext ? "已保存" : "保存上下文"}</span>
+        </button>
+        <SpeechOutputButton
+          text={text}
+          label="朗读"
+          ariaLabel="朗读回答"
+          disabled={streaming}
+        />
       </div>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}

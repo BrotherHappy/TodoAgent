@@ -3,7 +3,8 @@ export type ContextCaptureHistoryKind =
   | "window"
   | "selected-text"
   | "drop-text"
-  | "url";
+  | "url"
+  | "agent-reply";
 
 export interface ContextCaptureHistoryItem {
   id: string;
@@ -31,6 +32,7 @@ const kinds = new Set<ContextCaptureHistoryKind>([
   "selected-text",
   "drop-text",
   "url",
+  "agent-reply",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

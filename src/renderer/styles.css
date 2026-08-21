@@ -8940,6 +8940,7 @@ select {
 .agent-markdown-toolbar {
   display: flex;
   justify-content: flex-end;
+  gap: 4px;
   min-height: 22px;
   margin: -2px 0 4px;
 }
@@ -8955,6 +8956,34 @@ select {
   background: transparent;
   font-size: 10px;
   font-weight: 650;
+}
+.agent-context-save-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--app-text-faint);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 650;
+}
+.agent-context-save-button:hover:not(:disabled),
+.agent-context-save-button:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 64%, transparent);
+}
+.agent-context-save-button[aria-label="已保存到最近上下文"] {
+  border-color: color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 48%, transparent);
+}
+.agent-context-save-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 .agent-speak-button:hover:not(:disabled),
 .agent-speak-button:focus-visible,

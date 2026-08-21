@@ -4,6 +4,7 @@ import {
   History,
   Link,
   PanelTop,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import type { ContextCaptureHistoryItem } from "./context-capture-history";
@@ -14,6 +15,7 @@ const kindLabels: Record<ContextCaptureHistoryItem["kind"], string> = {
   "selected-text": "选中文本",
   "drop-text": "拖入文本",
   url: "拖入链接",
+  "agent-reply": "Agent 回复",
 };
 
 const kindIcons: Record<ContextCaptureHistoryItem["kind"], typeof Clipboard> = {
@@ -22,6 +24,7 @@ const kindIcons: Record<ContextCaptureHistoryItem["kind"], typeof Clipboard> = {
   "selected-text": ClipboardCheck,
   "drop-text": ClipboardCheck,
   url: Link,
+  "agent-reply": Sparkles,
 };
 
 function historyDateLabel(value: string): string {
