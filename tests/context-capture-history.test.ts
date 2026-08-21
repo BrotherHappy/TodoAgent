@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   CONTEXT_CAPTURE_HISTORY_LIMIT,
   CONTEXT_CAPTURE_HISTORY_TEXT_LIMIT,
+  CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
   clearContextCaptureHistory,
   parseContextCaptureHistory,
   rememberContextCapture,
@@ -64,5 +65,25 @@ describe("context capture history", () => {
     clearContextCaptureHistory(storage);
     expect(values.get("unrelated")).toBe("keep");
     expect(values.size).toBe(1);
+  });
+
+  it("notifies mounted Agent surfaces when history changes", () => {
+    const onChanged = vi.fn();
+    window.addEventListener(CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT, onChanged);
+    const item = {
+      id: "agent-reply-1",
+      kind: "agent-reply" as const,
+      label: "Agent 回复",
+      text: "可回用的研究结论",
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      rememberContextCapture(item, window.localStorage);
+      clearContextCaptureHistory(window.localStorage);
+      expect(onChanged).toHaveBeenCalledTimes(2);
+    } finally {
+      window.removeEventListener(CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT, onChanged);
+      window.localStorage.clear();
+    }
   });
 });

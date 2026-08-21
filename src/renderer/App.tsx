@@ -164,6 +164,7 @@ import { QuickCaptureHistory } from "./QuickCaptureHistory";
 import { ContextCaptureHistory } from "./ContextCaptureHistory";
 import {
   clearContextCaptureHistory,
+  CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
   readContextCaptureHistory,
   rememberContextCapture,
   type ContextCaptureHistoryItem,
@@ -5798,6 +5799,25 @@ function AgentPage({
     conversationSessions,
     conversationSearch,
   );
+  const [recentContexts, setRecentContexts] = useState<ContextCaptureHistoryItem[]>(
+    () => readContextCaptureHistory(),
+  );
+  useEffect(() => {
+    const refreshRecentContexts = () =>
+      setRecentContexts(readContextCaptureHistory());
+    window.addEventListener(
+      CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+      refreshRecentContexts,
+    );
+    window.addEventListener("storage", refreshRecentContexts);
+    return () => {
+      window.removeEventListener(
+        CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+        refreshRecentContexts,
+      );
+      window.removeEventListener("storage", refreshRecentContexts);
+    };
+  }, []);
   useEffect(() => {
     if (!chatFollowsOutputRef.current) return;
     const frame = window.requestAnimationFrame(() => {
@@ -6168,6 +6188,20 @@ function AgentPage({
               </button>
             </div>
           </div>
+        )}
+        {!input.trim() && !isSending && recentContexts.length > 0 && (
+          <ContextCaptureHistory
+            items={recentContexts}
+            onSelect={(item) =>
+              setInput((current) =>
+                current.trim() ? `${current}\n\n${item.text}` : item.text,
+              )
+            }
+            onClear={() => {
+              clearContextCaptureHistory();
+              setRecentContexts([]);
+            }}
+          />
         )}
         <div className="composer">
           <textarea
@@ -14921,6 +14955,9 @@ function FloatingWindow() {
   const [petSmartViews, setPetSmartViews] = useState<SmartViewDefinition[]>(() => readSmartViews());
   const [petSmartViewId, setPetSmartViewId] = useState<string | undefined>(readFloatingSmartView);
   const [input, setInput] = useState("");
+  const [recentContexts, setRecentContexts] = useState<ContextCaptureHistoryItem[]>(
+    () => readContextCaptureHistory(),
+  );
   const [creatingFloatingTask, setCreatingFloatingTask] = useState(false);
   const floatingCreateRef = useRef(false);
   const [activity, setActivity] = useState<AuditRecord[]>([]);
@@ -15034,6 +15071,22 @@ function FloatingWindow() {
       setPanelExpanded(true, "click");
     },
   });
+  useEffect(() => {
+    const refreshRecentContexts = () =>
+      setRecentContexts(readContextCaptureHistory());
+    window.addEventListener(
+      CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+      refreshRecentContexts,
+    );
+    window.addEventListener("storage", refreshRecentContexts);
+    return () => {
+      window.removeEventListener(
+        CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+        refreshRecentContexts,
+      );
+      window.removeEventListener("storage", refreshRecentContexts);
+    };
+  }, []);
   const voice = useVoiceCapture({
     onFinal: (spoken) => {
       if (tab === "chat") {
@@ -17417,6 +17470,24 @@ function FloatingWindow() {
                       )}
                     </div>
                   ))}
+                  {!floatingChat.input.trim() &&
+                    !floatingChat.isSending &&
+                    recentContexts.length > 0 && (
+                      <ContextCaptureHistory
+                        items={recentContexts}
+                        onSelect={(item) =>
+                          floatingChat.setInput((current) =>
+                            current.trim()
+                              ? `${current}\n\n${item.text}`
+                              : item.text,
+                          )
+                        }
+                        onClear={() => {
+                          clearContextCaptureHistory();
+                          setRecentContexts([]);
+                        }}
+                      />
+                    )}
                   {floatingChat.approval && (
                     <div
                       className="mini-approval"

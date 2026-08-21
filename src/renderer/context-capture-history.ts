@@ -16,6 +16,8 @@ export interface ContextCaptureHistoryItem {
 
 export const CONTEXT_CAPTURE_HISTORY_STORAGE_KEY =
   "todo-agent:context-capture-history:v1";
+export const CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT =
+  "todo-agent:context-capture-history-changed";
 export const CONTEXT_CAPTURE_HISTORY_LIMIT = 12;
 export const CONTEXT_CAPTURE_HISTORY_TEXT_LIMIT = 2_000;
 export const CONTEXT_CAPTURE_HISTORY_LABEL_LIMIT = 120;
@@ -105,6 +107,13 @@ function browserStorage(): StorageLike | undefined {
   }
 }
 
+function notifyHistoryChanged(): void {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+    return;
+  }
+  window.dispatchEvent(new Event(CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT));
+}
+
 export function readContextCaptureHistory(
   storage: StorageLike | undefined = browserStorage(),
 ): ContextCaptureHistoryItem[] {
@@ -133,6 +142,7 @@ export function rememberContextCapture(
       // A storage quota or privacy policy must not block the current capture.
     }
   }
+  notifyHistoryChanged();
   return next;
 }
 
@@ -144,4 +154,5 @@ export function clearContextCaptureHistory(
   } catch {
     // Clearing is best effort and never affects task creation.
   }
+  notifyHistoryChanged();
 }
