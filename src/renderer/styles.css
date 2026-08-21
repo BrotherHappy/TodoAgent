@@ -860,6 +860,21 @@ select {
   border-color: color-mix(in srgb, var(--app-brand) 28%, var(--app-line));
   background: var(--app-brand-soft);
 }
+.filter-check-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+.filter-check-label input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--app-brand);
+}
 .filter-select-label {
   display: grid;
   gap: 6px;
@@ -1691,6 +1706,17 @@ select {
 }
 .task-agent-button {
   color: color-mix(in srgb, var(--app-brand-strong) 78%, var(--app-text-faint));
+}
+.task-flag-button {
+  color: var(--app-text-faint);
+}
+.task-flag-button.is-active {
+  color: var(--app-warning);
+}
+.task-flag-button.is-active:hover {
+  color: var(--app-warning);
+  border-color: color-mix(in srgb, var(--app-warning) 30%, var(--app-line));
+  background: color-mix(in srgb, var(--app-warning) 10%, transparent);
 }
 .task-agent-bulk-button {
   color: var(--app-brand-strong);

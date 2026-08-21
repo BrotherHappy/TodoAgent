@@ -238,6 +238,8 @@ export interface Task {
   privateNotes: string;
   status: TaskStatus;
   priority: TaskPriority;
+  /** A private, independent attention marker inspired by Flagged views. */
+  flagged?: boolean;
   projectId?: string;
   listId?: string;
   sectionId?: string;
@@ -298,6 +300,7 @@ export interface CreateTaskInput {
   privateNotes?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
+  flagged?: boolean;
   projectId?: string;
   listId?: string;
   sectionId?: string;
@@ -371,6 +374,8 @@ export interface TaskFilter {
   contexts?: string[];
   contextMode?: 'any' | 'all';
   priorities?: TaskPriority[];
+  /** Keep only tasks explicitly marked for attention. */
+  flagged?: boolean;
   statuses?: TaskStatus[];
   plannedFrom?: LocalDate;
   plannedTo?: LocalDate;
@@ -504,6 +509,7 @@ export type BulkTaskTagEditMode = "replace" | "add" | "remove";
 /** Private task attributes that can be edited in one reviewed batch. */
 export interface BulkTaskEditPatch {
   priority?: TaskPriority;
+  flagged?: boolean;
   projectId?: string | null;
   listId?: string | null;
   tags?: {

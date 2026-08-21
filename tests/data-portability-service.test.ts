@@ -146,6 +146,7 @@ describe('DataPortabilityService export safety', () => {
       privateNotes: '只给自己看的内容',
       plannedDate: '2026-08-09',
       estimatedMinutes: 45,
+      flagged: true,
       recurrence: { frequency: 'weekly', interval: 1, weekdays: [1, 3, 5] },
       attachments: [{
         id: 'attachment-md',
@@ -165,6 +166,7 @@ describe('DataPortabilityService export safety', () => {
     expect(markdown).toContain('- [ ] **整理 Markdown 说明**');
     expect(markdown).toContain('项目：研究项目');
     expect(markdown).toContain('预计：45 分钟');
+    expect(markdown).toContain('重点标记');
     expect(markdown).toContain('循环：每周（周一、三、五）');
     expect(markdown).not.toContain('公开说明不应出现在默认私人导出中');
     expect(markdown).not.toContain('只给自己看的内容');

@@ -15,6 +15,7 @@ describe("parseSmartViewQuery", () => {
     if (result.kind !== "suggestion") return;
     expect(result.value.filters).toEqual({
       priority: "high",
+      flagged: false,
       projectId: "研究项目",
       tag: "论文",
       context: "all",
@@ -38,6 +39,18 @@ describe("parseSmartViewQuery", () => {
     if (result.kind !== "suggestion") return;
     expect(result.value.filters.context).toBe("办公室");
     expect(result.value.filters.sort).toBe("due");
+  });
+
+  it("recognizes the private attention marker", () => {
+    const result = parseSmartViewQuery("已标记的高优先级任务", options);
+
+    expect(result).toMatchObject({
+      kind: "suggestion",
+      value: {
+        filters: { flagged: true, priority: "high" },
+        summary: ["高优先级", "重点标记"],
+      },
+    });
   });
 
   it("fails closed for unknown values and ambiguous categories", () => {

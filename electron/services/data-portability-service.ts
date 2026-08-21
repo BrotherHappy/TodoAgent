@@ -450,7 +450,7 @@ const validateList = (value: unknown, path: string): TaskList => {
 const validateTask = (value: unknown, path: string): Task => {
   const task = expectRecord(value, path);
   assertOnlyKeys(task, [
-    'id', 'source', 'title', 'notes', 'privateNotes', 'status', 'priority',
+    'id', 'source', 'title', 'notes', 'privateNotes', 'status', 'priority', 'flagged',
     'projectId', 'listId', 'sectionId', 'tags', 'contexts', 'parentId', 'dependencyIds',
     'assigneeIds', 'followerIds', 'attachments', 'links', 'customFields', 'comments', 'researchCards',
     'plannedDate', 'startAt', 'startAtIsAllDay', 'dueAt', 'dueAtIsAllDay',
@@ -486,6 +486,7 @@ const validateTask = (value: unknown, path: string): Task => {
   expectString(task.privateNotes, `${path}.privateNotes`);
   expectEnum(task.status, ['open', 'completed', 'cancelled'] as const, `${path}.status`);
   expectEnum(task.priority, ['none', 'low', 'medium', 'high', 'urgent'] as const, `${path}.priority`);
+  expectOptional(task, 'flagged', path, expectBoolean);
   ['projectId', 'listId', 'sectionId', 'parentId', 'recurrenceSeriesId'].forEach((key) =>
     expectOptional(task, key, path, expectId),
   );
@@ -1604,6 +1605,7 @@ const renderMarkdownTask = (
   ];
   const priority = markdownPriority(task.priority);
   if (priority !== undefined) metadata.push(`优先级：${priority}`);
+  if (task.flagged === true) metadata.push('重点标记');
   if (task.projectId !== undefined) {
     metadata.push(`项目：${markdownInline(projects.get(task.projectId)?.name ?? task.projectId)}`);
   }
@@ -1668,6 +1670,7 @@ const markdownHistoryFields = [
   'notes',
   'privateNotes',
   'status',
+  'flagged',
   'completedAt',
   'priority',
   'projectId',
@@ -1708,6 +1711,7 @@ const markdownHistoryFieldLabels: Record<string, string> = {
   notes: '备注',
   privateNotes: '私人备注',
   status: '状态',
+  flagged: '重点标记',
   completedAt: '完成时间',
   priority: '优先级',
   projectId: '项目',

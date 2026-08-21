@@ -109,6 +109,7 @@ const listArgumentsSchema = z.strictObject({
   view: taskViewSchema.nullable(),
   text: z.string().max(1_000).nullable(),
   source: sourceSchema.nullable(),
+  flagged: z.boolean().optional().default(false),
   limit: z.number().int().min(1).max(500),
 });
 
@@ -125,6 +126,7 @@ const createArgumentsSchema = z.strictObject({
   startAt: isoDateSchema.nullable(),
   dueAt: isoDateSchema.nullable(),
   priority: prioritySchema,
+  flagged: z.boolean().optional().default(false),
   tags: z.array(z.string().trim().min(1).max(120)).max(100),
   contexts: z.array(z.string().trim().min(1).max(40)).max(20).nullable().optional(),
 });
@@ -135,6 +137,7 @@ const updateArgumentsSchema = z
     title: z.string().trim().min(1).max(2_000).nullable(),
     notes: z.string().max(50_000).nullable(),
     privateNotes: z.string().max(50_000).nullable(),
+    flagged: z.boolean().nullable().optional(),
     projectId: idSchema.nullable(),
     listId: idSchema.nullable(),
     plannedDate: localDateSchema.nullable(),
@@ -148,6 +151,7 @@ const updateArgumentsSchema = z
         z.enum([
           "notes",
           "privateNotes",
+          "flagged",
           "projectId",
           "listId",
           "plannedDate",
@@ -166,6 +170,7 @@ const updateArgumentsSchema = z
           "title",
           "notes",
           "privateNotes",
+          "flagged",
           "projectId",
           "listId",
           "plannedDate",
@@ -456,6 +461,7 @@ const compactTask = (task: Task, scope: ModelDataScope): AgentJsonValue => {
         : null,
     status: task.status,
     priority: task.priority,
+    flagged: task.flagged === true,
     source: task.source.type,
     parentId: task.parentId ?? null,
     projectId: task.projectId ?? null,
@@ -486,6 +492,7 @@ const changedFields = (args: z.infer<typeof updateArgumentsSchema>): string[] =>
         "title",
         "notes",
         "privateNotes",
+        "flagged",
         "projectId",
         "listId",
         "plannedDate",
@@ -570,6 +577,7 @@ const patchForUpdate = (
     "title",
     "notes",
     "privateNotes",
+    "flagged",
     "projectId",
     "listId",
     "plannedDate",
@@ -855,6 +863,7 @@ export const createTaskTools = (
             action: "list-tasks",
             view: args.view,
             source: args.source,
+            flagged: args.flagged,
             limit: args.limit,
           },
           baseVersions: {},
@@ -871,6 +880,7 @@ export const createTaskTools = (
             : options.getAgentCapabilities?.().feishuSync === false
               ? ["local"]
               : undefined,
+          flagged: args.flagged === true,
         };
         const tasks = (await options.tasks.listTasks(filter)).slice(
           0,
@@ -955,6 +965,7 @@ export const createTaskTools = (
             plannedDate: args.plannedDate,
             startAt: args.startAt,
             dueAt: args.dueAt,
+            flagged: args.flagged,
           },
           baseVersions: {},
         };
@@ -978,6 +989,7 @@ export const createTaskTools = (
           startAt: args.startAt ?? undefined,
           dueAt: args.dueAt ?? undefined,
           priority: args.priority,
+          flagged: args.flagged,
           tags: args.tags,
           contexts: args.contexts ?? [],
           sync: {

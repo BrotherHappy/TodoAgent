@@ -296,6 +296,36 @@ describe("TaskService views and task data", () => {
     ).toEqual([match.task.id]);
   });
 
+  it("supports a private attention marker without queueing a Feishu write", async () => {
+    const { service } = await createFixture();
+    const local = await service.createTask({ title: "本地重点任务", flagged: true });
+    const ordinary = await service.createTask({ title: "普通本地任务" });
+    const remote = await service.createTask({
+      title: "飞书重点任务",
+      flagged: true,
+      source: { type: "feishu", accountId: "primary", externalId: "flagged-remote" },
+      sync: { status: "synced" },
+    });
+
+    expect((await service.listTasks({ flagged: true })).map((task) => task.id)).toEqual([
+      local.task.id,
+      remote.task.id,
+    ]);
+
+    const updated = await service.updateTask(remote.task.id, { flagged: false });
+    expect(updated.task.flagged).toBe(false);
+    expect(updated.task.sync.status).toBe("synced");
+    expect((await service.listTasks({ flagged: true })).map((task) => task.id)).toEqual([
+      local.task.id,
+    ]);
+
+    await service.updateTask(ordinary.task.id, { flagged: true });
+    expect((await service.listTasks({ flagged: true })).map((task) => task.id)).toEqual([
+      local.task.id,
+      ordinary.task.id,
+    ]);
+  });
+
   it("keeps manual contexts local and filters them case-insensitively", async () => {
     const { service } = await createFixture();
     const local = await service.createTask({
@@ -593,6 +623,7 @@ describe("TaskService mutations, recovery, and recurrence", () => {
         kind: "edit",
         patch: {
           priority: "high",
+          flagged: true,
           projectId: project.id,
           listId: list.id,
           tags: { mode: "add", values: ["新" ] },
@@ -607,12 +638,14 @@ describe("TaskService mutations, recovery, and recurrence", () => {
     expect(operation.changes).toHaveLength(2);
     expect(await service.getTask(local.task.id)).toMatchObject({
       priority: "high",
+      flagged: true,
       projectId: project.id,
       listId: list.id,
       tags: ["旧", "保留", "新"],
     });
     expect(await service.getTask(remote.task.id)).toMatchObject({
       priority: "high",
+      flagged: true,
       projectId: project.id,
       listId: list.id,
       tags: ["旧", "新"],
@@ -624,6 +657,7 @@ describe("TaskService mutations, recovery, and recurrence", () => {
       priority: "low",
       tags: ["旧", "保留"],
     });
+    expect(restoredLocal?.flagged).toBeUndefined();
     expect(restoredLocal?.projectId).toBeUndefined();
     expect(restoredLocal?.listId).toBeUndefined();
     expect(await service.getTask(remote.task.id)).toMatchObject({
@@ -631,6 +665,7 @@ describe("TaskService mutations, recovery, and recurrence", () => {
       tags: ["旧"],
       sync: { status: "synced" },
     });
+    expect((await service.getTask(remote.task.id))?.flagged).toBeUndefined();
   });
 
   it("rejects malformed batch edit patches before touching tasks", async () => {

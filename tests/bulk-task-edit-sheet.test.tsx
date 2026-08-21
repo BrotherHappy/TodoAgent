@@ -41,6 +41,7 @@ describe("BulkTaskEditSheet", () => {
       />,
     );
     fireEvent.change(screen.getByLabelText("批量优先级"), { target: { value: "high" } });
+    fireEvent.change(screen.getByLabelText("批量重点标记"), { target: { value: "on" } });
     fireEvent.change(screen.getByLabelText("批量项目"), { target: { value: "project-release" } });
     fireEvent.change(screen.getByLabelText("批量清单"), { target: { value: "list-week" } });
     fireEvent.change(screen.getByLabelText("批量标签操作"), { target: { value: "add" } });
@@ -49,6 +50,7 @@ describe("BulkTaskEditSheet", () => {
     await vi.waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
     expect(onConfirm).toHaveBeenCalledWith({
       priority: "high",
+      flagged: true,
       projectId: "project-release",
       listId: "list-week",
       tags: { mode: "add", values: ["重要", "发布"] },

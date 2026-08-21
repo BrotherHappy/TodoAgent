@@ -86,6 +86,7 @@ export const filterTasksForPetView = (
       !task.deletedAt &&
       matchesSavedRoute(task, view.route, todayKey) &&
       (view.priority === "all" || task.priority === view.priority) &&
+      (!view.flagged || task.flagged === true) &&
       (view.projectId === "all" || task.projectId === view.projectId) &&
       (view.tag === "all" || task.tags.includes(view.tag)) &&
       (view.context === "all" ||

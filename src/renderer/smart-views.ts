@@ -33,6 +33,8 @@ export interface SmartViewDefinition {
   name: string;
   route: TaskView;
   priority: TaskPriority | "all";
+  /** OmniFocus-style private attention marker. */
+  flagged?: boolean;
   projectId: string | "all";
   tag: string | "all";
   /** A manual, local-only context such as office or home. */
@@ -48,6 +50,7 @@ export interface SmartViewDraft {
   name: string;
   route: TaskView;
   priority: TaskPriority | "all";
+  flagged?: boolean;
   projectId: string | "all";
   tag?: string | "all";
   context?: string | "all";
@@ -100,6 +103,7 @@ const valid = (value: unknown): value is SmartViewDefinition => {
     item.name.length <= 60 &&
     isTaskView(item.route) &&
     isPriority(item.priority) &&
+    (item.flagged === undefined || typeof item.flagged === "boolean") &&
     (item.projectId === "all" || typeof item.projectId === "string") &&
     (item.tag === undefined || item.tag === "all" || typeof item.tag === "string") &&
     (item.context === undefined || item.context === "all" || typeof item.context === "string") &&
@@ -125,6 +129,7 @@ export const readSmartViews = (): SmartViewDefinition[] => {
         // Views written before v1.33 did not have tag/date fields. Keep them
         // usable rather than discarding a user's saved filters on upgrade.
         tag: item.tag ?? "all",
+        flagged: item.flagged === true,
         context: item.context ?? "all",
         dateFilter: item.dateFilter ?? "any",
         sort: item.sort ?? "manual",
@@ -165,6 +170,7 @@ export const createSmartView = (
     name,
     route: draft.route,
     priority: draft.priority,
+    flagged: draft.flagged === true,
     projectId: draft.projectId,
     tag: draft.tag ?? "all",
     context: draft.context ?? "all",

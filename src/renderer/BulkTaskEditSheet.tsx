@@ -47,6 +47,7 @@ export function BulkTaskEditSheet({
   onConfirm,
 }: BulkTaskEditSheetProps) {
   const [priority, setPriority] = useState<"unchanged" | TaskPriority>("unchanged");
+  const [flagged, setFlagged] = useState<"unchanged" | "on" | "off">("unchanged");
   const [project, setProject] = useState("unchanged");
   const [list, setList] = useState("unchanged");
   const [tagMode, setTagMode] = useState<"none" | BulkTaskTagEditMode>("none");
@@ -58,6 +59,7 @@ export function BulkTaskEditSheet({
     if (saving) return;
     const patch: BulkTaskEditPatch = {};
     if (priority !== "unchanged") patch.priority = priority;
+    if (flagged !== "unchanged") patch.flagged = flagged === "on";
     if (project !== "unchanged") patch.projectId = project === "clear" ? null : project;
     if (list !== "unchanged") patch.listId = list === "clear" ? null : list;
     if (tagMode !== "none") {
@@ -131,6 +133,20 @@ export function BulkTaskEditSheet({
               {(Object.keys(priorityLabels) as TaskPriority[]).map((value) => (
                 <option value={value} key={value}>{priorityLabels[value]}</option>
               ))}
+            </select>
+          </label>
+          <label>
+            重点标记
+            <select
+              className="field-input"
+              aria-label="批量重点标记"
+              value={flagged}
+              disabled={saving}
+              onChange={(event) => setFlagged(event.target.value as "unchanged" | "on" | "off")}
+            >
+              <option value="unchanged">不修改</option>
+              <option value="on">标记为重点</option>
+              <option value="off">取消重点标记</option>
             </select>
           </label>
           <label>

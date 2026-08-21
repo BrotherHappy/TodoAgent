@@ -59,6 +59,7 @@ import {
   SkipForward,
   Sparkles,
   Square,
+  Star,
   Sun,
   Tag,
   Trash2,
@@ -614,6 +615,7 @@ const taskHistoryFieldLabels: Record<string, string> = {
   notes: "备注",
   privateNotes: "私人备注",
   status: "状态",
+  flagged: "重点标记",
   completedAt: "完成时间",
   priority: "优先级",
   projectId: "项目",
@@ -1761,6 +1763,16 @@ function TaskRow({
       );
     }
   };
+  const toggleFlag = async (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (interactionDisabled) return;
+    try {
+      await controller.update(task.id, { flagged: task.flagged !== true });
+      notify(task.flagged === true ? "已取消重点标记" : "已标记为重点任务", "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "暂时无法更新重点标记", "error");
+    }
+  };
   const overdue = isOpenTaskOverdue(task);
   const reason = task.status === "open" ? priorityReason(task) : undefined;
   const subtaskLabel = subtaskProgressLabel(subtaskProgress);
@@ -1883,6 +1895,19 @@ function TaskRow({
         {!selectionMode && (
           <button
             type="button"
+            className={`row-icon-button task-flag-button ${task.flagged === true ? "is-active" : ""}`}
+            disabled={interactionDisabled}
+            onClick={toggleFlag}
+            aria-label={`${task.flagged === true ? "取消" : "添加"}重点标记${task.title}`}
+            aria-pressed={task.flagged === true}
+            title={task.flagged === true ? "取消重点标记" : "标记为重点任务"}
+          >
+            <Star size={14} fill={task.flagged === true ? "currentColor" : "none"} aria-hidden="true" />
+          </button>
+        )}
+        {!selectionMode && (
+          <button
+            type="button"
             className="row-icon-button task-agent-button"
             disabled={interactionDisabled}
             onClick={() => onAskAgent(buildTaskAgentPrompt(task))}
@@ -1951,6 +1976,7 @@ function TaskListPage({
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">(
     "all",
   );
+  const [flaggedFilter, setFlaggedFilter] = useState(false);
   const [projectFilter, setProjectFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
   const [contextFilter, setContextFilter] = useState("all");
@@ -1972,6 +1998,7 @@ function TaskListPage({
   useEffect(() => {
     setFilterOpen(false);
     setPriorityFilter("all");
+    setFlaggedFilter(false);
     setProjectFilter("all");
     setTagFilter("all");
     setContextFilter("all");
@@ -1988,6 +2015,7 @@ function TaskListPage({
   }, [navigationKey]);
   const applySmartView = (view: SmartViewDefinition) => {
     setPriorityFilter(view.priority);
+    setFlaggedFilter(view.flagged === true);
     setProjectFilter(view.projectId);
     setTagFilter(view.tag);
     setContextFilter(view.context);
@@ -2002,6 +2030,7 @@ function TaskListPage({
       name: smartViewName,
       route,
       priority: priorityFilter,
+      flagged: flaggedFilter,
       projectId: projectFilter,
       tag: tagFilter,
       context: contextFilter,
@@ -2043,6 +2072,7 @@ function TaskListPage({
     if (smartViewQueryResult?.kind !== "suggestion") return;
     const { filters } = smartViewQueryResult.value;
     setPriorityFilter(filters.priority);
+    setFlaggedFilter(filters.flagged === true);
     setProjectFilter(filters.projectId);
     setTagFilter(filters.tag);
     setContextFilter(filters.context);
@@ -2071,6 +2101,7 @@ function TaskListPage({
             section.tasks.filter(
               (task) =>
                 (priorityFilter === "all" || task.priority === priorityFilter) &&
+                (!flaggedFilter || task.flagged === true) &&
                 (projectFilter === "all" || task.projectId === projectFilter) &&
                 (tagFilter === "all" || task.tags.includes(tagFilter)) &&
                 (contextFilter === "all" ||
@@ -2088,6 +2119,7 @@ function TaskListPage({
     [
       controller.sections,
       priorityFilter,
+      flaggedFilter,
       projectFilter,
       tagFilter,
       contextFilter,
@@ -2161,6 +2193,9 @@ function TaskListPage({
     const summary: string[] = [];
     if (action.patch.priority !== undefined) {
       summary.push(`优先级 → ${{ none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" }[action.patch.priority]}`);
+    }
+    if (action.patch.flagged !== undefined) {
+      summary.push(action.patch.flagged ? "添加重点标记" : "取消重点标记");
     }
     if (action.patch.projectId !== undefined) {
       const label = action.patch.projectId === null
@@ -2346,7 +2381,7 @@ function TaskListPage({
           <div className="filter-anchor">
             <button
             type="button"
-              className={`icon-button ${priorityFilter !== "all" || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? "active" : ""}`}
+              className={`icon-button ${priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? "active" : ""}`}
               aria-label="筛选"
               aria-expanded={filterOpen}
               onClick={() => setFilterOpen((value) => !value)}
@@ -2391,7 +2426,7 @@ function TaskListPage({
                     </button>
                   </div>
                   <small id="smart-view-query-hint">
-                    只生成筛选预览，不修改任务；支持日期、优先级、来源、项目、标签和情境。
+                    只生成筛选预览，不修改任务；支持重点标记、日期、优先级、来源、项目、标签和情境。
                   </small>
                   {smartViewQueryResult?.kind === "suggestion" && (
                     <div className="filter-assist-preview" role="status">
@@ -2430,6 +2465,18 @@ function TaskListPage({
                     </button>
                   ))}
                 </div>
+                <label className="filter-check-label">
+                  <input
+                    type="checkbox"
+                    checked={flaggedFilter}
+                    onChange={(event) => {
+                      setFlaggedFilter(event.target.checked);
+                      setActiveSmartViewId(undefined);
+                    }}
+                  />
+                  <Star size={14} aria-hidden="true" />
+                  只看重点标记
+                </label>
                 <label className="filter-select-label">
                   项目
                   <select
@@ -2823,7 +2870,7 @@ function TaskListPage({
             <h2>
               {search
                 ? `没有匹配“${search}”的任务`
-                : priorityFilter !== "all" || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
+                : priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
                   ? "没有符合筛选的任务"
                   : route === "completed"
                     ? "还没有已完成任务"
@@ -2834,7 +2881,7 @@ function TaskListPage({
             <p>
               {search
                 ? "试试其他关键词，或清除搜索后查看这个列表中的全部任务。"
-                : priorityFilter !== "all" || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
+                : priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
                   ? "调整或清除当前筛选后再看看。"
                   : route === "trash"
                     ? "删除的任务会先保留在这里。"
@@ -2842,13 +2889,14 @@ function TaskListPage({
                       ? "这里放尚未安排日期、项目或清单的任务；稍后再决定怎么处理。"
                       : "记录一件下一步要做的小事。"}
             </p>
-            {search || priorityFilter !== "all" || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? (
+            {search || priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? (
               <button
                 type="button"
                 className="soft-button"
                 onClick={() => {
                   onClearSearch();
                   setPriorityFilter("all");
+                  setFlaggedFilter(false);
                   setProjectFilter("all");
                   setTagFilter("all");
                   setContextFilter("all");
@@ -2856,7 +2904,7 @@ function TaskListPage({
                   setActiveSmartViewId(undefined);
                 }}
               >
-                {search && (priorityFilter !== "all" || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual")
+                {search && (priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual")
                   ? "清除搜索和筛选"
                   : search
                     ? "清除搜索"
@@ -2888,6 +2936,7 @@ function TaskListPage({
                 const canReorder =
                   route === "today" &&
                   priorityFilter === "all" &&
+                  !flaggedFilter &&
                   projectFilter === "all" &&
                   tagFilter === "all" &&
                   contextFilter === "all" &&
@@ -4911,9 +4960,20 @@ function TaskInspector({
               <small className="field-hint">仅本地，不同步飞书</small>
             )}
           </div>
+          <label className="field-checkbox task-flag-detail">
+            <input
+              type="checkbox"
+              checked={task.flagged === true}
+              onChange={(event) => void save({ flagged: event.target.checked })}
+              aria-label="重点标记任务"
+            />
+            <Star size={14} aria-hidden="true" />
+            标记为重点任务
+            <small className="field-hint">仅本地，不同步飞书</small>
+          </label>
           <div className="private-note">
             <EyeOff size={14} />
-            项目、标签、父子任务、优先级、预计、私人计划、时间块、排序和专注不会回写飞书
+            项目、标签、重点标记、父子任务、优先级、预计、私人计划、时间块、排序和专注不会回写飞书
           </div>
         </div>
         <div className="detail-group">

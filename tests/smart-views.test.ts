@@ -90,10 +90,24 @@ describe("smart views and explainable priority", () => {
     expect(readSmartViews()[0]).toMatchObject({
       id: "legacy-view",
       tag: "all",
+      flagged: false,
       context: "all",
       dateFilter: "any",
       sort: "manual",
     });
+  });
+
+  it("persists the private attention marker in saved views", () => {
+    const view = createSmartView({
+      name: "重点任务",
+      route: "all",
+      priority: "all",
+      flagged: true,
+      projectId: "all",
+    });
+
+    writeSmartViews([view!]);
+    expect(readSmartViews()[0]).toMatchObject({ flagged: true });
   });
 
   it("sorts saved-view results deterministically without mutating the snapshot", () => {

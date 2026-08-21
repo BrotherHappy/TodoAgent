@@ -145,6 +145,7 @@ const MUTABLE_TASK_FIELDS = new Set([
   "notes",
   "privateNotes",
   "status",
+  "flagged",
   "priority",
   "projectId",
   "listId",
@@ -196,6 +197,7 @@ const TASK_HISTORY_FIELDS = [
   "notes",
   "privateNotes",
   "status",
+  "flagged",
   "completedAt",
   "priority",
   "projectId",
@@ -278,11 +280,14 @@ const validateBulkTaskEditPatch = (patch: BulkTaskEditPatch): BulkTaskEditPatch 
     throw new TaskValidationError("批量编辑内容不正确。");
   }
   const keys = Object.keys(patch);
-  if (keys.length === 0 || keys.some((key) => !["priority", "projectId", "listId", "tags"].includes(key))) {
-    throw new TaskValidationError("批量编辑只支持优先级、项目、清单和标签。");
+  if (keys.length === 0 || keys.some((key) => !["priority", "flagged", "projectId", "listId", "tags"].includes(key))) {
+    throw new TaskValidationError("批量编辑只支持重点标记、优先级、项目、清单和标签。");
   }
   if (patch.priority !== undefined && !Object.prototype.hasOwnProperty.call(PRIORITY_RANK, patch.priority)) {
     throw new TaskValidationError("批量编辑优先级不正确。");
+  }
+  if (patch.flagged !== undefined && typeof patch.flagged !== "boolean") {
+    throw new TaskValidationError("批量编辑重点标记不正确。");
   }
   for (const [field, value] of [["projectId", patch.projectId], ["listId", patch.listId]] as const) {
     if (value !== undefined && value !== null && (typeof value !== "string" || value.trim().length === 0 || value.trim().length > 200)) {
@@ -515,6 +520,9 @@ const validateTask = (task: Task): Task => {
   task.title = task.title.trim();
   if (task.title.length === 0) {
     throw new TaskValidationError("Task title cannot be empty.");
+  }
+  if (task.flagged !== undefined && typeof task.flagged !== "boolean") {
+    throw new TaskValidationError("Task flagged value must be boolean.");
   }
   task.tags = uniqueStrings(task.tags);
   task.contexts = validateContexts(task.contexts ?? [], "contexts");
@@ -993,6 +1001,7 @@ export class TaskService {
         !filter.priorities.includes(task.priority)
       )
         return false;
+      if (filter.flagged === true && task.flagged !== true) return false;
       if (
         filter.statuses !== undefined &&
         !filter.statuses.includes(task.status)
@@ -1487,6 +1496,7 @@ export class TaskService {
         } else {
           const patch: UpdateTaskInput = {};
           if (editPatch?.priority !== undefined) patch.priority = editPatch.priority;
+          if (editPatch?.flagged !== undefined) patch.flagged = editPatch.flagged;
           if (editPatch?.projectId !== undefined) patch.projectId = editPatch.projectId;
           if (editPatch?.listId !== undefined) patch.listId = editPatch.listId;
           if (editPatch?.tags !== undefined) {
@@ -2110,6 +2120,7 @@ export class TaskService {
       privateNotes: input.privateNotes ?? "",
       status,
       priority: input.priority ?? "none",
+      ...(input.flagged === true ? { flagged: true } : {}),
       projectId: input.projectId,
       listId: input.listId,
       sectionId: input.sectionId,

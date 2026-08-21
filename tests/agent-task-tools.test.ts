@@ -149,6 +149,53 @@ describe("task Agent tools", () => {
     });
   });
 
+  it("treats the attention marker as a local Feishu edit", async () => {
+    const task = (
+      await tasks.createTask({
+        title: "飞书重点标记",
+        source: { type: "feishu", accountId: "primary", externalId: "flagged-agent" },
+        sync: { status: "synced" },
+      })
+    ).task;
+    const update = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    }).find((tool) => tool.name === "task_update")!;
+    const args = {
+      id: task.id,
+      title: null,
+      notes: null,
+      privateNotes: null,
+      flagged: true,
+      projectId: null,
+      listId: null,
+      plannedDate: null,
+      startAt: null,
+      dueAt: null,
+      priority: null,
+      tags: null,
+      contexts: null,
+      clearFields: [],
+    };
+    await expect(update.analyze(args, {
+      runId: "flagged-local",
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({
+      risk: "R1",
+      network: [],
+      externalEffects: [],
+      preview: {
+        changes: [{ field: "flagged", before: null, after: true }],
+      },
+    });
+    const output = await update.execute(args, executionContext("task_update"));
+    expect(output.data).toMatchObject({ changed: true, syncReceipts: [] });
+    expect(await tasks.getTask(task.id)).toMatchObject({
+      flagged: true,
+      sync: { status: "synced" },
+    });
+  });
+
   it("fails closed when an Agent remote write targets a task from another Feishu account", async () => {
     const task = (
       await tasks.createTask({
@@ -337,6 +384,23 @@ describe("task Agent tools", () => {
     expect(await tasks.listTasks({ text: "由 Agent 创建" })).toHaveLength(1);
   });
 
+  it("lets Agent query the local attention marker", async () => {
+    await tasks.createTask({ title: "Agent 重点", flagged: true });
+    await tasks.createTask({ title: "Agent 普通" });
+    const list = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    }).find((tool) => tool.name === "task_list")!;
+    const output = await list.execute(
+      { view: "all", text: null, source: null, flagged: true, limit: 100 },
+      executionContext("task_list"),
+    );
+    expect(output.data).toMatchObject({
+      count: 1,
+      tasks: [expect.objectContaining({ title: "Agent 重点", flagged: true })],
+    });
+  });
+
   it("creates, reads, updates, and clears start/project/list task fields", async () => {
     const tools = createTaskTools({
       tasks,
@@ -355,6 +419,7 @@ describe("task Agent tools", () => {
       startAt: "2026-08-10T09:00:00+08:00",
       dueAt: "2026-08-10T10:00:00+08:00",
       priority: "high" as const,
+      flagged: true,
       tags: ["agent"],
       contexts: null,
     };
@@ -371,6 +436,7 @@ describe("task Agent tools", () => {
     expect(read.data).toMatchObject({
       projectId: "project-agent",
       listId: "list-today",
+      flagged: true,
       startAt: "2026-08-10T09:00:00+08:00",
       dueAt: "2026-08-10T10:00:00+08:00",
     });
@@ -380,6 +446,7 @@ describe("task Agent tools", () => {
       title: null,
       notes: null,
       privateNotes: null,
+      flagged: false,
       projectId: "project-updated",
       listId: "list-updated",
       plannedDate: null,
@@ -395,6 +462,7 @@ describe("task Agent tools", () => {
     expect(await tasks.getTask(taskId)).toMatchObject({
       projectId: "project-updated",
       listId: "list-updated",
+      flagged: false,
       startAt: "2026-08-10T09:15:00+08:00",
     });
 

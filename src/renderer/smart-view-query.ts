@@ -6,6 +6,7 @@ import type {
 
 export interface SmartViewQueryFilters {
   priority: TaskPriority | "all";
+  flagged: boolean;
   projectId: string | "all";
   tag: string | "all";
   context: string | "all";
@@ -78,6 +79,7 @@ const findNamedValue = (
 
 const filtersWithDefaults = (): SmartViewQueryFilters => ({
   priority: "all",
+  flagged: false,
   projectId: "all",
   tag: "all",
   context: "all",
@@ -131,6 +133,14 @@ export const parseSmartViewQuery = (
   if (priorityMatches[0]) {
     filters.priority = priorityMatches[0][0];
     summary.push(priorityMatches[0][2]);
+  }
+
+  const flaggedMatches =
+    /已标记|重点任务|旗标|星标|flagged|starred/iu.test(normalized) &&
+    !/未标记|取消标记|不标记/iu.test(normalized);
+  if (flaggedMatches) {
+    filters.flagged = true;
+    summary.push("重点标记");
   }
 
   const dateRules: Array<[SmartViewDateFilter, RegExp, string]> = [

@@ -83,4 +83,12 @@ describe("filterTasksForPetView", () => {
     expect(filterTasksForPetView(tasks, view({ route: "today" }), today).map((item) => item.id)).toEqual(["today"]);
     expect(filterTasksForPetView(tasks, view({ route: "inbox" }), today).map((item) => item.id)).toEqual(["inbox"]);
   });
+
+  it("lets the pet surface only locally flagged tasks", () => {
+    const tasks = [
+      task({ id: "flagged", title: "重点", flagged: true }),
+      task({ id: "ordinary", title: "普通" }),
+    ];
+    expect(filterTasksForPetView(tasks, view({ flagged: true })).map((item) => item.id)).toEqual(["flagged"]);
+  });
 });
