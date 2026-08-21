@@ -65,9 +65,18 @@ const taskAutomationRuleSchema = z
     id: idSchema.max(160),
     name: z.string().trim().min(1).max(80),
     enabled: z.boolean(),
-    trigger: z.enum(["task-created", "task-completed", "manual"]),
+    trigger: z.enum(["task-created", "task-completed", "manual", "scheduled"]),
     condition: taskAutomationConditionSchema,
     action: taskAutomationActionSchema,
+    schedule: z
+      .object({
+        frequency: z.enum(["daily", "weekly"]),
+        time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u),
+        weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+        lastRunAt: z.string().datetime().optional(),
+      })
+      .strict()
+      .optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
   })

@@ -11423,6 +11423,35 @@ select {
   justify-content: flex-end;
   gap: 8px;
 }
+.automation-weekday-picker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+  max-width: 360px;
+}
+.automation-weekday-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--app-line);
+  border-radius: 10px;
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-surface) 76%, transparent);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.automation-weekday-option:has(input:checked) {
+  border-color: color-mix(in srgb, var(--app-brand) 45%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 54%, transparent);
+}
+.automation-weekday-option input {
+  accent-color: var(--app-brand);
+}
 .markdown-export-history-option {
   display: inline-flex;
   align-items: center;
@@ -12168,6 +12197,10 @@ select {
   }
   .settings-row .settings-input {
     width: 100%;
+  }
+  .automation-weekday-picker {
+    justify-content: flex-start;
+    max-width: none;
   }
   .settings-pricing-grid {
     min-width: 0;

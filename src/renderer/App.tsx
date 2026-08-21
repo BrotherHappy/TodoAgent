@@ -136,9 +136,11 @@ import {
   matchesTaskAutomation,
   taskAutomationPatch,
   taskAutomationActionLabel,
+  taskAutomationScheduleLabel,
   taskAutomationTriggerLabel,
   type TaskAutomationAction,
   type TaskAutomationRule,
+  type TaskAutomationScheduleFrequency,
   type TaskAutomationTrigger,
 } from "../shared/task-automations";
 import { AGENT_CAPABILITY_DESCRIPTORS } from "../shared/agent-capabilities";
@@ -9740,6 +9742,12 @@ function SettingsPage({
   const [automationName, setAutomationName] = useState("");
   const [automationTrigger, setAutomationTrigger] =
     useState<TaskAutomationTrigger>("task-created");
+  const [automationScheduleFrequency, setAutomationScheduleFrequency] =
+    useState<TaskAutomationScheduleFrequency>("daily");
+  const [automationScheduleTime, setAutomationScheduleTime] = useState("09:00");
+  const [automationScheduleWeekdays, setAutomationScheduleWeekdays] = useState<number[]>([
+    1, 2, 3, 4, 5,
+  ]);
   const [automationActionKind, setAutomationActionKind] =
     useState<TaskAutomationAction["kind"]>("set-flagged");
   const [automationActionValue, setAutomationActionValue] = useState("");
@@ -9918,6 +9926,18 @@ function SettingsPage({
       notify("最多保存 50 条任务自动化规则", "error");
       return;
     }
+    if (automationTrigger === "scheduled" && !/^([01]\d|2[0-3]):[0-5]\d$/u.test(automationScheduleTime)) {
+      notify("请填写有效的计划时间", "error");
+      return;
+    }
+    if (
+      automationTrigger === "scheduled" &&
+      automationScheduleFrequency === "weekly" &&
+      automationScheduleWeekdays.length === 0
+    ) {
+      notify("每周计划至少选择一天", "error");
+      return;
+    }
     try {
       const rule = createTaskAutomationRule({
         name: automationName,
@@ -9943,6 +9963,17 @@ function SettingsPage({
             : {}),
         },
         action: buildAutomationAction(),
+        ...(automationTrigger === "scheduled"
+          ? {
+              schedule: {
+                frequency: automationScheduleFrequency,
+                time: automationScheduleTime,
+                ...(automationScheduleFrequency === "weekly"
+                  ? { weekdays: automationScheduleWeekdays }
+                  : {}),
+              },
+            }
+          : {}),
       });
       const saved = await persist(
         { ...appSettings, automations: [...appSettings.automations, rule] },
@@ -9951,6 +9982,10 @@ function SettingsPage({
       if (!saved) return;
       setAutomationName("");
       setAutomationActionValue("");
+      setAutomationTrigger("task-created");
+      setAutomationScheduleFrequency("daily");
+      setAutomationScheduleTime("09:00");
+      setAutomationScheduleWeekdays([1, 2, 3, 4, 5]);
       setAutomationConditionSource("all");
       setAutomationConditionProject("");
       setAutomationConditionList("");
@@ -11833,8 +11868,83 @@ function SettingsPage({
                   <option value="task-created">任务新建时</option>
                   <option value="task-completed">任务完成时</option>
                   <option value="manual">手动应用时</option>
+                  <option value="scheduled">按计划自动执行</option>
                 </select>
               </div>
+              {automationTrigger === "scheduled" && (
+                <>
+                  <div className="settings-note-quiet">
+                    <Clock3 size={16} aria-hidden="true" />
+                    <span>定时规则只在应用运行时检查；错过设定时间会在当天下一次检查时补执行一次。同一周期不会重复执行。</span>
+                  </div>
+                  <div className="settings-row">
+                    <div>
+                      <strong>执行频率</strong>
+                      <p>每天一次，或在选定的星期几执行</p>
+                    </div>
+                    <select
+                      className="settings-input"
+                      aria-label="自动化计划频率"
+                      value={automationScheduleFrequency}
+                      onChange={(event) => setAutomationScheduleFrequency(event.target.value as TaskAutomationScheduleFrequency)}
+                    >
+                      <option value="daily">每天</option>
+                      <option value="weekly">每周指定日期</option>
+                    </select>
+                  </div>
+                  <div className="settings-row">
+                    <div>
+                      <strong>执行时间</strong>
+                      <p>使用本机时区；应用运行后会按分钟检查</p>
+                    </div>
+                    <input
+                      className="settings-input"
+                      aria-label="自动化计划时间"
+                      type="time"
+                      value={automationScheduleTime}
+                      onChange={(event) => setAutomationScheduleTime(event.target.value)}
+                    />
+                  </div>
+                  {automationScheduleFrequency === "weekly" && (
+                    <div className="settings-row settings-row-stack">
+                      <div>
+                        <strong>星期几</strong>
+                        <p>至少选择一天；所有选择都会在同一时间检查</p>
+                      </div>
+                      <div className="automation-weekday-picker" role="group" aria-label="自动化计划星期">
+                        {[
+                          [1, "周一"],
+                          [2, "周二"],
+                          [3, "周三"],
+                          [4, "周四"],
+                          [5, "周五"],
+                          [6, "周六"],
+                          [0, "周日"],
+                        ].map(([day, label]) => {
+                          const weekday = day as number;
+                          const checked = automationScheduleWeekdays.includes(weekday);
+                          return (
+                            <label key={weekday} className="automation-weekday-option">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() =>
+                                  setAutomationScheduleWeekdays((current) =>
+                                    checked
+                                      ? current.filter((value) => value !== weekday)
+                                      : [...current, weekday].sort((left, right) => left - right),
+                                  )
+                                }
+                              />
+                              <span>{label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
               <div className="settings-row">
                 <div>
                   <strong>来源条件</strong>
@@ -12018,7 +12128,9 @@ function SettingsPage({
                   <div>
                     <strong>{rule.name}</strong>
                     <p>
-                      {taskAutomationTriggerLabel(rule.trigger)} · {taskAutomationActionLabel(rule.action)}
+                      {taskAutomationTriggerLabel(rule.trigger)}
+                      {rule.schedule ? ` · ${taskAutomationScheduleLabel(rule.schedule)}` : ""}
+                      {" · "}{taskAutomationActionLabel(rule.action)}
                       · {describeAutomationCondition(rule)}
                     </p>
                   </div>

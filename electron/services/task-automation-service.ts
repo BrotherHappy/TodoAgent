@@ -2,6 +2,7 @@ import type { Task, TaskId, UpdateTaskInput } from "../../src/shared/models";
 import {
   matchesTaskAutomation,
   taskAutomationPatch,
+  taskAutomationScheduleDue,
   taskAutomationTaskIds,
   taskAutomationTrigger,
   type TaskAutomationRule,
@@ -25,6 +26,8 @@ export interface TaskAutomationRunResult {
   taskIds: TaskId[];
   ruleIds: string[];
   failures: TaskAutomationFailure[];
+  /** Scheduled rules whose current period was consumed, even when no task matched. */
+  scheduledRuleIds: string[];
 }
 
 /**
@@ -57,6 +60,7 @@ export class TaskAutomationService {
       taskIds: [],
       ruleIds: [],
       failures: [],
+      scheduledRuleIds: [],
     };
     const appliedTaskIds = new Set<TaskId>();
     const appliedRuleIds = new Set<string>();
@@ -95,6 +99,63 @@ export class TaskAutomationService {
           // A later action could depend on the failed write. Stop this task's
           // chain but allow independent tasks/rules to continue.
           break;
+        }
+      }
+    }
+    result.taskIds = [...appliedTaskIds];
+    result.ruleIds = [...appliedRuleIds];
+    return result;
+  }
+
+  /** Apply due local schedules to open tasks. This is deliberately a separate
+   * entry point from transition handling so a timer can never reinterpret a
+   * task update as a creation/completion edge. */
+  async applyScheduled(
+    current: readonly Task[],
+    now = new Date(),
+  ): Promise<TaskAutomationRunResult> {
+    const result: TaskAutomationRunResult = {
+      applied: 0,
+      taskIds: [],
+      ruleIds: [],
+      failures: [],
+      scheduledRuleIds: [],
+    };
+    const appliedTaskIds = new Set<TaskId>();
+    const appliedRuleIds = new Set<string>();
+    const workingById = new Map(
+      current
+        .filter((task) => task.deletedAt === undefined && task.status !== "completed")
+        .map((task) => [task.id, task]),
+    );
+    for (const rule of this.#rules()) {
+      if (!rule.enabled || rule.trigger !== "scheduled" || !taskAutomationScheduleDue(rule, now)) {
+        continue;
+      }
+      result.scheduledRuleIds.push(rule.id);
+      for (const [id, original] of workingById) {
+        if (!matchesTaskAutomation(rule, original)) continue;
+        const patch = taskAutomationPatch(rule, original);
+        if (!patch) continue;
+        try {
+          const mutation = await this.#writer.updateTask(id, patch);
+          const nextTask =
+            mutation !== null && typeof mutation === "object" &&
+            "task" in mutation &&
+            mutation.task !== undefined &&
+            typeof mutation.task === "object"
+              ? mutation.task as Task
+              : undefined;
+          workingById.set(id, nextTask ?? applyLocalPatch(original, patch));
+          result.applied += 1;
+          appliedTaskIds.add(id);
+          appliedRuleIds.add(rule.id);
+        } catch (error) {
+          result.failures.push({
+            taskId: id,
+            ruleId: rule.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }

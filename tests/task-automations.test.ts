@@ -5,6 +5,8 @@ import {
   matchesTaskAutomation,
   normalizeTaskAutomationRules,
   taskAutomationPatch,
+  taskAutomationScheduleDue,
+  taskAutomationScheduleLabel,
   taskAutomationTrigger,
   taskAutomationTriggerLabel,
 } from "../src/shared/task-automations";
@@ -54,6 +56,14 @@ describe("task automation rules", () => {
     expect(normalizeTaskAutomationRules(
       Array.from({ length: 55 }, (_, index) => ({ ...valid, id: `rule-${index}` })),
     )).toHaveLength(50);
+    expect(normalizeTaskAutomationRules([
+      { ...valid, trigger: "scheduled" },
+      {
+        ...valid,
+        trigger: "scheduled",
+        schedule: { frequency: "weekly", time: "08:30", weekdays: [1, 5] },
+      },
+    ])).toHaveLength(1);
   });
 
   it("matches source and private context conditions", () => {
@@ -106,6 +116,63 @@ describe("task automation rules", () => {
     expect(taskAutomationTriggerLabel("manual")).toBe("手动应用时");
     expect((await service.applyTransition([], [target])).applied).toBe(0);
     expect(calls).toEqual([]);
+  });
+
+  it("evaluates daily and weekly schedules once per local period", () => {
+    const daily = rule({
+      trigger: "scheduled",
+      schedule: { frequency: "daily", time: "09:00" },
+    });
+    const friday = new Date(2026, 7, 21, 9, 1);
+    expect(taskAutomationScheduleDue(daily, new Date(2026, 7, 21, 8, 59))).toBe(false);
+    expect(taskAutomationScheduleDue(daily, friday)).toBe(true);
+    expect(taskAutomationScheduleDue(
+      rule({
+        trigger: "scheduled",
+        schedule: {
+          frequency: "daily",
+          time: "09:00",
+          lastRunAt: friday.toISOString(),
+        },
+      }),
+      new Date(2026, 7, 21, 12, 0),
+    )).toBe(false);
+    const weekly = rule({
+      trigger: "scheduled",
+      schedule: { frequency: "weekly", time: "10:00", weekdays: [1, 3, 5] },
+    });
+    expect(taskAutomationScheduleDue(weekly, friday)).toBe(false);
+    expect(taskAutomationScheduleDue(weekly, new Date(2026, 7, 19, 10, 0))).toBe(true);
+    expect(taskAutomationScheduleLabel(weekly.schedule!)).toBe("周一、周三、周五 10:00");
+  });
+
+  it("applies due schedules only to open tasks and reports one consumed period", async () => {
+    const open = task("open", { source: { type: "feishu" }, tags: ["发布"] });
+    const completed = task("done", { status: "completed" });
+    const calls: Array<{ id: string; patch: unknown }> = [];
+    const scheduled = rule({
+      trigger: "scheduled",
+      condition: { source: "feishu", tag: "发布" },
+      schedule: { frequency: "daily", time: "09:00" },
+      action: { kind: "set-flagged", value: true },
+    });
+    const service = new TaskAutomationService(
+      {
+        updateTask: async (id, patch) => {
+          calls.push({ id, patch });
+          return { task: { ...open, ...patch } };
+        },
+      },
+      () => [scheduled],
+    );
+    const result = await service.applyScheduled(
+      [open, completed],
+      new Date(2026, 7, 21, 9, 1),
+    );
+    expect(result.scheduledRuleIds).toEqual(["rule-1"]);
+    expect(result.applied).toBe(1);
+    expect(result.taskIds).toEqual(["open"]);
+    expect(calls).toEqual([{ id: "open", patch: { flagged: true } }]);
   });
 
   it("creates private patches and skips no-ops", () => {

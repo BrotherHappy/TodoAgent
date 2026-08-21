@@ -22,7 +22,20 @@ export const TASK_AUTOMATION_MAX_VALUE_LENGTH = 80;
 export type TaskAutomationTrigger =
   | "task-created"
   | "task-completed"
-  | "manual";
+  | "manual"
+  | "scheduled";
+
+export type TaskAutomationScheduleFrequency = "daily" | "weekly";
+
+export interface TaskAutomationSchedule {
+  frequency: TaskAutomationScheduleFrequency;
+  /** Local machine time in HH:mm format. */
+  time: string;
+  /** Sunday is 0 and Saturday is 6. Required for weekly schedules. */
+  weekdays?: number[];
+  /** Internal local checkpoint; never sent to Feishu or an Agent. */
+  lastRunAt?: IsoDateTime;
+}
 
 export interface TaskAutomationCondition {
   source?: TaskSourceType;
@@ -51,6 +64,7 @@ export interface TaskAutomationRule {
   trigger: TaskAutomationTrigger;
   condition: TaskAutomationCondition;
   action: TaskAutomationAction;
+  schedule?: TaskAutomationSchedule;
   createdAt: string;
   updatedAt: string;
 }
@@ -69,6 +83,7 @@ export interface CreateTaskAutomationRuleInput {
   trigger: TaskAutomationTrigger;
   condition?: TaskAutomationCondition;
   action: TaskAutomationAction;
+  schedule?: TaskAutomationSchedule;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -77,6 +92,11 @@ const triggers = new Set<TaskAutomationTrigger>([
   "task-created",
   "task-completed",
   "manual",
+  "scheduled",
+]);
+const scheduleFrequencies = new Set<TaskAutomationScheduleFrequency>([
+  "daily",
+  "weekly",
 ]);
 const sourceTypes = new Set<TaskSourceType>(["local", "feishu"]);
 const actionKinds = new Set<TaskAutomationAction["kind"]>([
@@ -123,6 +143,45 @@ const isLocalDate = (value: unknown): value is LocalDate => {
 
 const isDateTime = (value: unknown): value is string =>
   typeof value === "string" && Number.isFinite(new Date(value).getTime());
+
+const isLocalTime = (value: unknown): value is string =>
+  typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/u.test(value);
+
+function normalizeSchedule(
+  value: unknown,
+  trigger: TaskAutomationTrigger,
+): TaskAutomationSchedule | undefined {
+  if (trigger !== "scheduled") return undefined;
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.frequency !== "string" ||
+    !scheduleFrequencies.has(value.frequency as TaskAutomationScheduleFrequency) ||
+    !isLocalTime(value.time)
+  ) {
+    return undefined;
+  }
+  const frequency = value.frequency as TaskAutomationScheduleFrequency;
+  let weekdays: number[] | undefined;
+  if (frequency === "weekly") {
+    if (!Array.isArray(value.weekdays) || value.weekdays.length === 0) return undefined;
+    const normalized = value.weekdays.filter(
+      (day): day is number =>
+        typeof day === "number" && Number.isInteger(day) && day >= 0 && day <= 6,
+    );
+    weekdays = [...new Set(normalized)].sort((left, right) => left - right);
+    if (weekdays.length === 0 || weekdays.length !== value.weekdays.length) return undefined;
+  } else if (value.weekdays !== undefined) {
+    return undefined;
+  }
+  const lastRunAt = value.lastRunAt === undefined ? undefined : value.lastRunAt;
+  if (lastRunAt !== undefined && !isDateTime(lastRunAt)) return undefined;
+  return {
+    frequency,
+    time: value.time,
+    ...(weekdays ? { weekdays } : {}),
+    ...(lastRunAt ? { lastRunAt } : {}),
+  };
+}
 
 function normalizeCondition(value: unknown): TaskAutomationCondition | undefined {
   if (value === undefined) return {};
@@ -205,7 +264,10 @@ export function normalizeTaskAutomationRule(
   }
   const condition = normalizeCondition(value.condition);
   const action = normalizeAction(value.action);
+  const schedule = normalizeSchedule(value.schedule, value.trigger as TaskAutomationTrigger);
   if (condition === undefined || action === undefined) return undefined;
+  if (value.trigger === "scheduled" && schedule === undefined) return undefined;
+  if (value.trigger !== "scheduled" && value.schedule !== undefined) return undefined;
   const createdAt = value.createdAt === undefined ? now : value.createdAt;
   const updatedAt = value.updatedAt === undefined ? createdAt : value.updatedAt;
   if (!isDateTime(createdAt) || !isDateTime(updatedAt)) return undefined;
@@ -216,6 +278,7 @@ export function normalizeTaskAutomationRule(
     trigger: value.trigger as TaskAutomationTrigger,
     condition,
     action,
+    ...(schedule ? { schedule } : {}),
     createdAt,
     updatedAt,
   };
@@ -248,6 +311,7 @@ export function createTaskAutomationRule(
       trigger: input.trigger,
       condition: input.condition ?? {},
       action: input.action,
+      ...(input.schedule ? { schedule: input.schedule } : {}),
       createdAt: input.createdAt ?? now,
       updatedAt: input.updatedAt ?? now,
     },
@@ -323,6 +387,40 @@ export function taskAutomationPatch(
   }
 }
 
+function localDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function schedulePeriodKey(schedule: TaskAutomationSchedule, now: Date): string | undefined {
+  if (schedule.frequency === "weekly" && !schedule.weekdays?.includes(now.getDay())) {
+    return undefined;
+  }
+  return `${schedule.frequency}:${localDateKey(now)}`;
+}
+
+/** Whether a local scheduled rule should run at this instant. The caller is
+ * expected to poll at a short interval; a missed time runs once later on the
+ * same eligible day, while the persisted checkpoint prevents repeats. */
+export function taskAutomationScheduleDue(
+  rule: TaskAutomationRule,
+  now = new Date(),
+): boolean {
+  if (!rule.enabled || rule.trigger !== "scheduled" || !rule.schedule) return false;
+  const period = schedulePeriodKey(rule.schedule, now);
+  if (!period) return false;
+  const [hours, minutes] = rule.schedule.time.split(":").map(Number);
+  const scheduledMinutes = hours * 60 + minutes;
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  if (currentMinutes < scheduledMinutes) return false;
+  const lastPeriod = rule.schedule.lastRunAt
+    ? schedulePeriodKey(rule.schedule, new Date(rule.schedule.lastRunAt))
+    : undefined;
+  return lastPeriod !== period;
+}
+
 export function taskAutomationActionLabel(action: TaskAutomationAction): string {
   switch (action.kind) {
     case "set-flagged": return action.value ? "标记为重点" : "取消重点标记";
@@ -337,10 +435,18 @@ export function taskAutomationActionLabel(action: TaskAutomationAction): string 
   }
 }
 
+export function taskAutomationScheduleLabel(schedule: TaskAutomationSchedule): string {
+  if (schedule.frequency === "daily") return `每天 ${schedule.time}`;
+  const labels = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const days = (schedule.weekdays ?? []).map((day) => labels[day]).join("、");
+  return `${days || "每周"} ${schedule.time}`;
+}
+
 export function taskAutomationTriggerLabel(trigger: TaskAutomationTrigger): string {
   if (trigger === "task-created") return "任务新建时";
   if (trigger === "task-completed") return "任务完成时";
-  return "手动应用时";
+  if (trigger === "manual") return "手动应用时";
+  return "按计划时";
 }
 
 export function taskAutomationTaskIds(

@@ -99,6 +99,7 @@ let notificationRuntime: ElectronNotificationRuntime | undefined;
 let petService: PetService | undefined;
 let weatherService: WeatherService | undefined;
 let petTickTimer: ReturnType<typeof setInterval> | undefined;
+let taskAutomationTimer: ReturnType<typeof setInterval> | undefined;
 let petInputActivityTimer: ReturnType<typeof setInterval> | undefined;
 let lastPetInputActivityAt = 0;
 let weatherRefreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -934,6 +935,45 @@ async function startApplication(): Promise<void> {
         );
       });
   };
+  let scheduledAutomationQueue: Promise<void> = Promise.resolve();
+  const processScheduledAutomations = (): void => {
+    scheduledAutomationQueue = scheduledAutomationQueue
+      .then(async () => {
+        const now = new Date();
+        const current = await tasks.listTasks({ includeDeleted: true });
+        const result = await taskAutomationService.applyScheduled(current, now);
+        if (result.failures.length > 0) {
+          console.warn(
+            "Some scheduled local task automations could not be applied",
+            result.failures,
+          );
+        }
+        if (result.scheduledRuleIds.length === 0) return;
+        const consumed = new Set(result.scheduledRuleIds);
+        const checkpoint = now.toISOString();
+        const settings = settingsService!.get();
+        const next = await settingsService!.replace({
+          ...settings,
+          automations: settings.automations.map((rule) =>
+            consumed.has(rule.id) && rule.schedule
+              ? {
+                  ...rule,
+                  schedule: { ...rule.schedule, lastRunAt: checkpoint },
+                  updatedAt: checkpoint,
+                }
+              : rule,
+          ),
+        });
+        broadcastSettings(next);
+        if (result.applied > 0) handleTasksChanged();
+      })
+      .catch((error: unknown) => {
+        console.error(
+          "Failed to process scheduled task automations",
+          error instanceof Error ? error.message : error,
+        );
+      });
+  };
   const agentWorkspace = path.join(userDataPath, "agent-workspace");
   await mkdir(agentWorkspace, { recursive: true });
   const toolAdapters = createElectronToolAdapters();
@@ -1650,6 +1690,8 @@ async function startApplication(): Promise<void> {
   screen.on("display-removed", ensureFloatingVisible);
   screen.on("display-metrics-changed", ensureFloatingVisible);
   registerQuickCaptureShortcut(settingsService.get());
+  processScheduledAutomations();
+  taskAutomationTimer = setInterval(processScheduledAutomations, 30_000);
   await notificationRuntime.start();
   petTickTimer = setInterval(() => {
     void petService?.tick().catch((error: unknown) => {
@@ -1776,6 +1818,7 @@ app.on("before-quit", () => {
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   if (petTickTimer) clearInterval(petTickTimer);
+  if (taskAutomationTimer) clearInterval(taskAutomationTimer);
   if (petInputActivityTimer) clearInterval(petInputActivityTimer);
   if (weatherRefreshTimer) clearInterval(weatherRefreshTimer);
   feishuMutationSync?.dispose();
