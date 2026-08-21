@@ -112,6 +112,7 @@ flowchart LR
 - 鼠标穿透：`FloatingSettings.mousePassthrough` 默认关闭，由设置服务做旧配置迁移；`WindowManager` 将它映射为 Electron `setIgnoreMouseEvents(..., { forward: true })`，保持宠物可见并把点击交给后方窗口。主窗口设置与托盘共用同一持久字段，关闭任一入口即可恢复互动；穿透不改变任务、Agent、专注、同步或权限事实。
 - 工作时回应：`PetBehaviorSettings.inputReactionsEnabled` 默认关闭；主进程每 4 秒读取 Electron `powerMonitor.getSystemIdleTime()` 的秒级结果，经 14 秒节流后只广播 `typing` / `reading` 两种粗粒度姿态给浮窗。该链路不读取按键、指针、前台窗口、窗口标题或内容，也不持久化、不上传；会议模式、隐私模式或浮窗关闭时不广播，renderer 只把事件映射为内置 `type` / `read` 动作。
 - 最近捕获：`src/renderer/quick-capture-history.ts` 只在任务 / 暂存 / 日记成功保存后把用户明确确认的文本、标题、去向和时间写入 renderer 本机存储，最多 12 条；快速录入窗可以回用或清空。上下文预览在确认前不会写入，历史不进入任务事件、Agent、飞书或数据同步。
+- 最近上下文：`src/renderer/context-capture-history.ts` 使用独立的 renderer `localStorage` 键保存用户在剪贴板、当前窗口、选中文本或文本/链接拖入预览卡中明确点击“保存到最近上下文”的内容；最多 12 条，单条原文最多 2,000 字，组件支持回用与清空。它不自动记录、不保存文件/图片正文，不建立窗口监听，不进入任务事件、Agent、飞书、`.todo-pet.json` 或安全导出；存储失败只降级为当前捕获继续可用。
 - 休假模式：`PetBehaviorSettings.vacationMode` 默认关闭；开启后 renderer 和主进程共同抑制宠物主动消息、工作时回应、启动时自动日记与主动消息记录，宠物仍可见，任务、专注、同步、提醒和用户主动互动不受影响。设置与宠物右键菜单都能切换，旧配置和导入缺省为关闭；它不维护连续签到，也不写任务或飞书字段。
 - 时间线日视图：`TimelinePage` 用 `timelineNowIndicator` 将本地时钟投影到 08:00–22:00 的半小时槽，仅对当天显示“现在”线；打开当天时只做一次温和滚动定位，用户也可手动回到当前时刻。该投影不创建 `Task`、不写入 `timeBlock`、日历或 Feishu；历史/未来日期和工作时段之外返回空值，避免伪造实时状态。
 - 专注守护：`FocusSettings.shieldMode` 与 `shieldApplications` 只保存在本地设置；`FloatingWindow` 在专注阶段按低频间隔调用已有 `shell.readActiveWindow`，只使用脱离标题的 `appName` 做大小写不敏感匹配。`gentle` 仅显示可折叠气泡，`pause` 复用既有 Pet/Task 专注暂停 API；不持久化窗口标题或内容，不关闭、阻挡、控制外部应用，也不抢夺焦点，默认关闭并随隐私/会议/全屏/安静策略收敛。

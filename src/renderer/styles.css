@@ -3937,6 +3937,78 @@ select {
   border-radius: 16px;
   background: color-mix(in srgb, var(--app-surface) 76%, var(--app-glass-soft));
 }
+.context-history-card {
+  display: grid;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--app-brand-soft) 28%, var(--app-surface));
+}
+.context-history-list {
+  display: grid;
+  gap: 6px;
+  max-height: 190px;
+  overflow: auto;
+}
+.context-history-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 8px 9px;
+  text-align: left;
+  color: var(--app-text);
+  background: var(--app-glass-soft);
+  cursor: pointer;
+}
+.context-history-item:hover,
+.context-history-item:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 42%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 62%, var(--app-glass-soft));
+}
+.context-history-item > svg {
+  color: var(--app-brand);
+}
+.context-history-item > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.context-history-item strong,
+.context-history-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-history-item strong {
+  font-size: 12px;
+}
+.context-history-item small {
+  color: var(--app-text-soft);
+  font-size: 10px;
+}
+.context-capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.context-capture-saved {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid color-mix(in srgb, var(--app-success) 28%, var(--app-line));
+  border-radius: 10px;
+  padding: 6px 9px;
+  color: var(--app-success);
+  background: color-mix(in srgb, var(--app-success-soft) 54%, transparent);
+  font-size: 11px;
+  margin: 0 0 10px;
+}
 .quick-history-list {
   display: grid;
   gap: 6px;

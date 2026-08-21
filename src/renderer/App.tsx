@@ -160,6 +160,14 @@ import { AgentMarkdown } from "./AgentMarkdown";
 import { AgentRunActivity } from "./AgentRunActivity";
 import { PetWeatherForecast } from "./PetWeatherForecast";
 import { QuickCaptureHistory } from "./QuickCaptureHistory";
+import { ContextCaptureHistory } from "./ContextCaptureHistory";
+import {
+  clearContextCaptureHistory,
+  readContextCaptureHistory,
+  rememberContextCapture,
+  type ContextCaptureHistoryItem,
+  type ContextCaptureHistoryKind,
+} from "./context-capture-history";
 import {
   clearQuickCaptureHistory,
   readQuickCaptureHistory,
@@ -13639,8 +13647,12 @@ function QuickCaptureWindow() {
   const [recentCaptures, setRecentCaptures] = useState<QuickCaptureHistoryItem[]>(
     () => readQuickCaptureHistory(),
   );
+  const [recentContexts, setRecentContexts] = useState<ContextCaptureHistoryItem[]>(
+    () => readContextCaptureHistory(),
+  );
   const [saving, setSaving] = useState(false);
   const [captureError, setCaptureError] = useState("");
+  const [contextSavedNotice, setContextSavedNotice] = useState("");
   const [captureDestination, setCaptureDestination] =
     useState<QuickCaptureDestination>("task");
   const captureIdRef = useRef(`quick-capture-${crypto.randomUUID()}`);
@@ -13721,6 +13733,30 @@ function QuickCaptureWindow() {
       createdAt: new Date().toISOString(),
     });
     setRecentCaptures(next);
+  };
+  const rememberContext = (
+    kind: ContextCaptureHistoryKind,
+    label: string,
+    value: string,
+  ) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    const next = rememberContextCapture({
+      id: `context-${crypto.randomUUID()}`,
+      kind,
+      label: label.trim() || "最近上下文",
+      text: normalized,
+      createdAt: new Date().toISOString(),
+    });
+    setRecentContexts(next);
+    setContextSavedNotice("已保存到最近上下文（仅本机）");
+    window.setTimeout(() => setContextSavedNotice(""), 1800);
+  };
+  const applyContext = (item: ContextCaptureHistoryItem) => {
+    setText((current) =>
+      current.trim() ? `${current}\n${item.text}` : item.text,
+    );
+    inputRef.current?.focus();
   };
   const templatePreview = selectedTemplate && fields.title
     ? previewTaskTemplate(selectedTemplate, fields.title, {
@@ -14071,19 +14107,29 @@ function QuickCaptureWindow() {
               : "输入自然语言即可开始"}
           </p>
           {!text && (
-            <QuickCaptureHistory
-              items={recentCaptures}
-              onSelect={(item) => {
-                setText(item.text);
-                setCaptureDestination(item.destination);
-                setSelectedTemplateId("");
-                inputRef.current?.focus();
-              }}
-              onClear={() => {
-                clearQuickCaptureHistory();
-                setRecentCaptures([]);
-              }}
-            />
+            <>
+              <QuickCaptureHistory
+                items={recentCaptures}
+                onSelect={(item) => {
+                  setText(item.text);
+                  setCaptureDestination(item.destination);
+                  setSelectedTemplateId("");
+                  inputRef.current?.focus();
+                }}
+                onClear={() => {
+                  clearQuickCaptureHistory();
+                  setRecentCaptures([]);
+                }}
+              />
+              <ContextCaptureHistory
+                items={recentContexts}
+                onSelect={applyContext}
+                onClear={() => {
+                  clearContextCaptureHistory();
+                  setRecentContexts([]);
+                }}
+              />
+            </>
           )}
           {(voice.interimTranscript || voice.error) && (
             <div
@@ -14094,6 +14140,12 @@ function QuickCaptureWindow() {
               <span>
                 {voice.error ?? `正在听：${voice.interimTranscript}`}
               </span>
+            </div>
+          )}
+          {contextSavedNotice && (
+            <div className="success-note context-capture-saved" role="status">
+              <CheckCircle2 size={15} />
+              {contextSavedNotice}
             </div>
           )}
           <div className="chip-row">
@@ -14250,9 +14302,14 @@ function QuickCaptureWindow() {
               </div>
               <pre>{clipboardContext.text}</pre>
               {clipboardContext.truncated && <small className="context-capture-truncated">内容较长，预览已截取前 {clipboardContext.text.length.toLocaleString()} 个字符。</small>}
-              <button type="button" className="soft-button" onClick={() => setText((current) => current.trim() ? `${current}\n${clipboardContext.text}` : clipboardContext.text)}>
-                带入输入框
-              </button>
+              <div className="context-capture-actions">
+                <button type="button" className="soft-button" onClick={() => setText((current) => current.trim() ? `${current}\n${clipboardContext.text}` : clipboardContext.text)}>
+                  带入输入框
+                </button>
+                <button type="button" className="soft-button" onClick={() => rememberContext("clipboard", "剪贴板内容", clipboardContext.text)}>
+                  保存到最近上下文
+                </button>
+              </div>
             </section>
           )}
           {windowContext && (
@@ -14273,12 +14330,17 @@ function QuickCaptureWindow() {
                 <p className="context-capture-truncated">暂时无法读取（{windowContext.reason === "permission-denied" ? "需要系统辅助功能权限" : "平台不支持或窗口没有标题"}）。</p>
               )}
               {windowContext.status === "captured" && (windowContext.appName || windowContext.title) && (
-                <button type="button" className="soft-button" onClick={() => setText((current) => {
-                  const contextLine = `处理${windowContext.appName ? `「${windowContext.appName}」` : "当前窗口"}${windowContext.title ? `中的「${windowContext.title}」` : ""}`;
-                  return current.trim() ? `${current}\n${contextLine}` : contextLine;
-                })}>
-                  带入输入框
-                </button>
+                <div className="context-capture-actions">
+                  <button type="button" className="soft-button" onClick={() => setText((current) => {
+                    const contextLine = `处理${windowContext.appName ? `「${windowContext.appName}」` : "当前窗口"}${windowContext.title ? `中的「${windowContext.title}」` : ""}`;
+                    return current.trim() ? `${current}\n${contextLine}` : contextLine;
+                  })}>
+                    带入输入框
+                  </button>
+                  <button type="button" className="soft-button" onClick={() => rememberContext("window", windowContext.appName ?? "当前窗口", `处理${windowContext.appName ? `「${windowContext.appName}」` : "当前窗口"}${windowContext.title ? `中的「${windowContext.title}」` : ""}`)}>
+                    保存到最近上下文
+                  </button>
+                </div>
               )}
             </section>
           )}
@@ -14295,7 +14357,10 @@ function QuickCaptureWindow() {
                 <>
                   <pre>{selectedTextContext.text}</pre>
                   <small>{selectedTextContext.characters?.toLocaleString() ?? selectedTextContext.text.length.toLocaleString()} 个字符{selectedTextContext.truncated ? " · 预览已截取" : ""}</small>
-                  <button type="button" className="soft-button" onClick={() => setText((current) => current.trim() ? `${current}\n${selectedTextContext.text}` : selectedTextContext.text ?? "")}>带入输入框</button>
+                  <div className="context-capture-actions">
+                    <button type="button" className="soft-button" onClick={() => setText((current) => current.trim() ? `${current}\n${selectedTextContext.text}` : selectedTextContext.text ?? "")}>带入输入框</button>
+                    <button type="button" className="soft-button" onClick={() => rememberContext("selected-text", "选中文本", selectedTextContext.text ?? "")}>保存到最近上下文</button>
+                  </div>
                 </>
               ) : (
                 <p className="context-capture-truncated">
@@ -14322,7 +14387,10 @@ function QuickCaptureWindow() {
               )}
               {dropPreview.truncated && <small className="context-capture-truncated">文本较长，预览已截取。</small>}
               {(dropPreview.kind === "text" || dropPreview.kind === "url") && (
-                <button type="button" className="soft-button" onClick={applyDropToText}>带入输入框</button>
+                <div className="context-capture-actions">
+                  <button type="button" className="soft-button" onClick={applyDropToText}>带入输入框</button>
+                  <button type="button" className="soft-button" onClick={() => rememberContext(dropPreview.kind === "url" ? "url" : "drop-text", dropPreview.label, dropPreview.kind === "url" ? dropPreview.url ?? "" : dropPreview.text ?? "")}>保存到最近上下文</button>
+                </div>
               )}
             </section>
           )}
