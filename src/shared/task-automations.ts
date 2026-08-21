@@ -18,12 +18,15 @@ import type {
 export const TASK_AUTOMATION_MAX_RULES = 50;
 export const TASK_AUTOMATION_MAX_NAME_LENGTH = 80;
 export const TASK_AUTOMATION_MAX_VALUE_LENGTH = 80;
+export const TASK_AUTOMATION_MIN_DEADLINE_WINDOW_MINUTES = 5;
+export const TASK_AUTOMATION_MAX_DEADLINE_WINDOW_MINUTES = 10_080;
 
 export type TaskAutomationTrigger =
   | "task-created"
   | "task-completed"
   | "manual"
-  | "scheduled";
+  | "scheduled"
+  | "deadline-approaching";
 
 export type TaskAutomationScheduleFrequency = "daily" | "weekly";
 
@@ -65,6 +68,8 @@ export interface TaskAutomationRule {
   condition: TaskAutomationCondition;
   action: TaskAutomationAction;
   schedule?: TaskAutomationSchedule;
+  /** Window before a timed/all-day due date in which the rule may run. */
+  deadlineWindowMinutes?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -84,6 +89,7 @@ export interface CreateTaskAutomationRuleInput {
   condition?: TaskAutomationCondition;
   action: TaskAutomationAction;
   schedule?: TaskAutomationSchedule;
+  deadlineWindowMinutes?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -93,6 +99,7 @@ const triggers = new Set<TaskAutomationTrigger>([
   "task-completed",
   "manual",
   "scheduled",
+  "deadline-approaching",
 ]);
 const scheduleFrequencies = new Set<TaskAutomationScheduleFrequency>([
   "daily",
@@ -143,6 +150,18 @@ const isLocalDate = (value: unknown): value is LocalDate => {
 
 const isDateTime = (value: unknown): value is string =>
   typeof value === "string" && Number.isFinite(new Date(value).getTime());
+
+const normalizeDeadlineWindow = (value: unknown): number | undefined => {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < TASK_AUTOMATION_MIN_DEADLINE_WINDOW_MINUTES ||
+    value > TASK_AUTOMATION_MAX_DEADLINE_WINDOW_MINUTES
+  ) {
+    return undefined;
+  }
+  return value;
+};
 
 const isLocalTime = (value: unknown): value is string =>
   typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/u.test(value);
@@ -265,9 +284,16 @@ export function normalizeTaskAutomationRule(
   const condition = normalizeCondition(value.condition);
   const action = normalizeAction(value.action);
   const schedule = normalizeSchedule(value.schedule, value.trigger as TaskAutomationTrigger);
+  const deadlineWindowMinutes = normalizeDeadlineWindow(value.deadlineWindowMinutes);
   if (condition === undefined || action === undefined) return undefined;
   if (value.trigger === "scheduled" && schedule === undefined) return undefined;
   if (value.trigger !== "scheduled" && value.schedule !== undefined) return undefined;
+  if (value.trigger === "deadline-approaching" && deadlineWindowMinutes === undefined) {
+    return undefined;
+  }
+  if (value.trigger !== "deadline-approaching" && value.deadlineWindowMinutes !== undefined) {
+    return undefined;
+  }
   const createdAt = value.createdAt === undefined ? now : value.createdAt;
   const updatedAt = value.updatedAt === undefined ? createdAt : value.updatedAt;
   if (!isDateTime(createdAt) || !isDateTime(updatedAt)) return undefined;
@@ -279,6 +305,7 @@ export function normalizeTaskAutomationRule(
     condition,
     action,
     ...(schedule ? { schedule } : {}),
+    ...(deadlineWindowMinutes !== undefined ? { deadlineWindowMinutes } : {}),
     createdAt,
     updatedAt,
   };
@@ -312,6 +339,9 @@ export function createTaskAutomationRule(
       condition: input.condition ?? {},
       action: input.action,
       ...(input.schedule ? { schedule: input.schedule } : {}),
+      ...(input.deadlineWindowMinutes !== undefined
+        ? { deadlineWindowMinutes: input.deadlineWindowMinutes }
+        : {}),
       createdAt: input.createdAt ?? now,
       updatedAt: input.updatedAt ?? now,
     },
@@ -387,6 +417,44 @@ export function taskAutomationPatch(
   }
 }
 
+/** Whether a deadline rule is currently inside its configured lead window.
+ * All-day due dates are interpreted as ending at local 23:59:59, while timed
+ * due dates use their exact timestamp. Past-due tasks intentionally do not
+ * match: overdue escalation belongs to reminders, not a repeating automation
+ * that could keep rewriting a task after its deadline. */
+export function taskAutomationDeadlineDue(
+  rule: TaskAutomationRule,
+  task: Task,
+  now = new Date(),
+): boolean {
+  if (
+    !rule.enabled ||
+    rule.trigger !== "deadline-approaching" ||
+    rule.deadlineWindowMinutes === undefined ||
+    task.deletedAt !== undefined ||
+    task.status === "completed" ||
+    task.dueAt === undefined
+  ) {
+    return false;
+  }
+  const parsedDue = new Date(task.dueAt);
+  if (!Number.isFinite(parsedDue.getTime())) return false;
+  let dueAt = parsedDue.getTime();
+  if (task.dueAtIsAllDay === true) {
+    dueAt = new Date(
+      parsedDue.getFullYear(),
+      parsedDue.getMonth(),
+      parsedDue.getDate(),
+      23,
+      59,
+      59,
+      999,
+    ).getTime();
+  }
+  const remaining = dueAt - now.getTime();
+  return remaining >= 0 && remaining <= rule.deadlineWindowMinutes * 60_000;
+}
+
 function localDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -442,10 +510,20 @@ export function taskAutomationScheduleLabel(schedule: TaskAutomationSchedule): s
   return `${days || "每周"} ${schedule.time}`;
 }
 
+export function taskAutomationDeadlineLabel(minutes: number): string {
+  if (minutes % 1_440 === 0) {
+    const days = minutes / 1_440;
+    return `截止前 ${days} 天`;
+  }
+  if (minutes % 60 === 0) return `截止前 ${minutes / 60} 小时`;
+  return `截止前 ${minutes} 分钟`;
+}
+
 export function taskAutomationTriggerLabel(trigger: TaskAutomationTrigger): string {
   if (trigger === "task-created") return "任务新建时";
   if (trigger === "task-completed") return "任务完成时";
   if (trigger === "manual") return "手动应用时";
+  if (trigger === "deadline-approaching") return "临近截止时";
   return "按计划时";
 }
 

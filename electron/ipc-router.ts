@@ -65,7 +65,7 @@ const taskAutomationRuleSchema = z
     id: idSchema.max(160),
     name: z.string().trim().min(1).max(80),
     enabled: z.boolean(),
-    trigger: z.enum(["task-created", "task-completed", "manual", "scheduled"]),
+    trigger: z.enum(["task-created", "task-completed", "manual", "scheduled", "deadline-approaching"]),
     condition: taskAutomationConditionSchema,
     action: taskAutomationActionSchema,
     schedule: z
@@ -77,6 +77,7 @@ const taskAutomationRuleSchema = z
       })
       .strict()
       .optional(),
+    deadlineWindowMinutes: z.number().int().min(5).max(10_080).optional(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
   })

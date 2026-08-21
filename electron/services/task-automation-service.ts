@@ -1,6 +1,7 @@
 import type { Task, TaskId, UpdateTaskInput } from "../../src/shared/models";
 import {
   matchesTaskAutomation,
+  taskAutomationDeadlineDue,
   taskAutomationPatch,
   taskAutomationScheduleDue,
   taskAutomationTaskIds,
@@ -28,6 +29,8 @@ export interface TaskAutomationRunResult {
   failures: TaskAutomationFailure[];
   /** Scheduled rules whose current period was consumed, even when no task matched. */
   scheduledRuleIds: string[];
+  /** Deadline rules that changed at least one task during this timer pass. */
+  deadlineRuleIds: string[];
 }
 
 /**
@@ -61,6 +64,7 @@ export class TaskAutomationService {
       ruleIds: [],
       failures: [],
       scheduledRuleIds: [],
+      deadlineRuleIds: [],
     };
     const appliedTaskIds = new Set<TaskId>();
     const appliedRuleIds = new Set<string>();
@@ -120,6 +124,7 @@ export class TaskAutomationService {
       ruleIds: [],
       failures: [],
       scheduledRuleIds: [],
+      deadlineRuleIds: [],
     };
     const appliedTaskIds = new Set<TaskId>();
     const appliedRuleIds = new Set<string>();
@@ -161,6 +166,68 @@ export class TaskAutomationService {
     }
     result.taskIds = [...appliedTaskIds];
     result.ruleIds = [...appliedRuleIds];
+    return result;
+  }
+
+  /** Apply local rules when an open task enters a configured lead window.
+   * The timer may evaluate the same task more than once, but patches are
+   * deterministic and no-op once the requested private state is already set;
+   * this avoids persisting a second per-task checkpoint or growing settings
+   * with task IDs. */
+  async applyDeadlineApproaching(
+    current: readonly Task[],
+    now = new Date(),
+  ): Promise<TaskAutomationRunResult> {
+    const result: TaskAutomationRunResult = {
+      applied: 0,
+      taskIds: [],
+      ruleIds: [],
+      failures: [],
+      scheduledRuleIds: [],
+      deadlineRuleIds: [],
+    };
+    const appliedTaskIds = new Set<TaskId>();
+    const appliedRuleIds = new Set<string>();
+    const deadlineRuleIds = new Set<string>();
+    const workingById = new Map(
+      current
+        .filter((task) => task.deletedAt === undefined && task.status !== "completed")
+        .map((task) => [task.id, task]),
+    );
+    for (const rule of this.#rules()) {
+      if (!rule.enabled || rule.trigger !== "deadline-approaching") continue;
+      for (const [id, original] of workingById) {
+        if (!taskAutomationDeadlineDue(rule, original, now) || !matchesTaskAutomation(rule, original)) {
+          continue;
+        }
+        const patch = taskAutomationPatch(rule, original);
+        if (!patch) continue;
+        try {
+          const mutation = await this.#writer.updateTask(id, patch);
+          const nextTask =
+            mutation !== null && typeof mutation === "object" &&
+            "task" in mutation &&
+            mutation.task !== undefined &&
+            typeof mutation.task === "object"
+              ? mutation.task as Task
+              : undefined;
+          workingById.set(id, nextTask ?? applyLocalPatch(original, patch));
+          result.applied += 1;
+          appliedTaskIds.add(id);
+          appliedRuleIds.add(rule.id);
+          deadlineRuleIds.add(rule.id);
+        } catch (error) {
+          result.failures.push({
+            taskId: id,
+            ruleId: rule.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+    result.taskIds = [...appliedTaskIds];
+    result.ruleIds = [...appliedRuleIds];
+    result.deadlineRuleIds = [...deadlineRuleIds];
     return result;
   }
 }

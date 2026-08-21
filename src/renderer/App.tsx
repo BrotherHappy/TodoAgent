@@ -136,6 +136,7 @@ import {
   matchesTaskAutomation,
   taskAutomationPatch,
   taskAutomationActionLabel,
+  taskAutomationDeadlineLabel,
   taskAutomationScheduleLabel,
   taskAutomationTriggerLabel,
   type TaskAutomationAction,
@@ -9748,6 +9749,8 @@ function SettingsPage({
   const [automationScheduleWeekdays, setAutomationScheduleWeekdays] = useState<number[]>([
     1, 2, 3, 4, 5,
   ]);
+  const [automationDeadlineWindowMinutes, setAutomationDeadlineWindowMinutes] =
+    useState("60");
   const [automationActionKind, setAutomationActionKind] =
     useState<TaskAutomationAction["kind"]>("set-flagged");
   const [automationActionValue, setAutomationActionValue] = useState("");
@@ -9974,6 +9977,9 @@ function SettingsPage({
               },
             }
           : {}),
+        ...(automationTrigger === "deadline-approaching"
+          ? { deadlineWindowMinutes: Number(automationDeadlineWindowMinutes) }
+          : {}),
       });
       const saved = await persist(
         { ...appSettings, automations: [...appSettings.automations, rule] },
@@ -9986,6 +9992,7 @@ function SettingsPage({
       setAutomationScheduleFrequency("daily");
       setAutomationScheduleTime("09:00");
       setAutomationScheduleWeekdays([1, 2, 3, 4, 5]);
+      setAutomationDeadlineWindowMinutes("60");
       setAutomationConditionSource("all");
       setAutomationConditionProject("");
       setAutomationConditionList("");
@@ -11834,7 +11841,7 @@ function SettingsPage({
             </p>
             <div className="settings-note-quiet">
               <ListChecks size={16} aria-hidden="true" />
-              <span>触发器支持“新建任务”“完成任务”和任务详情里的“手动应用”。规则不执行脚本、不联网，也不会在后台替你创建任务。</span>
+              <span>触发器支持“新建任务”“完成任务”“临近截止”、按计划执行和任务详情里的“手动应用”。规则不执行脚本、不联网，也不会在后台替你创建任务。</span>
             </div>
             <div className="settings-subsection">
               <div className="settings-subsection-heading">
@@ -11857,7 +11864,13 @@ function SettingsPage({
               <div className="settings-row">
                 <div>
                   <strong>什么时候</strong>
-                  <p>只在事实发生的瞬间执行一次</p>
+                  <p>
+                    {automationTrigger === "deadline-approaching"
+                      ? "进入提前窗口时检查；只写入有实际变化的动作"
+                      : automationTrigger === "scheduled"
+                        ? "按本机时间检查一次"
+                        : "只在事实发生的瞬间执行一次"}
+                  </p>
                 </div>
                 <select
                   className="settings-input"
@@ -11869,6 +11882,7 @@ function SettingsPage({
                   <option value="task-completed">任务完成时</option>
                   <option value="manual">手动应用时</option>
                   <option value="scheduled">按计划自动执行</option>
+                  <option value="deadline-approaching">临近截止时</option>
                 </select>
               </div>
               {automationTrigger === "scheduled" && (
@@ -11943,6 +11957,35 @@ function SettingsPage({
                       </div>
                     </div>
                   )}
+                </>
+              )}
+              {automationTrigger === "deadline-approaching" && (
+                <>
+                  <div className="settings-note-quiet">
+                    <AlarmClock size={16} aria-hidden="true" />
+                    <span>
+                      应用每 30 秒检查一次；任务进入这个窗口后只执行一次有实际变化的私有动作。
+                      已过期、已完成或没有截止时间的任务不会触发。
+                    </span>
+                  </div>
+                  <div className="settings-row">
+                    <div>
+                      <strong>提前多久</strong>
+                      <p>临近截止时执行一次；不会修改截止时间或写回飞书</p>
+                    </div>
+                    <select
+                      className="settings-input"
+                      aria-label="自动化截止提前窗口"
+                      value={automationDeadlineWindowMinutes}
+                      onChange={(event) => setAutomationDeadlineWindowMinutes(event.target.value)}
+                    >
+                      {[5, 15, 30, 60, 120, 360, 720, 1_440, 2_880, 10_080].map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {taskAutomationDeadlineLabel(minutes)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </>
               )}
               <div className="settings-row">
@@ -12121,7 +12164,7 @@ function SettingsPage({
             </div>
             <div className="settings-subheading">已保存规则</div>
             {appSettings.automations.length === 0 ? (
-              <div className="settings-note-quiet">还没有规则。可以先试试“任务新建时 → 设置重点标记”，或创建“手动应用时”规则，在任务详情的更多操作里点一下执行。</div>
+              <div className="settings-note-quiet">还没有规则。可以先试试“任务新建时 → 设置重点标记”，或创建“临近截止时 → 标记重点”，让重要任务在截止前进入你的视线。</div>
             ) : (
               appSettings.automations.map((rule) => (
                 <div className="settings-row" key={rule.id}>
@@ -12130,6 +12173,9 @@ function SettingsPage({
                     <p>
                       {taskAutomationTriggerLabel(rule.trigger)}
                       {rule.schedule ? ` · ${taskAutomationScheduleLabel(rule.schedule)}` : ""}
+                      {rule.deadlineWindowMinutes
+                        ? ` · ${taskAutomationDeadlineLabel(rule.deadlineWindowMinutes)}`
+                        : ""}
                       {" · "}{taskAutomationActionLabel(rule.action)}
                       · {describeAutomationCondition(rule)}
                     </p>

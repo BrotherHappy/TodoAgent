@@ -5,6 +5,8 @@ import {
   matchesTaskAutomation,
   normalizeTaskAutomationRules,
   taskAutomationPatch,
+  taskAutomationDeadlineDue,
+  taskAutomationDeadlineLabel,
   taskAutomationScheduleDue,
   taskAutomationScheduleLabel,
   taskAutomationTrigger,
@@ -63,6 +65,11 @@ describe("task automation rules", () => {
         trigger: "scheduled",
         schedule: { frequency: "weekly", time: "08:30", weekdays: [1, 5] },
       },
+    ])).toHaveLength(1);
+    expect(normalizeTaskAutomationRules([
+      { ...valid, trigger: "deadline-approaching" },
+      { ...valid, trigger: "deadline-approaching", deadlineWindowMinutes: 60 },
+      { ...valid, trigger: "task-created", deadlineWindowMinutes: 60 },
     ])).toHaveLength(1);
   });
 
@@ -173,6 +180,86 @@ describe("task automation rules", () => {
     expect(result.applied).toBe(1);
     expect(result.taskIds).toEqual(["open"]);
     expect(calls).toEqual([{ id: "open", patch: { flagged: true } }]);
+  });
+
+  it("detects a local lead window without treating overdue work as approaching", () => {
+    const now = new Date("2026-08-21T09:00:00.000Z");
+    const deadline = rule({
+      trigger: "deadline-approaching",
+      deadlineWindowMinutes: 60,
+    });
+    expect(taskAutomationDeadlineLabel(120)).toBe("截止前 2 小时");
+    expect(taskAutomationDeadlineDue(
+      deadline,
+      task("soon", { dueAt: "2026-08-21T09:45:00.000Z" }),
+      now,
+    )).toBe(true);
+    expect(taskAutomationDeadlineDue(
+      deadline,
+      task("later", { dueAt: "2026-08-21T11:00:00.000Z" }),
+      now,
+    )).toBe(false);
+    expect(taskAutomationDeadlineDue(
+      deadline,
+      task("late", { dueAt: "2026-08-21T08:59:00.000Z" }),
+      now,
+    )).toBe(false);
+    expect(taskAutomationDeadlineDue(
+      deadline,
+      task("done", { status: "completed", dueAt: "2026-08-21T09:30:00.000Z" }),
+      now,
+    )).toBe(false);
+    expect(taskAutomationDeadlineDue(
+      deadline,
+      task("all-day", { dueAt: new Date(2026, 7, 21, 0, 0, 0).toISOString(), dueAtIsAllDay: true }),
+      new Date(2026, 7, 21, 23, 30, 0),
+    )).toBe(true);
+  });
+
+  it("applies deadline rules to open tasks, keeps actions private, and skips no-ops", async () => {
+    const now = new Date("2026-08-21T09:00:00.000Z");
+    const soon = task("soon", {
+      source: { type: "feishu" },
+      dueAt: "2026-08-21T09:20:00.000Z",
+    });
+    const completed = task("done", {
+      status: "completed",
+      dueAt: "2026-08-21T09:20:00.000Z",
+    });
+    const calls: Array<{ id: string; patch: unknown }> = [];
+    const deadline = rule({
+      trigger: "deadline-approaching",
+      condition: { source: "feishu" },
+      deadlineWindowMinutes: 60,
+      action: { kind: "add-tag", value: "快到期" },
+    });
+    const service = new TaskAutomationService(
+      {
+        updateTask: async (id, patch) => {
+          calls.push({ id, patch });
+          return { task: { ...soon, ...patch } };
+        },
+      },
+      () => [deadline],
+    );
+    const result = await service.applyDeadlineApproaching([soon, completed], now);
+    expect(result.applied).toBe(1);
+    expect(result.deadlineRuleIds).toEqual(["rule-1"]);
+    expect(result.taskIds).toEqual(["soon"]);
+    expect(calls).toEqual([{ id: "soon", patch: { tags: ["快到期"] } }]);
+    expect(soon.title).toBe("soon");
+    expect(soon.dueAt).toBe("2026-08-21T09:20:00.000Z");
+    const alreadyTagged = task("tagged", {
+      dueAt: "2026-08-21T09:20:00.000Z",
+      tags: ["快到期"],
+    });
+    const noOpCalls: unknown[] = [];
+    const noOpService = new TaskAutomationService(
+      { updateTask: async (_id, patch) => { noOpCalls.push(patch); return { task: alreadyTagged }; } },
+      () => [deadline],
+    );
+    expect((await noOpService.applyDeadlineApproaching([alreadyTagged], now)).applied).toBe(0);
+    expect(noOpCalls).toEqual([]);
   });
 
   it("creates private patches and skips no-ops", () => {

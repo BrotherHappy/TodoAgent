@@ -941,30 +941,44 @@ async function startApplication(): Promise<void> {
       .then(async () => {
         const now = new Date();
         const current = await tasks.listTasks({ includeDeleted: true });
-        const result = await taskAutomationService.applyScheduled(current, now);
+        const scheduled = await taskAutomationService.applyScheduled(current, now);
+        const deadlineCurrent = scheduled.applied > 0
+          ? await tasks.listTasks({ includeDeleted: true })
+          : current;
+        const deadline = await taskAutomationService.applyDeadlineApproaching(deadlineCurrent, now);
+        const result = {
+          applied: scheduled.applied + deadline.applied,
+          taskIds: [...new Set([...scheduled.taskIds, ...deadline.taskIds])],
+          ruleIds: [...new Set([...scheduled.ruleIds, ...deadline.ruleIds])],
+          failures: [...scheduled.failures, ...deadline.failures],
+          scheduledRuleIds: scheduled.scheduledRuleIds,
+          deadlineRuleIds: deadline.deadlineRuleIds,
+        };
         if (result.failures.length > 0) {
           console.warn(
-            "Some scheduled local task automations could not be applied",
+            "Some timer-based local task automations could not be applied",
             result.failures,
           );
         }
-        if (result.scheduledRuleIds.length === 0) return;
+        if (result.scheduledRuleIds.length === 0 && result.applied === 0) return;
         const consumed = new Set(result.scheduledRuleIds);
         const checkpoint = now.toISOString();
         const settings = settingsService!.get();
-        const next = await settingsService!.replace({
-          ...settings,
-          automations: settings.automations.map((rule) =>
-            consumed.has(rule.id) && rule.schedule
-              ? {
-                  ...rule,
-                  schedule: { ...rule.schedule, lastRunAt: checkpoint },
-                  updatedAt: checkpoint,
-                }
-              : rule,
-          ),
-        });
-        broadcastSettings(next);
+        if (consumed.size > 0) {
+          const next = await settingsService!.replace({
+            ...settings,
+            automations: settings.automations.map((rule) =>
+              consumed.has(rule.id) && rule.schedule
+                ? {
+                    ...rule,
+                    schedule: { ...rule.schedule, lastRunAt: checkpoint },
+                    updatedAt: checkpoint,
+                  }
+                : rule,
+            ),
+          });
+          broadcastSettings(next);
+        }
         if (result.applied > 0) handleTasksChanged();
       })
       .catch((error: unknown) => {

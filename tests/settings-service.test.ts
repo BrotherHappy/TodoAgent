@@ -32,15 +32,23 @@ describe('SettingsService', () => {
           schedule: { frequency: 'daily', time: '09:00' },
           action: { kind: 'set-flagged', value: true },
         }),
+        createTaskAutomationRule({
+          id: 'rule-deadline',
+          name: '临近截止加重点',
+          trigger: 'deadline-approaching',
+          deadlineWindowMinutes: 120,
+          action: { kind: 'set-flagged', value: true },
+        }),
         { id: 'malformed', enabled: true } as never,
       ],
     });
-    expect(saved.automations).toHaveLength(2);
+    expect(saved.automations).toHaveLength(3);
     expect(saved.automations[0]?.id).toBe('rule-flag');
     expect(saved.automations[1]?.schedule).toEqual({
       frequency: 'daily',
       time: '09:00',
     });
+    expect(saved.automations[2]?.deadlineWindowMinutes).toBe(120);
 
     const reloaded = new SettingsService(root, encryption);
     await reloaded.load();
