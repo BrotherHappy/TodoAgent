@@ -57,6 +57,7 @@ export function GanttView({
       <div className="timeline-gantt-meta" aria-label="甘特摘要">
         <span><CalendarDays size={13} /> {plan.startDate} — {plan.endDate}</span>
         <span><Layers3 size={13} /> {totalRows} 项有日期</span>
+        {plan.criticalCount > 0 && <span className="timeline-gantt-critical-meta"><Sparkles size={13} /> 关键路线 {plan.criticalCount} 项</span>}
         {plan.blockedCount > 0 && <span className="is-warning"><AlertTriangle size={13} /> {plan.blockedCount} 项被前置依赖阻塞</span>}
       </div>
       {totalRows > 0 ? (
@@ -79,11 +80,11 @@ export function GanttView({
                 </div>
                 {group.rows.map((row) => {
                   const status = taskStatusLabel(row.task);
-                  const barLabel = `${row.task.title}，${row.bar.startDate} 至 ${row.bar.endDate}，${status}${row.blocked ? "，被前置依赖阻塞" : ""}`;
+                  const barLabel = `${row.task.title}，${row.bar.startDate} 至 ${row.bar.endDate}，${status}${row.critical ? "，关键路线" : ""}${row.blocked ? "，被前置依赖阻塞" : ""}`;
                   return (
                     <div className="timeline-gantt-row" key={row.task.id}>
-                      <button type="button" className={`timeline-gantt-task ${taskClass(row.task)}`} onClick={() => onSelect(row.task.id)}>
-                        <span className="timeline-gantt-task-title"><strong>{row.task.title}</strong><small>{status}{row.dependencyCount ? ` · 前置 ${row.dependencyCount} 项` : ""}</small></span>
+                      <button type="button" className={`timeline-gantt-task ${taskClass(row.task)} ${row.critical ? "is-critical" : ""}`} onClick={() => onSelect(row.task.id)}>
+                        <span className="timeline-gantt-task-title"><strong>{row.task.title}</strong><small>{status}{row.dependencyCount ? ` · 前置 ${row.dependencyCount} 项` : ""}{row.critical ? " · 关键路线" : ""}</small></span>
                         {row.blocked && <AlertTriangle size={13} aria-label="被前置依赖阻塞" />}
                       </button>
                       <div className="timeline-gantt-track">
@@ -92,7 +93,7 @@ export function GanttView({
                         </div>
                         <button
                           type="button"
-                          className={`timeline-gantt-bar ${taskClass(row.task)} ${row.task.status === "completed" ? "is-completed" : ""} ${row.blocked ? "is-blocked" : ""}`}
+                          className={`timeline-gantt-bar ${taskClass(row.task)} ${row.task.status === "completed" ? "is-completed" : ""} ${row.blocked ? "is-blocked" : ""} ${row.critical ? "is-critical" : ""}`}
                           style={barStyle(row.bar.startOffset, row.bar.spanDays, plan.days.length)}
                           onClick={() => onSelect(row.task.id)}
                           aria-label={barLabel}

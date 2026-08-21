@@ -71,4 +71,23 @@ describe("GanttView", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "甘特项目" }), { target: { value: "发布" } });
     expect(onProjectChange).toHaveBeenCalledWith("发布");
   });
+
+  it("explains the critical route without turning it into a second task state", () => {
+    const start = makeTask("路线起点", { projectId: "发布", plannedDate: "2026-08-19" });
+    const finish = makeTask("路线终点", { projectId: "发布", plannedDate: "2026-08-20", dependencyIds: [start.id] });
+    const plan = buildGanttPlan([start, finish], "2026-08-19", "all", "2026-08-19");
+    render(
+      <GanttView
+        plan={plan}
+        projectId="all"
+        projectIds={["发布"]}
+        onProjectChange={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("关键路线 2 项")).toBeVisible();
+    expect(screen.getAllByText(/关键路线/u)).toHaveLength(3);
+    expect(screen.getByRole("button", { name: /路线终点，2026-08-20 至 2026-08-20，进行中，关键路线/u })).toBeVisible();
+  });
 });

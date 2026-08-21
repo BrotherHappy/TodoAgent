@@ -26,6 +26,7 @@ export interface GanttRow {
   task: Task;
   projectLabel: string;
   blocked: boolean;
+  critical: boolean;
   dependencyCount: number;
   bar: GanttBar;
 }
@@ -44,6 +45,7 @@ export interface GanttPlan {
   unscheduledTasks: Task[];
   datedTaskCount: number;
   blockedCount: number;
+  criticalCount: number;
 }
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"] as const;
@@ -121,6 +123,72 @@ const progressFor = (task: Task): number | undefined => {
 };
 
 /**
+ * Find the longest dependency chain per project without changing task facts.
+ * A chain is only marked when it has at least two tasks; isolated tasks are
+ * useful work, but calling every task "critical" would make the signal noisy.
+ */
+const criticalTaskIdsFor = (
+  tasks: readonly Task[],
+  spans: ReadonlyMap<string, { startDate: string; endDate: string }>,
+): ReadonlySet<string> => {
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  const datedIds = new Set(spans.keys());
+  const memo = new Map<string, number>();
+  const visiting = new Set<string>();
+
+  const score = (taskId: string): number => {
+    const cached = memo.get(taskId);
+    if (cached !== undefined) return cached;
+    if (visiting.has(taskId)) return 0;
+    const task = byId.get(taskId);
+    const span = spans.get(taskId);
+    if (!task || !span || task.deletedAt) return 0;
+    visiting.add(taskId);
+    const duration = Math.max(1, dateDistance(span.startDate, span.endDate) + 1);
+    const predecessorScore = task.dependencyIds.reduce(
+      (best, dependencyId) => Math.max(best, datedIds.has(dependencyId) ? score(dependencyId) : 0),
+      0,
+    );
+    visiting.delete(taskId);
+    const total = duration + predecessorScore;
+    memo.set(taskId, total);
+    return total;
+  };
+
+  const successors = new Map<string, string[]>();
+  for (const task of tasks) {
+    if (!datedIds.has(task.id)) continue;
+    for (const dependencyId of task.dependencyIds) {
+      if (!datedIds.has(dependencyId)) continue;
+      const next = successors.get(dependencyId) ?? [];
+      next.push(task.id);
+      successors.set(dependencyId, next);
+    }
+  }
+  const terminals = tasks.filter((task) => datedIds.has(task.id) && !(successors.get(task.id)?.length));
+  const critical = new Set<string>();
+  for (const terminal of terminals) {
+    const chain: string[] = [];
+    const seen = new Set<string>();
+    let current: Task | undefined = terminal;
+    while (current && !seen.has(current.id) && datedIds.has(current.id)) {
+      seen.add(current.id);
+      chain.push(current.id);
+      const candidates = current.dependencyIds
+        .filter((dependencyId) => datedIds.has(dependencyId))
+        .sort((left, right) => {
+          const scoreDelta = score(right) - score(left);
+          if (scoreDelta) return scoreDelta;
+          return (spans.get(right)?.endDate ?? "").localeCompare(spans.get(left)?.endDate ?? "") || left.localeCompare(right);
+        });
+      current = candidates.length ? byId.get(candidates[0]) : undefined;
+    }
+    if (chain.length >= 2) chain.forEach((taskId) => critical.add(taskId));
+  }
+  return critical;
+};
+
+/**
  * Build a read-only project timeline from the canonical Task snapshot.
  *
  * The Gantt view deliberately projects dates only: it never invents a task,
@@ -141,6 +209,21 @@ export const buildGanttPlan = (
   const unscheduledTasks: Task[] = [];
   let datedTaskCount = 0;
   let blockedCount = 0;
+  const spans = new Map<string, { startDate: string; endDate: string }>();
+
+  for (const task of tasks) {
+    if (task.deletedAt) continue;
+    if (projectId !== "all" && taskProjectId(task) !== projectId) continue;
+    const start = taskStartDate(task);
+    if (!start) continue;
+    const end = taskEndDate(task, start);
+    if (end < startDate || start > endDate) continue;
+    spans.set(task.id, { startDate: start, endDate: end });
+  }
+  const criticalTaskIds = criticalTaskIdsFor(
+    tasks.filter((task) => !task.deletedAt && (projectId === "all" || taskProjectId(task) === projectId)),
+    spans,
+  );
 
   for (const task of tasks) {
     if (task.deletedAt) continue;
@@ -162,6 +245,7 @@ export const buildGanttPlan = (
         return !dependency || dependency.status !== "completed";
       });
     if (blocked) blockedCount += 1;
+    const critical = criticalTaskIds.has(task.id);
     const groupId = taskProjectId(task);
     const group = groupMap.get(groupId) ?? {
       projectId: groupId,
@@ -172,6 +256,7 @@ export const buildGanttPlan = (
       task,
       projectLabel: group.label,
       blocked,
+      critical,
       dependencyCount: task.dependencyIds.length,
       bar: {
         startDate: start,
@@ -207,5 +292,6 @@ export const buildGanttPlan = (
     unscheduledTasks,
     datedTaskCount,
     blockedCount,
+    criticalCount: criticalTaskIds.size,
   };
 };

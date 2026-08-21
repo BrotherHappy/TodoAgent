@@ -2322,6 +2322,9 @@ select {
 .timeline-gantt-meta .is-warning {
   color: var(--app-warning-strong, var(--app-warning));
 }
+.timeline-gantt-meta .timeline-gantt-critical-meta {
+  color: var(--app-accent, var(--app-brand));
+}
 .timeline-gantt-scroll {
   overflow-x: auto;
   border: 1px solid var(--app-line);
@@ -2423,6 +2426,9 @@ select {
 .timeline-gantt-task.is-high { border-left-color: var(--app-danger); }
 .timeline-gantt-task.is-medium { border-left-color: var(--app-warning); }
 .timeline-gantt-task.is-low { border-left-color: var(--app-success); }
+.timeline-gantt-task.is-critical {
+  background: color-mix(in srgb, var(--app-accent, var(--app-brand)) 8%, transparent);
+}
 .timeline-gantt-task > svg {
   flex: 0 0 auto;
   color: var(--app-warning-strong, var(--app-warning));
@@ -2501,6 +2507,10 @@ select {
 .timeline-gantt-bar.is-blocked {
   border-style: dotted;
   background: color-mix(in srgb, var(--app-warning) 12%, var(--app-surface-raised));
+}
+.timeline-gantt-bar.is-critical {
+  border-color: color-mix(in srgb, var(--app-accent, var(--app-brand)) 55%, var(--app-line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-accent, var(--app-brand)) 26%, transparent);
 }
 .timeline-gantt-bar-progress {
   position: absolute;

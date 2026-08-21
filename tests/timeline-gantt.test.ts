@@ -92,4 +92,23 @@ describe("buildGanttPlan", () => {
     expect(plan.groups[0]?.rows.map((row) => row.task.id)).toEqual(["发布任务"]);
     expect(plan.unscheduledTasks.map((task) => task.id)).toEqual(["发布未排"]);
   });
+
+  it("marks only the longest dependency chain as the critical route", () => {
+    const plan = buildGanttPlan(
+      [
+        makeTask("起点", { projectId: "发布", plannedDate: "2026-08-19", estimatedMinutes: 480 }),
+        makeTask("中段", { projectId: "发布", plannedDate: "2026-08-20", dependencyIds: ["起点"], estimatedMinutes: 480 }),
+        makeTask("终点", { projectId: "发布", plannedDate: "2026-08-21", dependencyIds: ["中段"], estimatedMinutes: 480 }),
+        makeTask("独立项", { projectId: "发布", plannedDate: "2026-08-19", estimatedMinutes: 30 }),
+      ],
+      "2026-08-19",
+      "all",
+      "2026-08-19",
+    );
+
+    const release = plan.groups.find((group) => group.projectId === "发布");
+    expect(plan.criticalCount).toBe(3);
+    expect(release?.rows.filter((row) => row.critical).map((row) => row.task.id)).toEqual(["起点", "中段", "终点"]);
+    expect(release?.rows.find((row) => row.task.id === "独立项")?.critical).toBe(false);
+  });
 });
