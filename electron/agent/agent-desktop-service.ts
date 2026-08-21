@@ -14,6 +14,7 @@ import type {
 } from "../../src/shared/desktop-api";
 import type { Task } from "../../src/shared/models";
 import type { PetPersonality } from "../../src/shared/pet-types";
+import { AGENT_CAPABILITY_DESCRIPTORS } from "../../src/shared/agent-capabilities";
 import type {
   AgentRunEvent,
   ApprovalChoice,
@@ -423,6 +424,17 @@ const personaInstruction = (
   return `身份名：${settings.persona.name || "Todo Agent"}；表达风格：${tone}；回答长度：${settings.persona.responseLength}；主动程度：${proactive}；提醒语气：${settings.persona.reminderStrength}；${userAddress}。${petLink}`;
 };
 
+const agentCapabilityInstruction = (
+  capabilities: ReturnType<SettingsService["get"]>["agentCapabilities"],
+): string => {
+  const disabled = AGENT_CAPABILITY_DESCRIPTORS
+    .filter((descriptor) => !capabilities[descriptor.key])
+    .map((descriptor) => descriptor.label);
+  return disabled.length === 0
+    ? ""
+    : `当前用户已关闭以下 Agent 能力：${disabled.join("、")}。不要调用或声称完成这些能力对应的操作；如果用户请求它们，先说明需要在权限中心重新开启。`;
+};
+
 const morningTaskData = (
   task: Task,
   settings: ReturnType<SettingsService["get"]>,
@@ -736,6 +748,9 @@ export class AgentDesktopService {
       settings.modelDataScope.chatHistory,
     );
     const { sourcePolicy } = sourceResolution;
+    const capabilityInstruction = agentCapabilityInstruction(
+      settings.agentCapabilities,
+    );
     const runtime = new AgentRuntime({
       modelGateway: gateway,
       permissionEngine: this.#permissionEngine,
@@ -758,7 +773,7 @@ export class AgentDesktopService {
     const messages: ModelMessage[] = [
       {
         role: "system",
-        content: `你是一个以任务管理为核心的个人执行助理。${personaInstruction(settings, petPersonality)}${agentTimeContextInstruction(timeContext)}${agentTimeIntentPolicyInstruction()}${taskSourcePolicyInstruction(sourcePolicy)}优先使用 task_list 或 task_get 核实精确任务 ID 和当前状态，再选择单条或批量任务工具；写操作严格遵守权限结果；工具返回参数错误或失败时，应按工具 JSON Schema 修正并重试，绝不能声称执行了未完成的工具调用。`,
+        content: `你是一个以任务管理为核心的个人执行助理。${personaInstruction(settings, petPersonality)}${agentCapabilityInstruction(settings.agentCapabilities)}${agentTimeContextInstruction(timeContext)}${agentTimeIntentPolicyInstruction()}${taskSourcePolicyInstruction(sourcePolicy)}优先使用 task_list 或 task_get 核实精确任务 ID 和当前状态，再选择单条或批量任务工具；写操作严格遵守权限结果；工具返回参数错误或失败时，应按工具 JSON Schema 修正并重试，绝不能声称执行了未完成的工具调用。`,
       },
       {
         role: "developer",

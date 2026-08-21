@@ -44,6 +44,58 @@ describe("task Agent tools", () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it("isolates Feishu tasks when the Feishu capability is disabled", async () => {
+    const localTask = (
+      await tasks.createTask({
+        title: "本地任务",
+        source: { type: "local" },
+        sync: { status: "local" },
+      })
+    ).task;
+    const feishuTask = (
+      await tasks.createTask({
+        title: "飞书任务",
+        source: { type: "feishu", accountId: "primary" },
+        sync: { status: "synced" },
+      })
+    ).task;
+    const tools = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+      getAgentCapabilities: () => ({
+        ...defaultSettings.agentCapabilities,
+        feishuSync: false,
+      }),
+    });
+    const get = tools.find((tool) => tool.name === "task_get")!;
+    await expect(
+      get.execute({ id: feishuTask.id }, executionContext("task_get")),
+    ).rejects.toThrow("AGENT_FEISHU_CAPABILITY_DISABLED");
+    await expect(
+      get.execute({ id: localTask.id }, executionContext("task_get")),
+    ).resolves.toMatchObject({ status: "ok" });
+
+    const create = tools.find((tool) => tool.name === "task_create")!;
+    expect(() =>
+      create.analyze(
+        {
+          title: "远端任务",
+          notes: "",
+          source: "feishu",
+          projectId: null,
+          listId: null,
+          plannedDate: null,
+          startAt: null,
+          dueAt: null,
+          priority: "none",
+          tags: [],
+          contexts: [],
+        },
+        { runId: "run" },
+      ),
+    ).toThrow("AGENT_FEISHU_CAPABILITY_DISABLED");
+  });
+
   it("classifies private Feishu planning as local and remote fields as external", async () => {
     const task = (
       await tasks.createTask({

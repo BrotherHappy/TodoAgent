@@ -138,6 +138,30 @@ describe('SettingsService', () => {
     expect(reloaded.get().pet.vacationMode).toBe(true);
   });
 
+  it('defaults newly introduced Agent capability layers on older settings files', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-capability-migration-'));
+    const initial = new SettingsService(root, encryption);
+    await initial.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const legacy = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>;
+    delete legacy.agentCapabilities;
+    await writeFile(settingsPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().agentCapabilities).toEqual({
+      taskManagement: true,
+      feishuSync: true,
+      webResearch: true,
+      filesAndTerminal: true,
+      clipboardAndScreen: true,
+    });
+    const persisted = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      agentCapabilities?: unknown;
+    };
+    expect(persisted.agentCapabilities).toEqual(migrated.get().agentCapabilities);
+  });
+
   it('clamps malformed on-disk hover delays to the supported range', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-floating-clamp-'));
     const service = new SettingsService(root, encryption);

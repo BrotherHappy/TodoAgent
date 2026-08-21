@@ -126,6 +126,7 @@ import {
   type PetTab,
   type TaskUrgencyWeights,
 } from "../shared/settings";
+import { AGENT_CAPABILITY_DESCRIPTORS } from "../shared/agent-capabilities";
 import { withBossMode } from "../shared/boss-mode";
 import type {
   AgentApprovalView,
@@ -5715,6 +5716,19 @@ function AgentPage({
 }) {
   const [proposal, setProposal] = useState(false);
   const [permission, setPermission] = useState(false);
+  const [agentCapabilities, setAgentCapabilities] = useState(
+    defaultSettings.agentCapabilities,
+  );
+  useEffect(() => {
+    if (!window.desktopApi) return undefined;
+    void window.desktopApi.settings
+      .get()
+      .then((settings) => setAgentCapabilities(settings.agentCapabilities))
+      .catch(() => undefined);
+    return window.desktopApi.events.onSettingsChanged((settings) =>
+      setAgentCapabilities(settings.agentCapabilities),
+    );
+  }, []);
   const fallback = async (text: string): Promise<string> => {
     if (/移到明天|改到明天|批量/u.test(text)) {
       setProposal(true);
@@ -6205,12 +6219,24 @@ function AgentPage({
         <div className="context-block">
           <h3>能力</h3>
           <div className="chip-row">
-            <span className="chip">任务读写</span>
-            <span className="chip">飞书同步</span>
-            <span className="chip">网页研究</span>
-            <span className="chip">文件与终端</span>
-            <span className="chip">剪贴板与屏幕</span>
+            {AGENT_CAPABILITY_DESCRIPTORS.map((descriptor) => (
+              <span
+                className={`chip ${agentCapabilities[descriptor.key] ? "is-enabled" : "is-disabled"}`}
+                key={descriptor.key}
+                title={
+                  agentCapabilities[descriptor.key]
+                    ? descriptor.description
+                    : `${descriptor.label}已关闭，请在权限中心重新开启`
+                }
+              >
+                {descriptor.label}
+                {!agentCapabilities[descriptor.key] && " · 已关"}
+              </span>
+            ))}
           </div>
+          <small className="context-line-muted">
+            能力关闭会从下一次运行的工具列表中移除；数据范围仍按隐私设置执行。
+          </small>
         </div>
         <div className="context-block">
           <h3>运行</h3>
@@ -11730,6 +11756,42 @@ function SettingsPage({
                 </option>
               </select>
             </div>
+            <div className="settings-subsection-heading">
+              <div>
+                <strong>Agent 能力分层</strong>
+                <p>
+                  关闭后对应工具不会提供给模型；重新开启只影响新的 Agent 运行。数据范围仍需在“隐私与数据”单独控制。
+                </p>
+              </div>
+              <span className="status-pill">默认全开</span>
+            </div>
+            {AGENT_CAPABILITY_DESCRIPTORS.map((descriptor) => (
+              <div className="settings-row" key={descriptor.key}>
+                <div>
+                  <strong>{descriptor.label}</strong>
+                  <p>{descriptor.description}</p>
+                  {descriptor.key === "feishuSync" && !appSettings.feishu.configured && (
+                    <small className="settings-hint">尚未连接飞书，开启后也不会自动创建远端任务。</small>
+                  )}
+                </div>
+                <Switch
+                  checked={appSettings.agentCapabilities[descriptor.key]}
+                  onChange={(value) =>
+                    void persist(
+                      {
+                        ...appSettings,
+                        agentCapabilities: {
+                          ...appSettings.agentCapabilities,
+                          [descriptor.key]: value,
+                        },
+                      },
+                      `${descriptor.label}已${value ? "开启" : "关闭"}`,
+                    )
+                  }
+                  label={`允许 Agent 使用${descriptor.label}`}
+                />
+              </div>
+            ))}
             <div className="settings-row">
               <div>
                 <strong>交互式全权限</strong>

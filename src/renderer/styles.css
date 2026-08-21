@@ -3975,6 +3975,16 @@ select {
   gap: 7px;
   flex-wrap: wrap;
 }
+.chip.is-enabled {
+  color: var(--app-brand-strong);
+  border-color: color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 48%, var(--app-glass-soft));
+}
+.chip.is-disabled {
+  color: var(--app-text-faint);
+  opacity: 0.82;
+  text-decoration: line-through;
+}
 .chip button {
   border: 0;
   background: transparent;

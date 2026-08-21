@@ -50,6 +50,7 @@ import { createBuiltinTools } from "./agent/builtin-tools";
 import { createElectronToolAdapters } from "./agent/electron-tool-adapters";
 import { FileAuditStore } from "./agent/file-audit-store";
 import { createTaskTools } from "./agent/task-tools";
+import { isAgentToolEnabled } from "../src/shared/agent-capabilities";
 import { BuiltinToolExecutors } from "./agent/tool-executors";
 import { ToolRegistry } from "./agent/tool-registry";
 import { ModelUsageBudgetService } from "./agent/model-usage-budget";
@@ -928,10 +929,12 @@ async function startApplication(): Promise<void> {
         allowedRoots: [agentWorkspace],
         adapters: toolAdapters,
       });
-      return new ToolRegistry([
+      const capabilities = settingsService!.get().agentCapabilities;
+      const definitions = [
         ...createTaskTools({
           tasks,
           getModelDataScope: () => settingsService!.get().modelDataScope,
+          getAgentCapabilities: () => settingsService!.get().agentCapabilities,
           sourcePolicy,
           getFeishuAccountId: () => {
             const connection = feishuController?.status();
@@ -940,7 +943,13 @@ async function startApplication(): Promise<void> {
           onTasksChanged: handleTasksChanged,
         }),
         ...createBuiltinTools(executors),
-      ]);
+      ].filter((definition) =>
+        isAgentToolEnabled(definition.name, capabilities),
+      );
+      return new ToolRegistry(definitions, {
+        isToolEnabled: (toolName) =>
+          isAgentToolEnabled(toolName, settingsService!.get().agentCapabilities),
+      });
     },
     onEvent: (event) => {
       const payload = event.payload as { state?: string };

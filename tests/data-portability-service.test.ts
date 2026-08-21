@@ -341,7 +341,7 @@ describe('DataPortabilityService export safety', () => {
   it('imports legacy floating settings as the unique Todo Pet defaults', async () => {
     const source = new MemoryPortabilityRepository(snapshot());
     const bundle = JSON.parse(await serviceFor(source).exportJson()) as {
-      data: { settings: { floating: Record<string, unknown>; pet: Record<string, unknown> } };
+      data: { settings: { floating: Record<string, unknown>; pet: Record<string, unknown>; agentCapabilities?: Record<string, unknown> } };
     };
     delete bundle.data.settings.floating.hoverExpandDelayMs;
     delete bundle.data.settings.floating.topMode;
@@ -350,6 +350,7 @@ describe('DataPortabilityService export safety', () => {
     delete bundle.data.settings.floating.mousePassthrough;
     delete bundle.data.settings.pet.inputReactionsEnabled;
     delete bundle.data.settings.pet.vacationMode;
+    delete bundle.data.settings.agentCapabilities;
     bundle.data.settings.floating.shape = 'capsule';
     const target = new MemoryPortabilityRepository(snapshot());
 
@@ -364,6 +365,7 @@ describe('DataPortabilityService export safety', () => {
     expect(target.state.settings.floating.mousePassthrough).toBe(false);
     expect(target.state.settings.pet.inputReactionsEnabled).toBe(false);
     expect(target.state.settings.pet.vacationMode).toBe(false);
+    expect(target.state.settings.agentCapabilities).toEqual(defaultSettings.agentCapabilities);
     expect(target.state.settings.floating).not.toHaveProperty('shape');
   });
 

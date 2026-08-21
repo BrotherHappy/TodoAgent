@@ -141,6 +141,10 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     },
     feishu: { ...defaultSettings.feishu, ...value?.feishu },
     modelDataScope: { ...defaultSettings.modelDataScope, ...value?.modelDataScope },
+    agentCapabilities: {
+      ...defaultSettings.agentCapabilities,
+      ...value?.agentCapabilities,
+    },
     persona: { ...defaultSettings.persona, ...value?.persona },
     schemaVersion: 1,
   };
@@ -469,6 +473,13 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       attachmentText: merged.modelDataScope.attachmentText,
       chatHistory: merged.modelDataScope.chatHistory,
     },
+    agentCapabilities: {
+      taskManagement: merged.agentCapabilities.taskManagement,
+      feishuSync: merged.agentCapabilities.feishuSync,
+      webResearch: merged.agentCapabilities.webResearch,
+      filesAndTerminal: merged.agentCapabilities.filesAndTerminal,
+      clipboardAndScreen: merged.agentCapabilities.clipboardAndScreen,
+    },
     persona: {
       preset: merged.persona.preset,
       name: merged.persona.name,
@@ -523,6 +534,7 @@ export class SettingsService {
         raw.focus === undefined ||
         raw.weather === undefined ||
         raw.pet === undefined ||
+        raw.agentCapabilities === undefined ||
         Object.prototype.hasOwnProperty.call(raw.floating ?? {}, 'shape')
       ) {
         await this.saveSettings();

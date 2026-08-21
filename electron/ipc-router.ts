@@ -230,6 +230,15 @@ const settingsSchema = z
         chatHistory: z.boolean(),
       })
       .strict(),
+    agentCapabilities: z
+      .object({
+        taskManagement: z.boolean(),
+        feishuSync: z.boolean(),
+        webResearch: z.boolean(),
+        filesAndTerminal: z.boolean(),
+        clipboardAndScreen: z.boolean(),
+      })
+      .strict(),
     persona: z
       .object({
         preset: z.enum(["minimal", "warm", "calm", "strict"]),

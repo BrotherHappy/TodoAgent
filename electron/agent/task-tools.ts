@@ -15,7 +15,10 @@ import type {
   TaskSyncStatus,
   UpdateTaskInput,
 } from "../../src/shared/models";
-import type { ModelDataScope } from "../../src/shared/settings";
+import type {
+  AgentCapabilitySettings,
+  ModelDataScope,
+} from "../../src/shared/settings";
 import type { TaskService } from "../services/task-service";
 import type {
   ToolExecutionContext,
@@ -726,6 +729,7 @@ const interruptedBatchResult = (
 export interface TaskToolOptions {
   tasks: TaskService;
   getModelDataScope: () => ModelDataScope;
+  getAgentCapabilities?: () => AgentCapabilitySettings;
   /** Trusted per-user-message creation policy, never supplied by the model. */
   sourcePolicy?: AgentTaskSourcePolicy;
   /** Resolves the currently connected account at both review and execution time. */
@@ -737,19 +741,39 @@ export const createTaskTools = (
   options: TaskToolOptions,
 ): TrustedToolDefinition[] => {
   const notifyChanged = (): void => options.onTasksChanged?.();
+  const assertTaskCapability = (): void => {
+    if (options.getAgentCapabilities?.().taskManagement === false) {
+      throw new Error(
+        "AGENT_TASK_CAPABILITY_DISABLED:任务读写能力已关闭，请在权限中心重新开启。",
+      );
+    }
+  };
+  const assertFeishuCapability = (): void => {
+    if (options.getAgentCapabilities?.().feishuSync === false) {
+      throw new Error(
+        "AGENT_FEISHU_CAPABILITY_DISABLED:飞书同步能力已关闭，请在权限中心重新开启。",
+      );
+    }
+  };
   const requireTask = async (id: string): Promise<Task> => {
+    assertTaskCapability();
     const task = await options.tasks.getTask(id, true);
     if (!task) throw new Error(`TASK_NOT_FOUND:${id}`);
+    if (task.source.type === "feishu") assertFeishuCapability();
     return task;
   };
   const requireActiveTask = async (id: string): Promise<Task> => {
+    assertTaskCapability();
     const task = await options.tasks.getTask(id);
     if (!task) throw new Error(`ACTIVE_TASK_NOT_FOUND:${id}`);
+    if (task.source.type === "feishu") assertFeishuCapability();
     return task;
   };
   const requireDeletedTask = async (id: string): Promise<Task> => {
+    assertTaskCapability();
     const task = await options.tasks.getTask(id, true);
     if (!task) throw new Error(`TASK_NOT_FOUND:${id}`);
+    if (task.source.type === "feishu") assertFeishuCapability();
     if (task.deletedAt === undefined) {
       throw new Error(`TASK_NOT_IN_TRASH:${id}`);
     }
@@ -759,11 +783,14 @@ export const createTaskTools = (
     const accountId = options.getFeishuAccountId?.()?.trim();
     return accountId || undefined;
   };
-  const assertCreationSource = (source: "local" | "feishu"): void =>
+  const assertCreationSource = (source: "local" | "feishu"): void => {
+    assertTaskCapability();
+    if (source === "feishu") assertFeishuCapability();
     assertTaskCreationSource(
       source,
       options.sourcePolicy ?? { kind: "default-local", source: "local" },
     );
+  };
   const assertFeishuCreationAvailable = (accountId: string | undefined): void =>
     assertFeishuTaskCreationAvailable(accountId);
   /**
@@ -773,7 +800,10 @@ export const createTaskTools = (
    * the account-scoped sync queue.
    */
   const assertFeishuMutationAvailable = (task: Task): void => {
-    if (task.source.type !== "feishu" || !options.getFeishuAccountId) return;
+    assertTaskCapability();
+    if (task.source.type !== "feishu") return;
+    assertFeishuCapability();
+    if (!options.getFeishuAccountId) return;
     assertFeishuTaskMutationAccount(task.source.accountId, feishuAccountId());
   };
   const requireOperation = async (operationId: string) => {
@@ -805,27 +835,37 @@ export const createTaskTools = (
       description:
         "List and search tasks. Use this before deciding which tasks to edit. Always provide all four arguments: view, text, source, and limit. Use null for an unused nullable filter and 100 for a normal default limit.",
       schema: listArgumentsSchema,
-      analyze: (args) => ({
-        risk: "R0",
-        targets: [{ kind: "task", value: args.view ?? "all" }],
-        reads: ["task titles, status, priority and approved time fields"],
-        writes: [],
-        network: [],
-        externalEffects: [],
-        reversible: true,
-        preview: {
-          action: "list-tasks",
-          view: args.view,
-          source: args.source,
-          limit: args.limit,
-        },
-        baseVersions: {},
-      }),
+      analyze: (args) => {
+        assertTaskCapability();
+        if (args.source === "feishu") assertFeishuCapability();
+        return {
+          risk: "R0",
+          targets: [{ kind: "task" as const, value: args.view ?? "all" }],
+          reads: ["task titles, status, priority and approved time fields"],
+          writes: [],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: {
+            action: "list-tasks",
+            view: args.view,
+            source: args.source,
+            limit: args.limit,
+          },
+          baseVersions: {},
+        };
+      },
       execute: async (args, context) => {
+        assertTaskCapability();
+        if (args.source === "feishu") assertFeishuCapability();
         const filter: TaskFilter = {
           view: args.view ?? undefined,
           text: args.text ?? undefined,
-          sourceTypes: args.source ? [args.source] : undefined,
+          sourceTypes: args.source
+            ? [args.source]
+            : options.getAgentCapabilities?.().feishuSync === false
+              ? ["local"]
+              : undefined,
         };
         const tasks = (await options.tasks.listTasks(filter)).slice(
           0,
@@ -844,17 +884,20 @@ export const createTaskTools = (
       description:
         "Read one task by its exact ID, including a task currently in recoverable trash.",
       schema: getArgumentsSchema,
-      analyze: (args) => ({
-        risk: "R0",
-        targets: [{ kind: "task", value: args.id }],
-        reads: ["one task and its approved fields"],
-        writes: [],
-        network: [],
-        externalEffects: [],
-        reversible: true,
-        preview: { action: "read-task", taskId: args.id },
-        baseVersions: {},
-      }),
+      analyze: async (args) => {
+        await requireTask(args.id);
+        return {
+          risk: "R0" as const,
+          targets: [{ kind: "task" as const, value: args.id }],
+          reads: ["one task and its approved fields"],
+          writes: [],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: { action: "read-task", taskId: args.id },
+          baseVersions: {},
+        };
+      },
       execute: async (args, context) =>
         result(
           context,

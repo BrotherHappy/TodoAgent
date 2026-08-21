@@ -836,7 +836,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   const settings = expectRecord(value, path);
   assertOnlyKeys(settings, [
     'schemaVersion', 'theme', 'launchAtLogin', 'closeToTray', 'quickCaptureShortcut',
-    'notifications', 'floating', 'focus', 'planning', 'weather', 'pet', 'ai', 'feishu', 'modelDataScope', 'persona', 'permissionMode',
+    'notifications', 'floating', 'focus', 'planning', 'weather', 'pet', 'ai', 'feishu', 'modelDataScope', 'agentCapabilities', 'persona', 'permissionMode',
     'onboardingComplete',
   ], path);
   if (settings.schemaVersion !== 1) throw new DataImportValidationError('Unsupported settings schema', `${path}.schemaVersion`);
@@ -1138,6 +1138,15 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   const scope = expectRecord(settings.modelDataScope, `${path}.modelDataScope`);
   assertOnlyKeys(scope, ['taskTitlesAndTimes', 'notes', 'feishuContent', 'attachmentText', 'chatHistory'], `${path}.modelDataScope`);
   Object.keys(scope).forEach((key) => expectBoolean(scope[key], `${path}.modelDataScope.${key}`));
+  const agentCapabilities: Record<string, unknown> = settings.agentCapabilities === undefined
+    ? clone(defaultSettings.agentCapabilities) as unknown as Record<string, unknown>
+    : expectRecord(settings.agentCapabilities, `${path}.agentCapabilities`);
+  assertOnlyKeys(agentCapabilities, [
+    'taskManagement', 'feishuSync', 'webResearch', 'filesAndTerminal', 'clipboardAndScreen',
+  ], `${path}.agentCapabilities`);
+  Object.keys(agentCapabilities).forEach((key) =>
+    expectBoolean(agentCapabilities[key], `${path}.agentCapabilities.${key}`),
+  );
   const persona = expectRecord(settings.persona, `${path}.persona`);
   assertOnlyKeys(persona, ['preset', 'name', 'userName', 'responseLength', 'proactiveLevel', 'reminderStrength', 'syncWithPet'], `${path}.persona`);
   expectEnum(persona.preset, ['minimal', 'warm', 'calm', 'strict'] as const, `${path}.persona.preset`);
@@ -1200,6 +1209,10 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     ...clone(persona),
     syncWithPet: persona.syncWithPet !== false,
   } as AppSettings['persona'];
+  validated.agentCapabilities = {
+    ...clone(defaultSettings.agentCapabilities),
+    ...clone(agentCapabilities),
+  } as AppSettings['agentCapabilities'];
   // Portable settings must never recreate OS credential references from
   // defaults after the export redaction step.
   delete validated.feishu.tokenCredentialId;

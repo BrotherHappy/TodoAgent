@@ -162,6 +162,19 @@ export interface ModelDataScope {
   chatHistory: boolean;
 }
 
+/**
+ * User-controlled Agent capability layers.  These are deliberately separate
+ * from model data scope: a capability decides which trusted tools may exist in
+ * a run, while the data scope decides which task content may leave the app.
+ */
+export interface AgentCapabilitySettings {
+  taskManagement: boolean;
+  feishuSync: boolean;
+  webResearch: boolean;
+  filesAndTerminal: boolean;
+  clipboardAndScreen: boolean;
+}
+
 export interface PersonaSettings {
   preset: PersonaPreset;
   name: string;
@@ -203,6 +216,7 @@ export interface AppSettings {
   ai: AiProviderSettings;
   feishu: FeishuIntegrationSettings;
   modelDataScope: ModelDataScope;
+  agentCapabilities: AgentCapabilitySettings;
   persona: PersonaSettings;
   permissionMode: AgentPermissionMode;
   onboardingComplete: boolean;
@@ -326,6 +340,13 @@ export const defaultSettings: AppSettings = {
     feishuContent: false,
     attachmentText: false,
     chatHistory: false,
+  },
+  agentCapabilities: {
+    taskManagement: true,
+    feishuSync: true,
+    webResearch: true,
+    filesAndTerminal: true,
+    clipboardAndScreen: true,
   },
   persona: {
     preset: 'calm',
