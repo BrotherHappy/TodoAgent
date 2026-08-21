@@ -158,6 +158,7 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { ResearchCardMarkdown } from "./ResearchCardMarkdown";
 import { SpeechOutputButton } from "./SpeechOutputButton";
 import { AgentRunActivity } from "./AgentRunActivity";
 import { PetWeatherForecast } from "./PetWeatherForecast";
@@ -4329,7 +4330,7 @@ function TaskInspector({
                         <span>{card.url}</span>
                       </button>
                     )}
-                    {card.summary && <p className="research-card-summary">{card.summary}</p>}
+                    {card.summary && <ResearchCardMarkdown text={card.summary} />}
                     {card.actionItems.length > 0 && (
                       <ul className="research-card-actions">
                         {card.actionItems.map((item, index) => <li key={`${card.id}-${index}`}>{item}</li>)}
