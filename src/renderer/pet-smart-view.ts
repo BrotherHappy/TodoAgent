@@ -55,12 +55,20 @@ const matchesSavedRoute = (task: Task, route: SmartViewDefinition["route"], toda
       .sort();
     return task.status === "open" && dates[0] !== undefined && dates[0] > today;
   }
+  if (route === "deferred") {
+    return (
+      task.status === "open" &&
+      task.deferUntil !== undefined &&
+      task.deferUntil > today
+    );
+  }
   if (route === "inbox") {
     return (
       task.status === "open" &&
       task.projectId === undefined &&
       task.listId === undefined &&
       task.plannedDate === undefined &&
+      task.deferUntil === undefined &&
       task.startAt === undefined &&
       task.dueAt === undefined
     );

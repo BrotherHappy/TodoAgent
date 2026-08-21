@@ -1029,3 +1029,4 @@ Todo Pet 的差异化不是“比 Todoist 多一个可爱的皮肤”，而是�
 | 2026-08-21 | v2.34 | 延伸 Todoist / Microsoft To Do 的重复任务处理：本地循环任务详情提供“跳过本次”，在同一任务上把日期、开始/截止时间、时间块和提醒平移到下一次循环；不创建重复任务，支持单次撤销；飞书循环继续由飞书负责，专注中的任务和已到最后一次的循环 fail-closed |
 | 2026-08-21 | v2.35 | 延伸 Todoist Assist / Taskade 的 Agent 任务动作覆盖：Agent 新增 `task_skip_recurring`，先显示当前锚点与下一次日期的影响预览，用户批准后才平移本地循环任务；沿用任务能力开关、版本校验、审计和撤销，不对飞书循环或专注中任务做猜测性改写 |
 | 2026-08-21 | v2.36 | 吸收 OmniFocus Flagged、Taskwarrior urgency/tag 和 Todoist 的重点筛选习惯：任务增加本地“重点标记”，任务行/详情可一键切换，筛选面板、一句话筛选、保存视图、Todo Pet 视图、批量编辑和 Agent 任务工具均可使用；标记独立于优先级，不进入飞书共享 payload，旧任务默认未标记并可在可读 Markdown/安全 JSON 中保留 |
+| 2026-08-21 | v2.37 | 吸收 Things 3 / Taskwarrior waiting / Microsoft To Do 的“稍后安排”语义：任务新增本地 `deferUntil` 可用日期，未来日期前从 Today 隐藏并进入侧栏“稍后安排”，到期后回到普通开放集合；任务行、新建/详情和 Agent 支持设置、查询与清除，飞书任务只保存私人字段，绝不改写飞书截止时间、状态或同步 payload；安全 JSON 与可读 Markdown 保持该字段，旧任务按无 defer 兼容 |

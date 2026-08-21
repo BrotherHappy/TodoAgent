@@ -240,6 +240,11 @@ export interface Task {
   priority: TaskPriority;
   /** A private, independent attention marker inspired by Flagged views. */
   flagged?: boolean;
+  /**
+   * A private availability date. Tasks deferred into the future stay out of
+   * Today until this date and are never written back to Feishu.
+   */
+  deferUntil?: LocalDate;
   projectId?: string;
   listId?: string;
   sectionId?: string;
@@ -301,6 +306,7 @@ export interface CreateTaskInput {
   status?: TaskStatus;
   priority?: TaskPriority;
   flagged?: boolean;
+  deferUntil?: LocalDate;
   projectId?: string;
   listId?: string;
   sectionId?: string;
@@ -345,11 +351,19 @@ export type UpdateTaskInput = {
   [Key in keyof MutableTaskFields]?: MutableTaskFields[Key] | null;
 };
 
-export type TaskView = 'inbox' | 'today' | 'upcoming' | 'all' | 'completed' | 'trash';
+export type TaskView =
+  | 'inbox'
+  | 'today'
+  | 'upcoming'
+  | 'deferred'
+  | 'all'
+  | 'completed'
+  | 'trash';
 
 export type TaskSortField =
   | 'title'
   | 'priority'
+  | 'deferUntil'
   | 'plannedDate'
   | 'startAt'
   | 'dueAt'
@@ -391,6 +405,7 @@ export type TaskViewSectionId =
   | 'due-today'
   | 'planned-today'
   | 'upcoming'
+  | 'deferred'
   | 'inbox'
   | 'open'
   | 'completed'

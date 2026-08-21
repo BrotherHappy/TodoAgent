@@ -395,6 +395,7 @@ type TaskEditorDirtyField =
   | "tags"
   | "contexts"
   | "plannedDate"
+  | "deferUntil"
   | "startAt"
   | "startAtAllDay"
   | "dueAt"
@@ -487,6 +488,7 @@ const routeTitles: Record<MainRoute, string> = {
   inbox: "暂存",
   today: "今天",
   upcoming: "即将到来",
+  deferred: "稍后安排",
   all: "全部任务",
   completed: "已完成",
   trash: "回收站",
@@ -504,6 +506,7 @@ const taskRouteNames = new Set<MainRoute>([
   "inbox",
   "today",
   "upcoming",
+  "deferred",
   "all",
   "completed",
   "trash",
@@ -579,6 +582,7 @@ const sectionTitles: Record<TaskViewSectionId, string> = {
   "due-today": "今天到期",
   "planned-today": "今天计划",
   upcoming: "即将到来",
+  deferred: "稍后安排",
   inbox: "暂存",
   open: "待办",
   completed: "已完成",
@@ -616,6 +620,7 @@ const taskHistoryFieldLabels: Record<string, string> = {
   privateNotes: "私人备注",
   status: "状态",
   flagged: "重点标记",
+  deferUntil: "稍后日期",
   completedAt: "完成时间",
   priority: "优先级",
   projectId: "项目",
@@ -1152,6 +1157,7 @@ interface SidebarCounts {
   inbox?: number;
   today?: number;
   upcoming?: number;
+  deferred?: number;
   all?: number;
   completed?: number;
   trash?: number;
@@ -1172,6 +1178,7 @@ function useSidebarCounts(): SidebarCounts {
       inbox,
       today,
       upcoming,
+      deferred,
       all,
       completed,
       trash,
@@ -1182,6 +1189,7 @@ function useSidebarCounts(): SidebarCounts {
       api.list({ view: "inbox" }),
       api.list({ view: "today" }),
       api.list({ view: "upcoming" }),
+      api.list({ view: "deferred" }),
       api.list({ view: "all" }),
       api.list({ view: "completed" }),
       api.list({ view: "trash" }),
@@ -1197,6 +1205,7 @@ function useSidebarCounts(): SidebarCounts {
       inbox: inbox.length,
       today: today.filter((task) => task.status === "open").length,
       upcoming: upcoming.length,
+      deferred: deferred.length,
       all: all.length,
       completed: completed.length,
       trash: trash.length,
@@ -1325,6 +1334,7 @@ function Sidebar({
       {item("inbox", <Inbox size={17} />, counts.inbox)}
       {item("today", <Sun size={17} />, counts.today)}
       {item("upcoming", <CalendarDays size={17} />, counts.upcoming)}
+      {item("deferred", <Clock3 size={17} />, counts.deferred)}
       {item("all", <LayoutList size={17} />, counts.all)}
       {item("completed", <CheckCircle2 size={17} />, counts.completed)}
       {item("trash", <Trash2 size={17} />, counts.trash)}
@@ -1831,6 +1841,11 @@ function TaskRow({
               {task.plannedDate === dateKey() ? "今天" : task.plannedDate}
             </span>
           )}
+          {task.deferUntil && (
+            <span className="private">
+              稍后至 {task.deferUntil === dateKey() ? "今天" : task.deferUntil}
+            </span>
+          )}
           {task.dueAt && (
             <span className={overdue ? "overdue" : ""}>
               {overdue ? "已逾期 · " : "截止 "}
@@ -2147,6 +2162,7 @@ function TaskListPage({
           task.status === "open" &&
           !task.deletedAt &&
           !task.plannedDate &&
+          !task.deferUntil &&
           !task.projectId &&
           !task.listId,
       ),
@@ -3033,6 +3049,9 @@ function TaskInspector({
   const [plannedDateInput, setPlannedDateInput] = useState(
     task?.plannedDate ?? "",
   );
+  const [deferUntilInput, setDeferUntilInput] = useState(
+    task?.deferUntil ?? "",
+  );
   const [localReminderInput, setLocalReminderInput] = useState(
     toLocalDateTimeInput(
       task?.reminders.find((reminder) => reminder.source === "local")?.at,
@@ -3123,6 +3142,8 @@ function TaskInspector({
         setDueAtAllDay(task.dueAtIsAllDay === true);
       if (!dirtyFieldsRef.current.has("plannedDate"))
         setPlannedDateInput(task.plannedDate ?? "");
+      if (!dirtyFieldsRef.current.has("deferUntil"))
+        setDeferUntilInput(task.deferUntil ?? "");
       if (!dirtyFieldsRef.current.has("localReminder"))
         setLocalReminderInput(
           toLocalDateTimeInput(
@@ -3148,6 +3169,7 @@ function TaskInspector({
     setDueAtInput(toLocalDateTimeInput(task.dueAt));
     setDueAtAllDay(task.dueAtIsAllDay === true);
     setPlannedDateInput(task.plannedDate ?? "");
+    setDeferUntilInput(task.deferUntil ?? "");
     setLocalReminderInput(
       toLocalDateTimeInput(
         task.reminders.find((reminder) => reminder.source === "local")?.at,
@@ -3209,6 +3231,7 @@ function TaskInspector({
     task?.id,
     task?.notes,
     task?.plannedDate,
+    task?.deferUntil,
     task?.projectId,
     task?.listId,
     task?.reminders,
@@ -3446,6 +3469,12 @@ function TaskInspector({
     const saved = await save({ plannedDate: value || null });
     if (saved) clearDirtyIfCurrent("plannedDate", revision);
   };
+  const commitDeferUntil = async (value = deferUntilInput): Promise<void> => {
+    if (!dirtyFieldsRef.current.has("deferUntil")) return;
+    const revision = currentDirtyRevision("deferUntil");
+    const saved = await save({ deferUntil: value || null });
+    if (saved) clearDirtyIfCurrent("deferUntil", revision);
+  };
   const commitTemporalFields = async (
     values: Partial<{ startAtInput: string; dueAtInput: string }> = {},
   ): Promise<void> => {
@@ -3552,6 +3581,7 @@ function TaskInspector({
       tags: task.tags,
       contexts: task.contexts,
       plannedDate: task.plannedDate,
+      deferUntil: task.deferUntil,
       startAt: task.startAt,
       dueAt: task.dueAt,
       estimatedMinutes: task.estimatedMinutes,
@@ -4813,6 +4843,38 @@ function TaskInspector({
             )}
           </div>
           <div className="detail-field">
+            <label htmlFor="defer-until">稍后安排</label>
+            <input
+              id="defer-until"
+              className="field-input"
+              type="date"
+              value={deferUntilInput}
+              onChange={(event) => {
+                markDirty("deferUntil");
+                setDeferUntilInput(event.target.value);
+              }}
+              onBlur={(event) =>
+                void commitDeferUntil(event.currentTarget.value)
+              }
+            />
+            <small className="field-hint">
+              到这一天前不会出现在“今天”；仅本地，不同步飞书
+            </small>
+            {deferUntilInput && (
+              <button
+                type="button"
+                className="ghost-button compact"
+                onClick={() => {
+                  markDirty("deferUntil");
+                  setDeferUntilInput("");
+                  void commitDeferUntil("");
+                }}
+              >
+                恢复可安排
+              </button>
+            )}
+          </div>
+          <div className="detail-field">
             <label htmlFor="start-at">开始时间</label>
             <div className="field-control-stack">
               <input
@@ -4973,7 +5035,7 @@ function TaskInspector({
           </label>
           <div className="private-note">
             <EyeOff size={14} />
-            项目、标签、重点标记、父子任务、优先级、预计、私人计划、时间块、排序和专注不会回写飞书
+            项目、标签、重点标记、稍后安排、父子任务、优先级、预计、私人计划、时间块、排序和专注不会回写飞书
           </div>
         </div>
         <div className="detail-group">
@@ -5613,6 +5675,7 @@ function NewTaskSheet({
   const [notes, setNotes] = useState(initialNotes);
   const [source, setSource] = useState<TaskSourceType>("local");
   const [plannedDate, setPlannedDate] = useState(initialPlannedDate ?? dateKey());
+  const [deferUntil, setDeferUntil] = useState("");
   const [startAt, setStartAt] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [reminderAt, setReminderAt] = useState("");
@@ -5667,6 +5730,7 @@ function NewTaskSheet({
             ? { type: "feishu", accountId: feishuStatus?.accountId }
             : { type: "local" },
         plannedDate: plannedDate || undefined,
+        deferUntil: deferUntil || undefined,
         startAt: startAtIso,
         dueAt: dueAtIso,
         projectId: resolveProjectInput(projectId, projects) || undefined,
@@ -5866,6 +5930,17 @@ function NewTaskSheet({
               value={plannedDate}
               onChange={(event) => setPlannedDate(event.target.value)}
             />
+          </div>
+          <div className="detail-field">
+            <label htmlFor="new-defer-until">稍后安排</label>
+            <input
+              id="new-defer-until"
+              className="field-input"
+              type="date"
+              value={deferUntil}
+              onChange={(event) => setDeferUntil(event.target.value)}
+            />
+            <small className="field-hint">到这一天前不会出现在“今天”，仅本地</small>
           </div>
           <div className="detail-field">
             <label htmlFor="new-start">开始时间</label>
@@ -13206,6 +13281,7 @@ function MainWindow() {
     "inbox",
     "today",
     "upcoming",
+    "deferred",
     "all",
     "completed",
     "trash",
@@ -13403,6 +13479,14 @@ function MainWindow() {
         run: () => navigateTaskCollection("all"),
       },
       {
+        id: "deferred",
+        label: "打开稍后安排",
+        description: "查看被暂缓到未来日期、尚未进入 Today 的任务",
+        keywords: ["defer", "someday", "waiting", "稍后", "延后", "等待"],
+        icon: <Clock3 size={16} />,
+        run: () => navigateTaskCollection("deferred"),
+      },
+      {
         id: "plan-today",
         label: "一起规划今天",
         description: "预览容量、依赖和预计时长后安排 Today",
@@ -13551,6 +13635,7 @@ function MainWindow() {
     "inbox",
     "today",
     "upcoming",
+    "deferred",
     "all",
     "completed",
     "trash",

@@ -79,11 +79,17 @@ function fallbackMatchesView(task: Task, view: TaskView): boolean {
   if (view === "completed") return task.status === "completed";
   if (view === "all") return true;
   if (view === "inbox")
-    return !task.plannedDate && !task.dueAt && !task.projectId;
+    return !task.plannedDate && !task.deferUntil && !task.dueAt && !task.projectId;
+  if (view === "deferred")
+    return task.status === "open" && Boolean(task.deferUntil && task.deferUntil > localDate());
   if (view === "upcoming")
-    return Boolean(task.plannedDate && task.plannedDate > localDate());
+    return Boolean(
+      (task.plannedDate && task.plannedDate > localDate()) ||
+        (task.deferUntil && task.deferUntil > localDate()),
+    );
   return (
     task.status === "open" &&
+    !(task.deferUntil && task.deferUntil > localDate()) &&
     (task.plannedDate === localDate() ||
       Boolean(task.dueAt && task.dueAt.slice(0, 10) <= localDate()))
   );
@@ -100,6 +106,8 @@ function fallbackSections(tasks: Task[], view: TaskView): TaskViewSection[] {
               ? "completed"
               : view === "upcoming"
                 ? "upcoming"
+                : view === "deferred"
+                  ? "deferred"
                 : view === "inbox"
                   ? "inbox"
                   : "open",

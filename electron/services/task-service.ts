@@ -146,6 +146,7 @@ const MUTABLE_TASK_FIELDS = new Set([
   "privateNotes",
   "status",
   "flagged",
+  "deferUntil",
   "priority",
   "projectId",
   "listId",
@@ -198,6 +199,7 @@ const TASK_HISTORY_FIELDS = [
   "privateNotes",
   "status",
   "flagged",
+  "deferUntil",
   "completedAt",
   "priority",
   "projectId",
@@ -539,6 +541,8 @@ const validateTask = (task: Task): Task => {
 
   if (task.plannedDate !== undefined)
     assertLocalDate(task.plannedDate, "plannedDate");
+  if (task.deferUntil !== undefined)
+    assertLocalDate(task.deferUntil, "deferUntil");
   if (task.startAt !== undefined) assertDateTime(task.startAt, "startAt");
   if (task.dueAt !== undefined) assertDateTime(task.dueAt, "dueAt");
   // A false/missing flag has the same meaning as a timed task. Normalize it
@@ -654,6 +658,17 @@ const earliestDateKey = (task: Task, timeZone: string): string | undefined => {
   return values[0];
 };
 
+const upcomingDateKey = (
+  task: Task,
+  today: string,
+  timeZone: string,
+): string | undefined => {
+  if (task.deferUntil !== undefined && task.deferUntil > today) {
+    return task.deferUntil;
+  }
+  return earliestDateKey(task, timeZone);
+};
+
 const taskMatchesToday = (
   task: Task,
   today: string,
@@ -662,6 +677,13 @@ const taskMatchesToday = (
   const due = temporalToLocalKey(task.dueAt, timeZone);
   const planned = temporalToLocalKey(task.plannedDate, timeZone);
   const start = temporalToLocalKey(task.startAt, timeZone);
+  if (
+    task.status === "open" &&
+    task.deferUntil !== undefined &&
+    task.deferUntil > today
+  ) {
+    return false;
+  }
   if (task.status === "completed") {
     return (
       temporalToLocalKey(task.completedAt, timeZone) === today ||
@@ -688,8 +710,15 @@ const matchesView = (
   if (view === "completed") return task.status === "completed";
   if (view === "today") return taskMatchesToday(task, today, timeZone);
   if (view === "upcoming") {
-    const date = earliestDateKey(task, timeZone);
+    const date = upcomingDateKey(task, today, timeZone);
     return task.status === "open" && date !== undefined && date > today;
+  }
+  if (view === "deferred") {
+    return (
+      task.status === "open" &&
+      task.deferUntil !== undefined &&
+      task.deferUntil > today
+    );
   }
   if (view === "inbox") {
     return (
@@ -697,6 +726,7 @@ const matchesView = (
       task.projectId === undefined &&
       task.listId === undefined &&
       task.plannedDate === undefined &&
+      task.deferUntil === undefined &&
       task.startAt === undefined &&
       task.dueAt === undefined
     );
@@ -735,6 +765,7 @@ const sectionForView = (
   if (view === "trash") return "trash";
   if (view === "completed" || task.status === "completed") return "completed";
   if (view === "upcoming") return "upcoming";
+  if (view === "deferred") return "deferred";
   if (view === "inbox") return "inbox";
   return "open";
 };
@@ -742,6 +773,7 @@ const sectionForView = (
 const defaultSort = (view: TaskView | undefined): TaskSort[] => {
   if (view === "upcoming")
     return [{ field: "plannedDate" }, { field: "dueAt" }];
+  if (view === "deferred") return [{ field: "deferUntil" }];
   if (view === "completed") return [{ field: "updatedAt", direction: "desc" }];
   if (view === "trash") return [{ field: "updatedAt", direction: "desc" }];
   return [
@@ -1114,8 +1146,16 @@ export class TaskService {
       }
       if (filter.view === "upcoming") {
         const dateComparison = compareOptional(
-          earliestDateKey(left, this.timeZone),
-          earliestDateKey(right, this.timeZone),
+          upcomingDateKey(left, today, this.timeZone),
+          upcomingDateKey(right, today, this.timeZone),
+          "asc",
+        );
+        if (dateComparison !== 0) return dateComparison;
+      }
+      if (filter.view === "deferred") {
+        const dateComparison = compareOptional(
+          left.deferUntil,
+          right.deferUntil,
           "asc",
         );
         if (dateComparison !== 0) return dateComparison;
@@ -1150,7 +1190,7 @@ export class TaskService {
     const order: TaskViewSectionId[] =
       filter.view === "today"
         ? ["overdue", "due-today", "planned-today", "open", "completed"]
-        : ["inbox", "open", "upcoming", "completed", "trash"];
+        : ["inbox", "open", "upcoming", "deferred", "completed", "trash"];
     return order
       .filter((id) => sectionMap.has(id))
       .map((id) => ({ id, tasks: deepClone(sectionMap.get(id) ?? []) }));
@@ -2121,6 +2161,7 @@ export class TaskService {
       status,
       priority: input.priority ?? "none",
       ...(input.flagged === true ? { flagged: true } : {}),
+      deferUntil: input.deferUntil,
       projectId: input.projectId,
       listId: input.listId,
       sectionId: input.sectionId,

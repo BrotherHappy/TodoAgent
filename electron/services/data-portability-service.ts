@@ -450,7 +450,7 @@ const validateList = (value: unknown, path: string): TaskList => {
 const validateTask = (value: unknown, path: string): Task => {
   const task = expectRecord(value, path);
   assertOnlyKeys(task, [
-    'id', 'source', 'title', 'notes', 'privateNotes', 'status', 'priority', 'flagged',
+    'id', 'source', 'title', 'notes', 'privateNotes', 'status', 'priority', 'flagged', 'deferUntil',
     'projectId', 'listId', 'sectionId', 'tags', 'contexts', 'parentId', 'dependencyIds',
     'assigneeIds', 'followerIds', 'attachments', 'links', 'customFields', 'comments', 'researchCards',
     'plannedDate', 'startAt', 'startAtIsAllDay', 'dueAt', 'dueAtIsAllDay',
@@ -487,6 +487,7 @@ const validateTask = (value: unknown, path: string): Task => {
   expectEnum(task.status, ['open', 'completed', 'cancelled'] as const, `${path}.status`);
   expectEnum(task.priority, ['none', 'low', 'medium', 'high', 'urgent'] as const, `${path}.priority`);
   expectOptional(task, 'flagged', path, expectBoolean);
+  expectOptional(task, 'deferUntil', path, expectLocalDate);
   ['projectId', 'listId', 'sectionId', 'parentId', 'recurrenceSeriesId'].forEach((key) =>
     expectOptional(task, key, path, expectId),
   );
@@ -1606,6 +1607,7 @@ const renderMarkdownTask = (
   const priority = markdownPriority(task.priority);
   if (priority !== undefined) metadata.push(`优先级：${priority}`);
   if (task.flagged === true) metadata.push('重点标记');
+  if (task.deferUntil !== undefined) metadata.push(`稍后：${task.deferUntil}`);
   if (task.projectId !== undefined) {
     metadata.push(`项目：${markdownInline(projects.get(task.projectId)?.name ?? task.projectId)}`);
   }
@@ -1671,6 +1673,7 @@ const markdownHistoryFields = [
   'privateNotes',
   'status',
   'flagged',
+  'deferUntil',
   'completedAt',
   'priority',
   'projectId',
@@ -1712,6 +1715,7 @@ const markdownHistoryFieldLabels: Record<string, string> = {
   privateNotes: '私人备注',
   status: '状态',
   flagged: '重点标记',
+  deferUntil: '稍后日期',
   completedAt: '完成时间',
   priority: '优先级',
   projectId: '项目',

@@ -326,6 +326,45 @@ describe("TaskService views and task data", () => {
     ]);
   });
 
+  it("defers tasks locally until a private availability date", async () => {
+    const { service } = await createFixture();
+    const deferred = await service.createTask({
+      title: "下周再看",
+      plannedDate: "2026-08-09",
+      deferUntil: "2026-08-12",
+    });
+    const remote = await service.createTask({
+      title: "飞书稍后任务",
+      deferUntil: "2026-08-12",
+      source: { type: "feishu", accountId: "primary", externalId: "defer-remote" },
+      sync: { status: "synced" },
+    });
+
+    expect((await service.listTasks({ view: "today" })).map((task) => task.id)).not.toContain(
+      deferred.task.id,
+    );
+    expect((await service.listTasks({ view: "deferred" })).map((task) => task.id)).toEqual([
+      deferred.task.id,
+      remote.task.id,
+    ]);
+    expect((await service.listTasks({ view: "upcoming" })).map((task) => task.id)).toContain(
+      deferred.task.id,
+    );
+
+    const cleared = await service.updateTask(remote.task.id, { deferUntil: null });
+    expect(cleared.task.deferUntil).toBeUndefined();
+    expect(cleared.task.sync.status).toBe("synced");
+    expect(await service.listTasks({ view: "deferred" })).toEqual([
+      expect.objectContaining({ id: deferred.task.id }),
+    ]);
+
+    const nextDay = await service.updateTask(deferred.task.id, {
+      deferUntil: "2026-08-09",
+    });
+    expect(nextDay.task.deferUntil).toBe("2026-08-09");
+    expect(await service.listTasks({ view: "deferred" })).toEqual([]);
+  });
+
   it("keeps manual contexts local and filters them case-insensitively", async () => {
     const { service } = await createFixture();
     const local = await service.createTask({

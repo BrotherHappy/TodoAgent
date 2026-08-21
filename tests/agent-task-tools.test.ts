@@ -401,6 +401,60 @@ describe("task Agent tools", () => {
     });
   });
 
+  it("lets Agent defer and restore a task without a Feishu write", async () => {
+    const tools = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    });
+    const create = tools.find((tool) => tool.name === "task_create")!;
+    const update = tools.find((tool) => tool.name === "task_update")!;
+    const list = tools.find((tool) => tool.name === "task_list")!;
+    const created = await create.execute(
+      {
+        title: "稍后处理",
+        notes: "",
+        source: "local",
+        projectId: null,
+        listId: null,
+        plannedDate: null,
+        deferUntil: "2099-01-01",
+        startAt: null,
+        dueAt: null,
+        priority: "none",
+        tags: [],
+        contexts: [],
+      },
+      executionContext("task_create-defer"),
+    );
+    const taskId = (created.data as { task: { id: string } }).task.id;
+    expect(
+      (await list.execute(
+        { view: "deferred", text: null, source: null, flagged: false, limit: 100 },
+        executionContext("task_list-deferred"),
+      )).data,
+    ).toMatchObject({ count: 1 });
+    await update.execute(
+      {
+        id: taskId,
+        title: null,
+        notes: null,
+        privateNotes: null,
+        deferUntil: null,
+        projectId: null,
+        listId: null,
+        plannedDate: null,
+        startAt: null,
+        dueAt: null,
+        priority: null,
+        tags: null,
+        contexts: null,
+        clearFields: ["deferUntil"],
+      },
+      executionContext("task_update-clear-defer"),
+    );
+    expect((await tasks.getTask(taskId))?.deferUntil).toBeUndefined();
+  });
+
   it("creates, reads, updates, and clears start/project/list task fields", async () => {
     const tools = createTaskTools({
       tasks,

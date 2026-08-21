@@ -63,6 +63,7 @@ const isTaskView = (value: unknown): value is TaskView =>
   value === "inbox" ||
   value === "today" ||
   value === "upcoming" ||
+  value === "deferred" ||
   value === "all" ||
   value === "completed" ||
   value === "trash";
