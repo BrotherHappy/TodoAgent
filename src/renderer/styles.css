@@ -9469,6 +9469,70 @@ select {
   color: var(--app-brand-strong);
   background: var(--app-brand-soft);
 }
+.task-template-save-sheet .modal-header {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: start;
+}
+.task-template-save-sheet .modal-header .feature-icon {
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.task-template-save-context {
+  display: grid;
+  gap: 5px;
+  margin: 3px 0 14px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-brand-soft) 35%, transparent);
+}
+.task-template-save-context strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-template-save-context span {
+  color: var(--app-text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.task-template-save-form {
+  display: grid;
+  gap: 12px;
+}
+.task-template-save-form > label {
+  display: grid;
+  gap: 5px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+.task-template-save-form > label small {
+  color: var(--app-text-faint);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: right;
+}
+.task-template-save-preview {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-surface-raised) 72%, transparent);
+}
+.task-template-save-preview span,
+.task-template-save-preview small {
+  color: var(--app-text-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.task-template-save-preview strong {
+  color: var(--app-brand-strong);
+  font-family: var(--app-font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 15px;
+}
 .calendar-action-items-context {
   display: grid;
   gap: 4px;

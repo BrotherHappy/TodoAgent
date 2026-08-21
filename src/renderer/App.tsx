@@ -306,10 +306,13 @@ import {
 } from "./pet-action-packs";
 import {
   buildTaskTemplateInputs,
+  installTaskTemplate,
   parseTaskTemplateJson,
   previewTaskTemplate,
+  type TaskTemplate,
   useTaskTemplates,
 } from "./task-templates";
+import { TaskTemplateSaveSheet } from "./TaskTemplateSaveSheet";
 import { suggestDailyPlan } from "../shared/daily-planner";
 import { formatDailyScheduleTime } from "../shared/daily-schedule";
 import {
@@ -2938,6 +2941,7 @@ function TaskInspector({
   const [editingCommentId, setEditingCommentId] = useState<string>();
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
+  const [showTemplateSave, setShowTemplateSave] = useState(false);
   const editingTaskIdRef = useRef<string | undefined>(undefined);
   // A native input can emit a second blur save before the first IPC reply.
   // Per-field revisions stop the older completion from clearing a newer
@@ -3051,6 +3055,7 @@ function TaskInspector({
     setEditingCommentId(undefined);
     setEditingCommentBody("");
     setCommentBusy(false);
+    setShowTemplateSave(false);
     setTimeBlockStart(toLocalDateTimeInput(task.timeBlock?.startAt));
     setTimeBlockEnd(toLocalDateTimeInput(task.timeBlock?.endAt));
     void window.desktopApi.tasks
@@ -3414,6 +3419,12 @@ function TaskInspector({
     });
     setShowActions(false);
     notify("已创建本地副本", "success");
+  };
+  const saveAsTaskTemplate = async (template: TaskTemplate): Promise<void> => {
+    installTaskTemplate(template);
+    setShowTemplateSave(false);
+    setShowActions(false);
+    notify(`已保存模板「${template.name}」`, "success");
   };
   const openInFeishu = async () => {
     const guid = task.source.externalId;
@@ -3941,6 +3952,15 @@ function TaskInspector({
             <div className="inspector-menu">
               <button type="button" onClick={() => void duplicateAsLocal()}>
                 创建本地副本
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTemplateSave(true);
+                  setShowActions(false);
+                }}
+              >
+                保存为工作流模板
               </button>
               {!task.deletedAt && (
                 <button
@@ -5369,6 +5389,13 @@ function TaskInspector({
             </div>
           </section>
         </div>
+      )}
+      {showTemplateSave && (
+        <TaskTemplateSaveSheet
+          task={task}
+          onClose={() => setShowTemplateSave(false)}
+          onConfirm={saveAsTaskTemplate}
+        />
       )}
     </>
   );

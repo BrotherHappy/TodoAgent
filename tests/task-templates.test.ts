@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allTaskTemplates,
+  buildTaskTemplateFromTask,
   buildTaskTemplateInputs,
   builtInTaskTemplates,
   installTaskTemplate,
@@ -23,6 +24,59 @@ class MemoryStorage {
 }
 
 describe("task templates", () => {
+  it("turns an existing task into a local-only reusable recipe", () => {
+    const template = buildTaskTemplateFromTask(
+      {
+        title: "整理发布清单",
+        notes: "先确认截图和链接",
+        tags: ["发布", "发布"],
+        priority: "high",
+        estimatedMinutes: 45,
+      },
+      {
+        id: "publish-checklist-abc",
+        name: "发布检查",
+        description: "每次发布前复用",
+        now: new Date("2026-08-21T08:00:00.000Z"),
+      },
+    );
+    expect(template).toMatchObject({
+      id: "publish-checklist-abc",
+      name: "发布检查",
+      defaultSource: "local",
+      steps: [
+        {
+          id: "task",
+          titleTemplate: "{{title}}",
+          notesTemplate: "先确认截图和链接",
+          tags: ["发布"],
+          priority: "high",
+          estimatedMinutes: 45,
+          plannedDayOffset: 0,
+        },
+      ],
+      createdAt: "2026-08-21T08:00:00.000Z",
+      updatedAt: "2026-08-21T08:00:00.000Z",
+    });
+  });
+
+  it("does not copy provider identity or invalid estimates into a template", () => {
+    const template = buildTaskTemplateFromTask(
+      {
+        title: "飞书任务",
+        notes: "包含 {{unsupported}} 变量的旧备注",
+        tags: [],
+        priority: "none",
+        estimatedMinutes: 1,
+      },
+      { id: "feishu-recipe-abc", name: "飞书任务模板" },
+    );
+    expect(template.defaultSource).toBe("local");
+    expect(template.steps[0]).not.toHaveProperty("notesTemplate");
+    expect(template.steps[0]).not.toHaveProperty("estimatedMinutes");
+    expect(template.steps[0]).not.toHaveProperty("source");
+  });
+
   it("ships safe built-in workflows and renders placeholders with date offsets", () => {
     const template = builtInTaskTemplates.find((item) => item.id === "publish-article")!;
     const preview = previewTaskTemplate(template, "Todo Pet 发布说明", {

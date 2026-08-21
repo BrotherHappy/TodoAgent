@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CreateTaskInput, TaskPriority } from "../shared/models";
+import type { CreateTaskInput, Task, TaskPriority } from "../shared/models";
 
 export const TASK_TEMPLATES_STORAGE_KEY = "todo-agent.task-templates.v1";
 export const TASK_TEMPLATES_CHANGED_EVENT = "todo-agent-task-templates-changed";
@@ -44,6 +44,13 @@ export interface TaskTemplatePreview {
   steps: TaskTemplatePreviewStep[];
 }
 
+export interface BuildTaskTemplateOptions {
+  id: string;
+  name: string;
+  description?: string;
+  now?: Date;
+}
+
 export type TaskTemplateImportResult =
   | { ok: true; template: TaskTemplate }
   | { ok: false; message: string };
@@ -62,6 +69,55 @@ const VALID_PRIORITIES = new Set<TaskPriority>([
 ]);
 const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/gu;
 const ALLOWED_PLACEHOLDERS = new Set(["title", "date", "now"]);
+
+const validEstimatedMinutes = (value: unknown): value is number =>
+  typeof value === "number" &&
+  Number.isInteger(value) &&
+  value >= 5 &&
+  value <= 720;
+
+const uniqueTrimmed = (values: readonly string[] | undefined): string[] =>
+  [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].slice(
+    0,
+    12,
+  );
+
+/**
+ * Creates a safe, local-only workflow template from an existing task.
+ *
+ * Provider identity, completion state, dates and attachments are deliberately
+ * not copied. A Feishu task therefore becomes a reusable local recipe rather
+ * than another remote task or a hidden write-back operation.
+ */
+export const buildTaskTemplateFromTask = (
+  task: Pick<Task, "title" | "notes" | "tags" | "priority" | "estimatedMinutes">,
+  options: BuildTaskTemplateOptions,
+): TaskTemplate => {
+  const now = (options.now ?? new Date()).toISOString();
+  const notes = task.notes.trim();
+  const step: TaskTemplateStep = {
+    id: "task",
+    titleTemplate: "{{title}}",
+    ...(notes && validatePlaceholders(notes) ? { notesTemplate: notes } : {}),
+    tags: uniqueTrimmed(task.tags),
+    priority: task.priority,
+    ...(validEstimatedMinutes(task.estimatedMinutes)
+      ? { estimatedMinutes: task.estimatedMinutes }
+      : {}),
+    plannedDayOffset: 0,
+  };
+  return {
+    id: options.id.trim(),
+    name: options.name.trim(),
+    description:
+      options.description?.trim() ||
+      "从现有任务保存的本地模板，可在快速录入中继续复用。",
+    defaultSource: "local",
+    steps: [step],
+    createdAt: now,
+    updatedAt: now,
+  };
+};
 
 const builtInTemplate = (
   value: Omit<TaskTemplate, "createdAt" | "updatedAt">,
@@ -196,6 +252,9 @@ const validatePlaceholders = (value: string): boolean => {
   }
   return true;
 };
+
+export const taskTemplateTextSupportsVariables = (value: string): boolean =>
+  validatePlaceholders(value);
 
 export const validateTaskTemplate = (value: unknown): TaskTemplateImportResult => {
   if (!isRecord(value)) return { ok: false, message: "模板必须是一个 JSON 对象。" };
