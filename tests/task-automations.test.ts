@@ -62,12 +62,25 @@ describe("task automation rules", () => {
       tags: ["发布"],
       contexts: ["办公室"],
       projectId: "project-1",
+      listId: "list-1",
+      sectionId: "本周发布",
     });
     const matching = rule({
-      condition: { source: "feishu", projectId: "project-1", tag: "发布", context: "办公室" },
+      condition: {
+        source: "feishu",
+        projectId: "project-1",
+        listId: "list-1",
+        sectionId: "本周发布",
+        tag: "发布",
+        context: "办公室",
+      },
     });
     expect(matchesTaskAutomation(matching, target)).toBe(true);
     expect(matchesTaskAutomation(rule({ condition: { source: "local" } }), target)).toBe(false);
+    expect(matchesTaskAutomation(
+      rule({ condition: { listId: "list-2" } }),
+      target,
+    )).toBe(false);
   });
 
   it("detects only creation and open-to-completed edges", () => {

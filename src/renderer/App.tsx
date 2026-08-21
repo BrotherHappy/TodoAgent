@@ -9690,6 +9690,8 @@ function SettingsPage({
   const [section, setSection] = useState<SettingsSection>("general");
   const [appSettings, setAppSettings] = useState<AppSettings>(defaultSettings);
   const projectController = useTaskController("all", "");
+  const automationProjectState = useProjects();
+  const automationListState = useLists();
   const projectReminderOptions = useMemo(
     () => Array.from(new Set(
       projectController.tasks
@@ -9743,7 +9745,67 @@ function SettingsPage({
   const [automationActionValue, setAutomationActionValue] = useState("");
   const [automationConditionSource, setAutomationConditionSource] =
     useState<"all" | "local" | "feishu">("all");
+  const [automationConditionProject, setAutomationConditionProject] =
+    useState("");
+  const [automationConditionList, setAutomationConditionList] =
+    useState("");
+  const [automationConditionSection, setAutomationConditionSection] =
+    useState("");
   const [automationConditionTag, setAutomationConditionTag] = useState("");
+  const [automationConditionContext, setAutomationConditionContext] =
+    useState("");
+  const automationProjectOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const project of automationProjectState.projects) {
+      if (!project.archived) options.set(project.id, project.name);
+    }
+    for (const task of projectController.tasks) {
+      const projectId = task.projectId?.trim();
+      if (projectId && !options.has(projectId)) options.set(projectId, projectId);
+    }
+    return Array.from(options.entries())
+      .sort((left, right) => left[1].localeCompare(right[1], "zh-CN"))
+      .slice(0, 100);
+  }, [automationProjectState.projects, projectController.tasks]);
+  const automationListOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const list of automationListState.lists) {
+      if (!list.archived) options.set(list.id, list.name);
+    }
+    for (const task of projectController.tasks) {
+      const listId = task.listId?.trim();
+      if (listId && !options.has(listId)) options.set(listId, listId);
+    }
+    return Array.from(options.entries())
+      .sort((left, right) => left[1].localeCompare(right[1], "zh-CN"))
+      .slice(0, 100);
+  }, [automationListState.lists, projectController.tasks]);
+  const automationSectionOptions = useMemo(
+    () => Array.from(new Set(
+      projectController.tasks
+        .map((task) => task.sectionId?.trim())
+        .filter((sectionId): sectionId is string => Boolean(sectionId)),
+    )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
+    [projectController.tasks],
+  );
+  const automationTagOptions = useMemo(
+    () => Array.from(new Set(
+      projectController.tasks
+        .flatMap((task) => task.tags)
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
+    [projectController.tasks],
+  );
+  const automationContextOptions = useMemo(
+    () => Array.from(new Set(
+      projectController.tasks
+        .flatMap((task) => task.contexts ?? [])
+        .map((context) => context.trim())
+        .filter(Boolean),
+    )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
+    [projectController.tasks],
+  );
   const activeAiProvider =
     appSettings.ai.routing === "local-only"
       ? appSettings.ai.fallback
@@ -9827,6 +9889,30 @@ function SettingsPage({
         return { kind: automationActionKind, value: automationActionValue.trim() };
     }
   };
+  const automationProjectNames = useMemo(
+    () => new Map(automationProjectOptions),
+    [automationProjectOptions],
+  );
+  const automationListNames = useMemo(
+    () => new Map(automationListOptions),
+    [automationListOptions],
+  );
+  const describeAutomationCondition = (rule: TaskAutomationRule): string => {
+    const labels: string[] = [];
+    if (rule.condition.source) {
+      labels.push(rule.condition.source === "local" ? "仅本地" : "仅飞书");
+    }
+    if (rule.condition.projectId) {
+      labels.push(`项目：${automationProjectNames.get(rule.condition.projectId) ?? rule.condition.projectId}`);
+    }
+    if (rule.condition.listId) {
+      labels.push(`清单：${automationListNames.get(rule.condition.listId) ?? rule.condition.listId}`);
+    }
+    if (rule.condition.sectionId) labels.push(`分组：${rule.condition.sectionId}`);
+    if (rule.condition.tag) labels.push(`标签：${rule.condition.tag}`);
+    if (rule.condition.context) labels.push(`情境：${rule.condition.context}`);
+    return labels.length ? labels.join(" · ") : "所有任务";
+  };
   const addAutomation = async (): Promise<void> => {
     if (appSettings.automations.length >= 50) {
       notify("最多保存 50 条任务自动化规则", "error");
@@ -9840,8 +9926,20 @@ function SettingsPage({
           ...(automationConditionSource === "all"
             ? {}
             : { source: automationConditionSource }),
+          ...(automationConditionProject.trim()
+            ? { projectId: automationConditionProject.trim() }
+            : {}),
+          ...(automationConditionList.trim()
+            ? { listId: automationConditionList.trim() }
+            : {}),
+          ...(automationConditionSection.trim()
+            ? { sectionId: automationConditionSection.trim() }
+            : {}),
           ...(automationConditionTag.trim()
             ? { tag: automationConditionTag.trim() }
+            : {}),
+          ...(automationConditionContext.trim()
+            ? { context: automationConditionContext.trim() }
             : {}),
         },
         action: buildAutomationAction(),
@@ -9853,7 +9951,12 @@ function SettingsPage({
       if (!saved) return;
       setAutomationName("");
       setAutomationActionValue("");
+      setAutomationConditionSource("all");
+      setAutomationConditionProject("");
+      setAutomationConditionList("");
+      setAutomationConditionSection("");
       setAutomationConditionTag("");
+      setAutomationConditionContext("");
     } catch (reason) {
       notify(
         reason instanceof Error && reason.message === "INVALID_TASK_AUTOMATION_RULE"
@@ -11748,6 +11851,58 @@ function SettingsPage({
                   <option value="feishu">仅飞书</option>
                 </select>
               </div>
+              <div className="settings-note-quiet">
+                <Filter size={16} aria-hidden="true" />
+                <span>条件组合：下面填写的条件会同时生效；留空表示不限制。规则仍只读取任务的本地私有字段。</span>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>项目条件（可选）</strong>
+                  <p>只匹配属于这个本地项目的任务</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化项目条件"
+                  value={automationConditionProject}
+                  onChange={(event) => setAutomationConditionProject(event.target.value)}
+                >
+                  <option value="">所有项目</option>
+                  {automationProjectOptions.map(([id, name]) => (
+                    <option key={id} value={id}>{name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>清单条件（可选）</strong>
+                  <p>只匹配属于这个本地清单的任务</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化清单条件"
+                  value={automationConditionList}
+                  onChange={(event) => setAutomationConditionList(event.target.value)}
+                >
+                  <option value="">所有清单</option>
+                  {automationListOptions.map(([id, name]) => (
+                    <option key={id} value={id}>{name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>分组条件（可选）</strong>
+                  <p>匹配任务的本地分组标题</p>
+                </div>
+                <input
+                  className="settings-input"
+                  aria-label="自动化分组条件"
+                  list="automation-section-options"
+                  placeholder="例如：本周发布"
+                  value={automationConditionSection}
+                  onChange={(event) => setAutomationConditionSection(event.target.value)}
+                />
+              </div>
               <div className="settings-row">
                 <div>
                   <strong>标签条件（可选）</strong>
@@ -11756,11 +11911,35 @@ function SettingsPage({
                 <input
                   className="settings-input"
                   aria-label="自动化标签条件"
+                  list="automation-tag-options"
                   placeholder="例如：发布"
                   value={automationConditionTag}
                   onChange={(event) => setAutomationConditionTag(event.target.value)}
                 />
               </div>
+              <div className="settings-row">
+                <div>
+                  <strong>情境条件（可选）</strong>
+                  <p>匹配办公室、家、出门等本地情境</p>
+                </div>
+                <input
+                  className="settings-input"
+                  aria-label="自动化情境条件"
+                  list="automation-context-options"
+                  placeholder="例如：办公室"
+                  value={automationConditionContext}
+                  onChange={(event) => setAutomationConditionContext(event.target.value)}
+                />
+              </div>
+              <datalist id="automation-section-options">
+                {automationSectionOptions.map((value) => <option key={value} value={value} />)}
+              </datalist>
+              <datalist id="automation-tag-options">
+                {automationTagOptions.map((value) => <option key={value} value={value} />)}
+              </datalist>
+              <datalist id="automation-context-options">
+                {automationContextOptions.map((value) => <option key={value} value={value} />)}
+              </datalist>
               <div className="settings-row">
                 <div>
                   <strong>执行动作</strong>
@@ -11840,8 +12019,7 @@ function SettingsPage({
                     <strong>{rule.name}</strong>
                     <p>
                       {taskAutomationTriggerLabel(rule.trigger)} · {taskAutomationActionLabel(rule.action)}
-                      {rule.condition.source ? ` · ${rule.condition.source === "local" ? "仅本地" : "仅飞书"}` : ""}
-                      {rule.condition.tag ? ` · 标签：${rule.condition.tag}` : ""}
+                      · {describeAutomationCondition(rule)}
                     </p>
                   </div>
                   <div className="settings-row-actions">
