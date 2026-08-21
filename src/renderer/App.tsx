@@ -205,7 +205,13 @@ import {
 import {
   conversationTitle,
   filterStoredAgentConversations,
+  readStoredAgentConversationCollection,
 } from "./agent-conversation-store";
+import { GlobalSearchSheet } from "./GlobalSearchSheet";
+import type {
+  GlobalSearchConversation,
+  GlobalSearchResult,
+} from "../shared/global-search";
 import { buildAgentQuickSuggestions } from "./agent-quick-suggestions";
 import {
   buildBulkTaskAgentPrompt,
@@ -6499,11 +6505,15 @@ function AgentPage({
   notify,
   initialPrompt,
   onPromptConsumed,
+  initialConversationId,
+  onConversationConsumed,
 }: {
   controller: TaskController;
   notify: (message: string, kind?: ToastKind) => void;
   initialPrompt?: string;
   onPromptConsumed: () => void;
+  initialConversationId?: string;
+  onConversationConsumed: () => void;
 }) {
   const [proposal, setProposal] = useState(false);
   const [permission, setPermission] = useState(false);
@@ -6573,6 +6583,15 @@ function AgentPage({
     toggleConversationPinned,
     exportConversation,
   } = chat;
+  useEffect(() => {
+    if (!initialConversationId) return;
+    if (!conversationSessions.some((session) => session.conversationId === initialConversationId)) {
+      return;
+    }
+    if (switchConversation(initialConversationId)) {
+      onConversationConsumed();
+    }
+  }, [conversationSessions, initialConversationId, onConversationConsumed, switchConversation]);
   const agentThreadRef = useRef<HTMLElement>(null);
   const chatFollowsOutputRef = useRef(true);
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
@@ -14646,6 +14665,12 @@ function MainWindow() {
   const [newTask, setNewTask] = useState(false);
   const [newTaskPreset, setNewTaskPreset] = useState<CalendarFollowUpDraft>();
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchTasks, setGlobalSearchTasks] = useState<Task[]>([]);
+  const [globalSearchConversations, setGlobalSearchConversations] = useState<GlobalSearchConversation[]>([]);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  const [globalSearchError, setGlobalSearchError] = useState<string>();
+  const [pendingAgentConversationId, setPendingAgentConversationId] = useState<string>();
   const [dailyPlanOpen, setDailyPlanOpen] = useState(false);
   const [dailyPlanDate, setDailyPlanDate] = useState(() => dateKey());
   const [dailyPlanPreset, setDailyPlanPreset] = useState<MorningKickoffPreset>();
@@ -14697,6 +14722,69 @@ function MainWindow() {
   const openTodayPlan = useCallback(
     (preset?: MorningKickoffPreset) => openDailyPlan(dateKey(), preset),
     [openDailyPlan],
+  );
+  const loadGlobalSearch = useCallback(async () => {
+    setGlobalSearchLoading(true);
+    setGlobalSearchError(undefined);
+    try {
+      const tasks = window.desktopApi
+        ? await window.desktopApi.tasks.list({ includeDeleted: true })
+        : [...controller.tasks, ...timelineController.tasks, ...timelineCompletedController.tasks].filter(
+            (task, index, all) => all.findIndex((candidate) => candidate.id === task.id) === index,
+          );
+      const collection = readStoredAgentConversationCollection();
+      setGlobalSearchTasks(tasks);
+      setGlobalSearchConversations(
+        collection.conversations.map((conversation) => ({
+          id: conversation.conversationId,
+          title: conversationTitle(conversation),
+          updatedAt: conversation.updatedAt,
+          messages: conversation.messages.map((message) => message.text),
+        })),
+      );
+    } catch (reason) {
+      setGlobalSearchError(
+        reason instanceof Error ? reason.message : "暂时无法读取本地工作区",
+      );
+    } finally {
+      setGlobalSearchLoading(false);
+    }
+  }, [controller.tasks, timelineCompletedController.tasks, timelineController.tasks]);
+  const openGlobalSearch = useCallback(() => {
+    setGlobalSearchOpen(true);
+    void loadGlobalSearch();
+  }, [loadGlobalSearch]);
+  const closeGlobalSearch = useCallback(() => {
+    setGlobalSearchOpen(false);
+    setGlobalSearchError(undefined);
+  }, []);
+  const handleGlobalSearchSelect = useCallback(
+    (result: GlobalSearchResult) => {
+      closeGlobalSearch();
+      if (result.kind === "task" && result.task) {
+        setPendingTaskId(result.task.id);
+        const destination = result.task.deletedAt
+          ? "trash"
+          : result.task.status === "completed"
+            ? "completed"
+            : "all";
+        navigateTaskCollection(destination, result.task.source.type);
+        return;
+      }
+      if (result.kind === "conversation" && result.conversationId) {
+        setPendingAgentConversationId(result.conversationId);
+        navigate("agent");
+        return;
+      }
+      if (result.kind === "project") {
+        navigate("projects");
+        return;
+      }
+      if (result.kind === "list") {
+        navigate("lists");
+      }
+    },
+    [closeGlobalSearch, navigate, navigateTaskCollection],
   );
   const updateCalendarEvents = useCallback((events: CalendarEvent[]) => {
     setCalendarEvents(events);
@@ -14781,9 +14869,18 @@ function MainWindow() {
         run: () => void window.desktopApi?.shell.showQuickCapture(),
       },
       {
+        id: "global-search",
+        label: "全局查找",
+        description: "跨任务、项目、清单和本机会话搜索，不离开当前工作流",
+        keywords: ["global", "workspace", "search", "find", "全局", "查找", "会话"],
+        shortcut: "⌘ ⇧ F",
+        icon: <Search size={16} />,
+        run: openGlobalSearch,
+      },
+      {
         id: "search-tasks",
-        label: "搜索任务",
-        description: "进入全部任务并聚焦搜索框",
+        label: "搜索当前任务列表",
+        description: "进入全部任务并聚焦当前列表搜索框",
         keywords: ["search", "find", "搜索", "查找"],
         shortcut: "⌘ F",
         icon: <Search size={16} />,
@@ -14900,7 +14997,7 @@ function MainWindow() {
         run: () => navigate("settings"),
       },
     ],
-    [navigate, navigateTaskCollection, notify, openDailyPlan],
+    [navigate, navigateTaskCollection, notify, openDailyPlan, openGlobalSearch],
   );
   useEffect(
     () =>
@@ -14985,7 +15082,7 @@ function MainWindow() {
     "trash",
   ].includes(route);
   const modalOpen = Boolean(
-    newTask || commandPaletteOpen || dailyPlanOpen || activeReminder || onboarding || calendarActionItems,
+    newTask || commandPaletteOpen || globalSearchOpen || dailyPlanOpen || activeReminder || onboarding || calendarActionItems,
   );
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -14995,12 +15092,16 @@ function MainWindow() {
       const shortcutKey =
         (event.metaKey || event.ctrlKey) &&
         ["k", "n"].includes(event.key.toLocaleLowerCase());
+      const globalSearchShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLocaleLowerCase() === "f";
       if (modalOpen && !commandPaletteOpen) {
-        if (isBackShortcut || shortcutKey) event.preventDefault();
+        if (isBackShortcut || shortcutKey || globalSearchShortcut) event.preventDefault();
         return;
       }
       if (commandPaletteOpen) {
-        if (isBackShortcut || shortcutKey) event.preventDefault();
+        if (isBackShortcut || shortcutKey || globalSearchShortcut) event.preventDefault();
         return;
       }
       if (isBackShortcut) {
@@ -15022,10 +15123,14 @@ function MainWindow() {
         event.preventDefault();
         setNewTask(true);
       }
+      if (globalSearchShortcut) {
+        event.preventDefault();
+        openGlobalSearch();
+      }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [commandPaletteOpen, goBack, modalOpen]);
+  }, [commandPaletteOpen, goBack, modalOpen, openGlobalSearch]);
   const feishuState = feishuSyncVisualState(feishuStatus);
   const syncState: TaskSyncVisualState = controller.tasks.some(
     (task) => taskSyncVisualState(task.sync.status) === "error",
@@ -15134,6 +15239,8 @@ function MainWindow() {
               notify={notify}
               initialPrompt={agentDraft}
               onPromptConsumed={consumeAgentDraft}
+              initialConversationId={pendingAgentConversationId}
+              onConversationConsumed={() => setPendingAgentConversationId(undefined)}
             />
           </div>
           <div className="route-workspace" hidden={route !== "settings"}>
@@ -15346,6 +15453,19 @@ function MainWindow() {
           <CommandPalette
             actions={commandPaletteActions}
             onClose={closeCommandPalette}
+          />
+        )}
+        {globalSearchOpen && (
+          <GlobalSearchSheet
+            tasks={globalSearchTasks}
+            projects={projectState.projects}
+            lists={listState.lists}
+            conversations={globalSearchConversations}
+            loading={globalSearchLoading}
+            error={globalSearchError}
+            onRetry={() => void loadGlobalSearch()}
+            onClose={closeGlobalSearch}
+            onSelect={handleGlobalSearchSelect}
           />
         )}
         {dailyPlanOpen && (
