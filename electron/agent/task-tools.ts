@@ -20,6 +20,10 @@ import type {
   ModelDataScope,
 } from "../../src/shared/settings";
 import type { TaskService } from "../services/task-service";
+import {
+  getNextOccurrence,
+  getTaskRecurrenceAnchor,
+} from "../services/recurrence";
 import type {
   ToolExecutionContext,
   TrustedToolDefinition,
@@ -109,6 +113,7 @@ const listArgumentsSchema = z.strictObject({
 });
 
 const getArgumentsSchema = z.strictObject({ id: idSchema });
+const skipRecurringArgumentsSchema = z.strictObject({ id: idSchema });
 
 const createArgumentsSchema = z.strictObject({
   title: z.string().trim().min(1).max(2_000),
@@ -1095,6 +1100,76 @@ export const createTaskTools = (
           task: compactTask(updated.task, options.getModelDataScope()),
           researchCardId: card.id,
           undoOperationId: updated.operationId,
+        });
+      },
+    }),
+    taskTool({
+      name: "task_skip_recurring",
+      description:
+        "Skip only the current occurrence of one local recurring task. Keep the same task and move its private schedule to the next occurrence; never use this for Feishu-owned recurring tasks.",
+      schema: skipRecurringArgumentsSchema,
+      analyze: async (args) => {
+        const task = await requireActiveTask(args.id);
+        if (task.source.type === "feishu") {
+          throw new Error(
+            "TASK_RECURRING_SKIP_LOCAL_ONLY:飞书循环由飞书负责生成，请在飞书中操作。",
+          );
+        }
+        if (task.recurrence === undefined) {
+          throw new Error("TASK_NOT_RECURRING:这项任务没有循环规则。");
+        }
+        if (task.status !== "open") {
+          throw new Error("TASK_RECURRING_SKIP_NOT_OPEN:只有未完成任务可以跳过本次。");
+        }
+        if (task.focusStartedAt !== undefined) {
+          throw new Error("TASK_RECURRING_SKIP_FOCUS_ACTIVE:请先暂停专注。");
+        }
+        const anchor = getTaskRecurrenceAnchor(task);
+        if (anchor === undefined) {
+          throw new Error("TASK_RECURRING_SKIP_NO_ANCHOR:任务没有可用日期。");
+        }
+        const nextAnchor = getNextOccurrence(
+          anchor,
+          task.recurrence,
+          task.recurrenceIndex ?? 0,
+        );
+        if (nextAnchor === undefined) {
+          throw new Error("TASK_RECURRING_SKIP_LAST:这已经是循环的最后一次。");
+        }
+        return {
+          risk: "R1" as const,
+          targets: [{ kind: "task" as const, value: task.id }],
+          reads: ["current local recurring task and recurrence rule"],
+          writes: ["move this occurrence's private schedule to the next one"],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: {
+            action: "skip-recurring-task",
+            taskId: task.id,
+            title: task.title,
+            from: anchor,
+            to: nextAnchor,
+            keepTaskId: true,
+            remoteWrite: false,
+          },
+          baseVersions: { [task.id]: task.updatedAt },
+        };
+      },
+      execute: async (args, context) => {
+        const current = await requireActiveTask(args.id);
+        if (current.source.type === "feishu") {
+          throw new Error(
+            "TASK_RECURRING_SKIP_LOCAL_ONLY:飞书循环由飞书负责生成，请在飞书中操作。",
+          );
+        }
+        const mutation = await options.tasks.skipRecurringTask(args.id);
+        notifyChanged();
+        return result(context, {
+          changed: true,
+          task: compactTask(mutation.task, options.getModelDataScope()),
+          syncReceipts: [],
+          undoOperationId: mutation.operationId,
         });
       },
     }),

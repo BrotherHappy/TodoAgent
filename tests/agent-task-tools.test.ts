@@ -1632,4 +1632,74 @@ describe("task Agent tools", () => {
     expect((await tasks.getTask(local.id))?.status).toBe("completed");
     expect((await tasks.getTask(allAssignees.id))?.status).toBe("open");
   });
+
+  it("previews and executes local recurring skip without creating a second task", async () => {
+    const recurring = (
+      await tasks.createTask({
+        title: "Agent 跳过本次",
+        source: { type: "local" },
+        plannedDate: "2026-08-10",
+        recurrence: { frequency: "daily", interval: 1 },
+      })
+    ).task;
+    const tools = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    });
+    const skip = tools.find((tool) => tool.name === "task_skip_recurring")!;
+    const effects = await skip.analyze(
+      { id: recurring.id },
+      { runId: "run", signal: new AbortController().signal },
+    );
+    expect(effects).toMatchObject({
+      risk: "R1",
+      network: [],
+      externalEffects: [],
+      preview: {
+        action: "skip-recurring-task",
+        from: "2026-08-10",
+        to: "2026-08-11",
+        keepTaskId: true,
+        remoteWrite: false,
+      },
+    });
+    const output = await skip.execute(
+      { id: recurring.id },
+      executionContext("task_skip_recurring"),
+    );
+    expect(output.status).toBe("ok");
+    expect(output.data).toMatchObject({
+      changed: true,
+      undoOperationId: expect.any(String),
+      task: {
+        id: recurring.id,
+        plannedDate: "2026-08-11",
+      },
+      syncReceipts: [],
+    });
+    expect((await tasks.getTask(recurring.id))?.recurrenceIndex).toBe(1);
+    expect((await tasks.listTasks({ includeDeleted: true })).map((task) => task.id)).toEqual([
+      recurring.id,
+    ]);
+
+    const remote = (
+      await tasks.createTask({
+        title: "飞书循环不可跳过",
+        source: {
+          type: "feishu",
+          accountId: "primary",
+          externalId: "remote-skip",
+        },
+        dueAt: "2026-08-10T09:00:00.000Z",
+        recurrence: { frequency: "daily", interval: 1 },
+        sync: { status: "synced" },
+      })
+    ).task;
+    await expect(
+      skip.analyze(
+        { id: remote.id },
+        { runId: "run", signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("TASK_RECURRING_SKIP_LOCAL_ONLY");
+  });
 });
