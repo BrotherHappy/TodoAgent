@@ -1583,6 +1583,37 @@ select {
   color: var(--app-text);
   font-size: 13px;
 }
+.bulk-preview-summary {
+  display: grid;
+  gap: 3px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.bulk-task-edit-sheet {
+  width: min(520px, calc(100vw - 32px));
+}
+.bulk-task-edit-form {
+  display: grid;
+  gap: 12px;
+}
+.bulk-task-edit-form > label {
+  display: grid;
+  gap: 6px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+.bulk-task-edit-form > label .field-input {
+  width: 100%;
+}
+.bulk-task-edit-note {
+  margin: 0;
+  color: var(--app-text-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
 .bulk-toolbar-hint {
   margin: 0;
 }

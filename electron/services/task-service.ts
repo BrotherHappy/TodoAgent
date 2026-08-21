@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   ApplyTodayPlanRequest,
+  BulkTaskEditPatch,
   BulkTaskRequest,
   CreateListInput,
   CreateProjectInput,
@@ -265,6 +266,54 @@ const normalizeListName = (value: unknown): string => {
 const uniqueStrings = (values: string[]): string[] => [
   ...new Set(values.map((value) => value.trim()).filter(Boolean)),
 ];
+
+const validateBulkTaskEditPatch = (patch: BulkTaskEditPatch): BulkTaskEditPatch => {
+  if (patch === null || typeof patch !== "object") {
+    throw new TaskValidationError("批量编辑内容不正确。");
+  }
+  const keys = Object.keys(patch);
+  if (keys.length === 0 || keys.some((key) => !["priority", "projectId", "listId", "tags"].includes(key))) {
+    throw new TaskValidationError("批量编辑只支持优先级、项目、清单和标签。");
+  }
+  if (patch.priority !== undefined && !Object.prototype.hasOwnProperty.call(PRIORITY_RANK, patch.priority)) {
+    throw new TaskValidationError("批量编辑优先级不正确。");
+  }
+  for (const [field, value] of [["projectId", patch.projectId], ["listId", patch.listId]] as const) {
+    if (value !== undefined && value !== null && (typeof value !== "string" || value.trim().length === 0 || value.trim().length > 200)) {
+      throw new TaskValidationError(`批量编辑 ${field} 不正确。`);
+    }
+  }
+  if (patch.tags !== undefined) {
+    if (patch.tags === null || typeof patch.tags !== "object" || !["replace", "add", "remove"].includes(patch.tags.mode) || !Array.isArray(patch.tags.values)) {
+      throw new TaskValidationError("批量编辑标签操作不正确。");
+    }
+    if (patch.tags.values.length > 20) {
+      throw new TaskValidationError("一次最多处理 20 个标签。");
+    }
+    const values = patch.tags.values.map((value) => {
+      if (typeof value !== "string") throw new TaskValidationError("批量编辑标签必须是文字。");
+      const normalized = value.trim();
+      if (normalized.length === 0 || normalized.length > 40) {
+        throw new TaskValidationError("标签必须是 1–40 个字符。");
+      }
+      return normalized;
+    });
+    if (new Set(values).size !== values.length) {
+      throw new TaskValidationError("批量编辑标签不能重复。");
+    }
+    return {
+      ...patch,
+      projectId: typeof patch.projectId === "string" ? patch.projectId.trim() : patch.projectId,
+      listId: typeof patch.listId === "string" ? patch.listId.trim() : patch.listId,
+      tags: { mode: patch.tags.mode, values },
+    };
+  }
+  return {
+    ...patch,
+    projectId: typeof patch.projectId === "string" ? patch.projectId.trim() : patch.projectId,
+    listId: typeof patch.listId === "string" ? patch.listId.trim() : patch.listId,
+  };
+};
 
 const validateContexts = (value: unknown, field: string): string[] => {
   if (!Array.isArray(value)) {
@@ -1246,6 +1295,9 @@ export class TaskService {
     if (request.action.kind === "complete" && request.action.completedAt !== undefined) {
       assertDateTime(request.action.completedAt, "completedAt");
     }
+    const editPatch = request.action.kind === "edit"
+      ? validateBulkTaskEditPatch(request.action.patch)
+      : undefined;
 
     return this.store.transact((state) => {
       const now = this.now();
@@ -1300,6 +1352,8 @@ export class TaskService {
           if (task.deletedAt === undefined) {
             throw new TaskStateError(`Task is not in trash: ${task.id}`);
           }
+        } else if (request.action.kind === "edit") {
+          this.requireNotDeleted(task);
         }
       });
 
@@ -1343,11 +1397,26 @@ export class TaskService {
           updated.deletedAt = now;
           updated.updatedAt = now;
           this.markSync(updated, true);
-        } else {
+        } else if (request.action.kind === "restore") {
           updated = deepClone(task);
           delete updated.deletedAt;
           updated.updatedAt = now;
           this.markSync(updated, true);
+        } else {
+          const patch: UpdateTaskInput = {};
+          if (editPatch?.priority !== undefined) patch.priority = editPatch.priority;
+          if (editPatch?.projectId !== undefined) patch.projectId = editPatch.projectId;
+          if (editPatch?.listId !== undefined) patch.listId = editPatch.listId;
+          if (editPatch?.tags !== undefined) {
+            const current = task.tags;
+            const values = editPatch.tags.values;
+            patch.tags = editPatch.tags.mode === "replace"
+              ? values
+              : editPatch.tags.mode === "add"
+                ? uniqueStrings([...current, ...values])
+                : current.filter((tag) => !values.includes(tag));
+          }
+          updated = this.applyPatch(task, patch, now, false);
         }
         state.tasks[task.id] = updated;
         if (!deepEqual(before, updated)) changes.push(this.change(before, updated));

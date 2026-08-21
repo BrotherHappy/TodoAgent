@@ -478,6 +478,25 @@ export function useTaskController(
               updatedAt: now,
             };
           }
+          if (request.action.kind === "edit") {
+            const { patch } = request.action;
+            let tags = task.tags;
+            if (patch.tags !== undefined) {
+              tags = patch.tags.mode === "replace"
+                ? [...patch.tags.values]
+                : patch.tags.mode === "add"
+                  ? [...new Set([...tags, ...patch.tags.values])]
+                  : tags.filter((tag) => !patch.tags?.values.includes(tag));
+            }
+            return {
+              ...task,
+              ...(patch.priority === undefined ? {} : { priority: patch.priority }),
+              ...(patch.projectId === undefined ? {} : { projectId: patch.projectId ?? undefined }),
+              ...(patch.listId === undefined ? {} : { listId: patch.listId ?? undefined }),
+              tags,
+              updatedAt: now,
+            };
+          }
           if (request.action.kind === "trash") {
             return { ...task, deletedAt: now, updatedAt: now };
           }

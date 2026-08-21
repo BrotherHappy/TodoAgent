@@ -571,6 +571,86 @@ describe("TaskService mutations, recovery, and recurrence", () => {
     expect((await service.getTask(second.task.id))?.plannedDate).toBe("2026-08-08");
   });
 
+  it("batch-edits private attributes, preserves Feishu sync state, and undoes once", async () => {
+    const { service } = await createFixture();
+    const project = await service.createProject({ name: "发布" });
+    const list = await service.createList({ name: "本周" });
+    const local = await service.createTask({
+      title: "本地批量编辑",
+      priority: "low",
+      tags: ["旧", "保留"],
+    });
+    const remote = await service.createTask({
+      title: "飞书批量编辑",
+      priority: "low",
+      tags: ["旧"],
+      source: { type: "feishu", accountId: "primary", externalId: "remote-edit" },
+      sync: { status: "synced" },
+    });
+    const operation = await service.applyBulkTaskAction({
+      ids: [local.task.id, remote.task.id],
+      action: {
+        kind: "edit",
+        patch: {
+          priority: "high",
+          projectId: project.id,
+          listId: list.id,
+          tags: { mode: "add", values: ["新" ] },
+        },
+      },
+      baselines: [
+        { id: local.task.id, updatedAt: local.task.updatedAt },
+        { id: remote.task.id, updatedAt: remote.task.updatedAt },
+      ],
+    });
+    expect(operation.kind).toBe("bulk");
+    expect(operation.changes).toHaveLength(2);
+    expect(await service.getTask(local.task.id)).toMatchObject({
+      priority: "high",
+      projectId: project.id,
+      listId: list.id,
+      tags: ["旧", "保留", "新"],
+    });
+    expect(await service.getTask(remote.task.id)).toMatchObject({
+      priority: "high",
+      projectId: project.id,
+      listId: list.id,
+      tags: ["旧", "新"],
+      sync: { status: "synced" },
+    });
+    await service.undo(operation.id);
+    const restoredLocal = await service.getTask(local.task.id);
+    expect(restoredLocal).toMatchObject({
+      priority: "low",
+      tags: ["旧", "保留"],
+    });
+    expect(restoredLocal?.projectId).toBeUndefined();
+    expect(restoredLocal?.listId).toBeUndefined();
+    expect(await service.getTask(remote.task.id)).toMatchObject({
+      priority: "low",
+      tags: ["旧"],
+      sync: { status: "synced" },
+    });
+  });
+
+  it("rejects malformed batch edit patches before touching tasks", async () => {
+    const { service } = await createFixture();
+    const task = await service.createTask({ title: "批量编辑校验" });
+    const operationsBefore = await service.getOperations();
+    await expect(
+      service.applyBulkTaskAction({
+        ids: [task.task.id],
+        action: {
+          kind: "edit",
+          patch: { tags: { mode: "add", values: ["重复", "重复"] } },
+        },
+        baselines: [{ id: task.task.id, updatedAt: task.task.updatedAt }],
+      }),
+    ).rejects.toBeInstanceOf(TaskValidationError);
+    expect(await service.getTask(task.task.id)).toMatchObject({ tags: [] });
+    expect((await service.getOperations()).length).toBe(operationsBefore.length);
+  });
+
   it("rejects a stale batch before changing any selected task", async () => {
     const { service, setNow } = await createFixture();
     const first = await service.createTask({ title: "仍应保持打开" });

@@ -498,6 +498,19 @@ export interface TaskMutationResult {
   generatedTask?: Task;
 }
 
+export type BulkTaskTagEditMode = "replace" | "add" | "remove";
+
+/** Private task attributes that can be edited in one reviewed batch. */
+export interface BulkTaskEditPatch {
+  priority?: TaskPriority;
+  projectId?: string | null;
+  listId?: string | null;
+  tags?: {
+    mode: BulkTaskTagEditMode;
+    values: string[];
+  };
+}
+
 /** A reviewed, atomic action over a set of already identified tasks.  The
  * renderer must show the target list before sending this request; the main
  * process re-checks every target in one transaction so a half-applied batch
@@ -507,7 +520,8 @@ export type BulkTaskAction =
   | { kind: "reopen" }
   | { kind: "move-to-today"; date?: LocalDate }
   | { kind: "trash" }
-  | { kind: "restore" };
+  | { kind: "restore" }
+  | { kind: "edit"; patch: BulkTaskEditPatch };
 
 export interface BulkTaskBaseline {
   id: TaskId;

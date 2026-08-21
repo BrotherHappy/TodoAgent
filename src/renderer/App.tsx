@@ -82,6 +82,7 @@ import {
 import type {
   JsonValue,
   BulkTaskAction,
+  BulkTaskEditPatch,
   RecurrenceEditScope,
   Task,
   TaskAttachment,
@@ -210,6 +211,7 @@ import { buildDependencyChain } from "./dependency-chain";
 import { TimelinePage } from "./TimelinePage";
 import { CalendarActionItemsSheet } from "./CalendarActionItemsSheet";
 import { AgentActionItemsSheet } from "./AgentActionItemsSheet";
+import { BulkTaskEditSheet } from "./BulkTaskEditSheet";
 import {
   AgentResearchCardSheet,
   buildAgentResearchCardDraft,
@@ -1907,6 +1909,8 @@ function TaskListPage({
   onAskAgent,
   onPlanToday,
   onSourceChange,
+  projects = [],
+  lists = [],
   calendarEvents = [],
   onOpenTimeline,
   onOpenAll,
@@ -1927,6 +1931,8 @@ function TaskListPage({
   onAskAgent: (prompt: string) => void;
   onPlanToday: (preset?: MorningKickoffPreset) => void;
   onSourceChange: (source?: TaskSourceType) => void;
+  projects?: readonly TaskProject[];
+  lists?: readonly TaskList[];
   calendarEvents?: readonly CalendarEvent[];
   onOpenTimeline?: () => void;
   onOpenAll?: () => void;
@@ -1938,6 +1944,7 @@ function TaskListPage({
     () => new Set(),
   );
   const [bulkPreview, setBulkPreview] = useState<BulkTaskAction>();
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">(
     "all",
@@ -1972,6 +1979,7 @@ function TaskListPage({
     setBulkMode(false);
     setBulkSelection(new Set());
     setBulkPreview(undefined);
+    setBulkEditOpen(false);
     setInboxTriageOpen(false);
     setSmartViewQuery("");
     setSmartViewQueryResult(undefined);
@@ -2135,12 +2143,40 @@ function TaskListPage({
   const allSelectedCanRestore =
     selectedBulkTasks.length > 0 &&
     selectedBulkTasks.every((task) => task.deletedAt !== undefined);
+  const allSelectedCanEdit =
+    selectedBulkTasks.length > 0 &&
+    selectedBulkTasks.every((task) => task.deletedAt === undefined);
   const bulkActionLabel = (action: BulkTaskAction): string => {
     if (action.kind === "complete") return "完成任务";
     if (action.kind === "reopen") return "恢复任务";
     if (action.kind === "move-to-today") return "安排到今天";
     if (action.kind === "trash") return "移入回收站";
-    return "恢复出回收站";
+    if (action.kind === "restore") return "恢复出回收站";
+    return "编辑任务属性";
+  };
+  const bulkEditSummary = (action: BulkTaskAction): string[] => {
+    if (action.kind !== "edit") return [];
+    const summary: string[] = [];
+    if (action.patch.priority !== undefined) {
+      summary.push(`优先级 → ${{ none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" }[action.patch.priority]}`);
+    }
+    if (action.patch.projectId !== undefined) {
+      const label = action.patch.projectId === null
+        ? "无项目"
+        : projects.find((project) => project.id === action.patch.projectId)?.name ?? action.patch.projectId;
+      summary.push(`项目 → ${label}`);
+    }
+    if (action.patch.listId !== undefined) {
+      const label = action.patch.listId === null
+        ? "无清单"
+        : lists.find((list) => list.id === action.patch.listId)?.name ?? action.patch.listId;
+      summary.push(`清单 → ${label}`);
+    }
+    if (action.patch.tags !== undefined) {
+      const values = action.patch.tags.values.length > 0 ? action.patch.tags.values.join("、") : "无标签";
+      summary.push(`标签${action.patch.tags.mode === "replace" ? "替换" : action.patch.tags.mode === "add" ? "追加" : "移除"} → ${values}`);
+    }
+    return summary;
   };
   const requestBulkPreview = (action: BulkTaskAction) => {
     if (selectedBulkTasks.length === 0) return;
@@ -2183,6 +2219,7 @@ function TaskListPage({
       if (current) {
         setBulkSelection(new Set());
         setBulkPreview(undefined);
+        setBulkEditOpen(false);
       }
       return !current;
     });
@@ -2192,6 +2229,7 @@ function TaskListPage({
   };
   const toggleBulkSelection = (taskId: string) => {
     setBulkPreview(undefined);
+    setBulkEditOpen(false);
     setBulkSelection((current) => {
       const next = new Set(current);
       if (next.has(taskId)) next.delete(taskId);
@@ -2615,6 +2653,19 @@ function TaskListPage({
             </div>
           </div>
           <div className="bulk-action-buttons">
+            {allSelectedCanEdit && (
+              <button
+                type="button"
+                className="soft-button"
+                disabled={bulkBusy}
+                onClick={() => {
+                  setBulkPreview(undefined);
+                  setBulkEditOpen(true);
+                }}
+              >
+                <Pencil size={15} /> 编辑属性
+              </button>
+            )}
             {allSelectedCanComplete && (
               <button
                 type="button"
@@ -2684,6 +2735,13 @@ function TaskListPage({
                     ? ` 等 ${selectedBulkTasks.length} 项`
                     : ""}
                 </p>
+                {bulkPreview.kind === "edit" && (
+                  <ul className="bulk-preview-summary">
+                    {bulkEditSummary(bulkPreview).map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
                 {bulkPreview.kind === "trash" && (
                   <small>飞书任务会进入本地同步队列，远端删除仍以同步结果为准。</small>
                 )}
@@ -2719,6 +2777,18 @@ function TaskListPage({
               </p>
             )}
         </section>
+      )}
+      {bulkEditOpen && selectedBulkTasks.length > 0 && (
+        <BulkTaskEditSheet
+          count={selectedBulkTasks.length}
+          projects={projects}
+          lists={lists}
+          onClose={() => setBulkEditOpen(false)}
+          onConfirm={(patch: BulkTaskEditPatch) => {
+            setBulkEditOpen(false);
+            setBulkPreview({ kind: "edit", patch });
+          }}
+        />
       )}
       {controller.loading ? (
         <div className="empty-state">
@@ -13495,6 +13565,8 @@ function MainWindow() {
                 onAskAgent={askAgent}
                 onPlanToday={openTodayPlan}
                 onSourceChange={(source) => navigate(taskView, source, { replace: true })}
+                projects={projectState.projects}
+                lists={listState.lists}
                 calendarEvents={calendarEvents}
                 onOpenTimeline={() => navigate("timeline")}
                 onOpenAll={() => navigateTaskCollection("all")}
