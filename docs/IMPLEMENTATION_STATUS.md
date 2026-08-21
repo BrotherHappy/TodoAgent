@@ -278,10 +278,11 @@ npm test
 npm run test:e2e
 ```
 
-v2.58 当前构建已安装到 `/Users/hx/Applications/Todo Agent.app`，并完成主进程与两个渲染窗口启动冒烟；上一安装版本保留在 `/Users/hx/Applications/Todo Agent.before-v2.58-20260821.app`。本机没有 Developer ID 证书，因此 electron-builder 跳过正式 macOS 签名；发布前仍需完成签名与公证。发布产物与 SHA-256：
+v2.59 当前构建已安装到 `/Users/hx/Applications/Todo Agent.app`，并完成主进程与两个渲染窗口启动冒烟；上一安装版本保留在 `/Users/hx/Applications/Todo Agent.before-v2.59-20260821.app`。本机没有 Developer ID 证书，因此 electron-builder 跳过正式 macOS 签名；发布前仍需完成签名与公证。发布产物与 SHA-256：
 
-- `Todo Agent-0.0.1-arm64.dmg`：`870cf9860dde6e16f0bf04fe5bd7b748e7d62773b79c52e60669ab854b7f4ad0`
-- `Todo Agent-0.0.1-arm64-mac.zip`：`a50590dc32b46b30834e0bd696a4ba8188bbd8b5749cdb8f52df22733fdb9f5b`
+- `app.asar`：`31b35f27b6f784e07479a5dc48e49c042eb43ebc0792dd49dc287e3a1798af6e1`
+- `Todo Agent-0.0.1-arm64.dmg`：`4825a9599615bca9cd5c43c35ea762b71b97019b863d36cd02509f6c176a4ce2`
+- `Todo Agent-0.0.1-arm64-mac.zip`：`22382839e411c0b0e3d7597127bc6ca81e3236bcc4497c1aa023ad049dc98d79`
 
 上述 macOS 产物已包含本轮 Todo Pet 动作与互动改造。已安装应用沿用原有用户数据目录，因此不会清除任务、设置、飞书凭据引用或宠物成长记录。尚未在 Windows 实机运行；所有自动化证据都不能替代完整的人工发布矩阵或真实飞书授权。
 
