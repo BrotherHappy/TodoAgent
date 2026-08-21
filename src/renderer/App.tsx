@@ -14886,6 +14886,7 @@ function FloatingWindow() {
     useState<PetTaskDropTargetId>();
   const [petDropActive, setPetDropActive] = useState(false);
   const [petDropPreview, setPetDropPreview] = useState<DropContextPreview>();
+  const [petContextSavedNotice, setPetContextSavedNotice] = useState("");
   const [selectedTextPreview, setSelectedTextPreview] = useState<{
     status: "captured" | "unavailable";
     text?: string;
@@ -15042,6 +15043,23 @@ function FloatingWindow() {
     } finally {
       setSelectedTextLoading(false);
     }
+  };
+  const rememberFloatingContext = (
+    kind: ContextCaptureHistoryKind,
+    label: string,
+    value: string,
+  ) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    rememberContextCapture({
+      id: `context-${crypto.randomUUID()}`,
+      kind,
+      label: label.trim() || "最近上下文",
+      text: normalized,
+      createdAt: new Date().toISOString(),
+    });
+    setPetContextSavedNotice("已保存到最近上下文（仅本机）");
+    window.setTimeout(() => setPetContextSavedNotice(""), 1_800);
   };
   const openTodayTaskCount = todayController.tasks.filter(
     (task) => task.status === "open" && !task.deletedAt,
@@ -16631,6 +16649,12 @@ function FloatingWindow() {
             />
           )}
           <div className="pet-bubble-stack no-drag">
+            {petContextSavedNotice && (
+              <div className="success-note context-capture-saved pet-context-saved-note" role="status">
+                <CheckCircle2 size={14} />
+                {petContextSavedNotice}
+              </div>
+            )}
             {petDropPreview && (
               <section className="pet-speech-bubble pet-drop-preview-bubble" aria-label="宠物收到的拖入内容">
                 <div className="pet-drop-preview-header">
@@ -16646,14 +16670,21 @@ function FloatingWindow() {
                 )}
                 <small>只做预览，不会自动上传或创建任务。</small>
                 {(petDropPreview.kind === "text" || petDropPreview.kind === "url") && (
-                  <button type="button" className="soft-button" onClick={() => {
-                    const value = petDropPreview.kind === "url" ? petDropPreview.url : petDropPreview.text;
-                    if (value) {
-                      setInput((current) => current.trim() ? `${current}\n${value}` : value);
-                      setTab("chat");
-                    }
-                    setPetDropPreview(undefined);
-                  }}>带入聊聊</button>
+                  <div className="context-capture-actions pet-context-actions">
+                    <button type="button" className="soft-button" onClick={() => {
+                      const value = petDropPreview.kind === "url" ? petDropPreview.url : petDropPreview.text;
+                      if (value) {
+                        setInput((current) => current.trim() ? `${current}\n${value}` : value);
+                        setTab("chat");
+                      }
+                      setPetDropPreview(undefined);
+                    }}>带入聊聊</button>
+                    <button type="button" className="soft-button" onClick={() => rememberFloatingContext(
+                      petDropPreview.kind === "url" ? "url" : "drop-text",
+                      petDropPreview.label,
+                      petDropPreview.kind === "url" ? petDropPreview.url ?? "" : petDropPreview.text ?? "",
+                    )}>保存到最近上下文</button>
+                  </div>
                 )}
               </section>
             )}
@@ -16667,15 +16698,18 @@ function FloatingWindow() {
                   <>
                     <p>{selectedTextPreview.text}</p>
                     <small>仅预览 · {selectedTextPreview.characters?.toLocaleString() ?? selectedTextPreview.text.length.toLocaleString()} 个字符{selectedTextPreview.truncated ? " · 已截取" : ""}</small>
-                    <button type="button" className="soft-button" onClick={() => {
-                      const value = selectedTextPreview.text ?? "";
-                      if (value) {
-                        if (tab === "chat") floatingChat.setInput((current) => current.trim() ? `${current}\n${value}` : value);
-                        else setInput((current) => current.trim() ? `${current}\n${value}` : value);
-                        setTab("chat");
-                      }
-                      setSelectedTextPreview(undefined);
-                    }}>带入聊聊</button>
+                    <div className="context-capture-actions pet-context-actions">
+                      <button type="button" className="soft-button" onClick={() => {
+                        const value = selectedTextPreview.text ?? "";
+                        if (value) {
+                          if (tab === "chat") floatingChat.setInput((current) => current.trim() ? `${current}\n${value}` : value);
+                          else setInput((current) => current.trim() ? `${current}\n${value}` : value);
+                          setTab("chat");
+                        }
+                        setSelectedTextPreview(undefined);
+                      }}>带入聊聊</button>
+                      <button type="button" className="soft-button" onClick={() => rememberFloatingContext("selected-text", "选中文本", selectedTextPreview.text ?? "")}>保存到最近上下文</button>
+                    </div>
                   </>
                 ) : (
                   <small>暂时没有读到选中文本；请在其他应用选中文本后使用全局快捷键打开小窗。</small>

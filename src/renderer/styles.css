@@ -4009,6 +4009,14 @@ select {
   font-size: 11px;
   margin: 0 0 10px;
 }
+.pet-context-saved-note {
+  max-width: 260px;
+  margin: 0;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--app-success) 10%, transparent);
+}
+.pet-context-actions {
+  margin-top: 7px;
+}
 .quick-history-list {
   display: grid;
   gap: 6px;

@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   CONTEXT_CAPTURE_HISTORY_LIMIT,
   CONTEXT_CAPTURE_HISTORY_TEXT_LIMIT,
+  clearContextCaptureHistory,
   parseContextCaptureHistory,
+  rememberContextCapture,
   serializeContextCaptureHistory,
 } from "../src/renderer/context-capture-history";
 
@@ -41,5 +43,26 @@ describe("context capture history", () => {
     expect(parsed).toHaveLength(CONTEXT_CAPTURE_HISTORY_LIMIT);
     expect(parsed[0].text).toHaveLength(CONTEXT_CAPTURE_HISTORY_TEXT_LIMIT);
     expect(parsed[0]).toMatchObject({ text: expect.stringMatching(/^x+$/) });
+  });
+
+  it("persists explicit pet-window captures and clears them without affecting other keys", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
+    const item = {
+      id: "pet-context-1",
+      kind: "drop-text" as const,
+      label: "拖入文本",
+      text: "来自宠物小窗的内容",
+      createdAt: new Date().toISOString(),
+    };
+    expect(rememberContextCapture(item, storage)).toEqual([item]);
+    values.set("unrelated", "keep");
+    clearContextCaptureHistory(storage);
+    expect(values.get("unrelated")).toBe("keep");
+    expect(values.size).toBe(1);
   });
 });
