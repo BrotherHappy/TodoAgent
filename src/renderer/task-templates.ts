@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CreateTaskInput, Task, TaskPriority } from "../shared/models";
+import type {
+  CreateTaskInput,
+  Task,
+  TaskId,
+  TaskPriority,
+} from "../shared/models";
 
 export const TASK_TEMPLATES_STORAGE_KEY = "todo-agent.task-templates.v1";
 export const TASK_TEMPLATES_CHANGED_EVENT = "todo-agent-task-templates-changed";
@@ -9,6 +14,8 @@ export type TaskTemplateSource = "local" | "feishu";
 export interface TaskTemplateStep {
   id: string;
   titleTemplate: string;
+  /** When present, this step is created as a local child of the referenced step. */
+  parentStepId?: string;
   notesTemplate?: string;
   tags?: string[];
   priority?: TaskPriority;
@@ -30,6 +37,7 @@ export interface TaskTemplate {
 export interface TaskTemplatePreviewStep {
   id: string;
   title: string;
+  parentStepId?: string;
   notes: string;
   tags: string[];
   priority?: TaskPriority;
@@ -49,6 +57,11 @@ export interface BuildTaskTemplateOptions {
   name: string;
   description?: string;
   now?: Date;
+  subtasks?: readonly Pick<
+    Task,
+    "title" | "notes" | "tags" | "priority" | "estimatedMinutes"
+  >[];
+  includeSubtasks?: boolean;
 }
 
 export type TaskTemplateImportResult =
@@ -94,18 +107,39 @@ export const buildTaskTemplateFromTask = (
   options: BuildTaskTemplateOptions,
 ): TaskTemplate => {
   const now = (options.now ?? new Date()).toISOString();
-  const notes = task.notes.trim();
-  const step: TaskTemplateStep = {
-    id: "task",
-    titleTemplate: "{{title}}",
-    ...(notes && validatePlaceholders(notes) ? { notesTemplate: notes } : {}),
-    tags: uniqueTrimmed(task.tags),
-    priority: task.priority,
-    ...(validEstimatedMinutes(task.estimatedMinutes)
-      ? { estimatedMinutes: task.estimatedMinutes }
-      : {}),
-    plannedDayOffset: 0,
+  const buildStep = (
+    source: Pick<
+      Task,
+      "title" | "notes" | "tags" | "priority" | "estimatedMinutes"
+    >,
+    id: string,
+    titleTemplate: string,
+    parentStepId?: string,
+  ): TaskTemplateStep => {
+    const notes = source.notes.trim();
+    return {
+      id,
+      titleTemplate,
+      ...(parentStepId ? { parentStepId } : {}),
+      ...(notes && validatePlaceholders(notes) ? { notesTemplate: notes } : {}),
+      tags: uniqueTrimmed(source.tags),
+      priority: source.priority,
+      ...(validEstimatedMinutes(source.estimatedMinutes)
+        ? { estimatedMinutes: source.estimatedMinutes }
+        : {}),
+      plannedDayOffset: 0,
+    };
   };
+  const steps: TaskTemplateStep[] = [buildStep(task, "task", "{{title}}")];
+  if (options.includeSubtasks && options.subtasks?.length) {
+    options.subtasks.slice(0, 11).forEach((subtask, index) => {
+      const literalTitle = subtask.title.trim();
+      const titleTemplate = validatePlaceholders(literalTitle)
+        ? literalTitle
+        : `子任务 ${index + 1}`;
+      steps.push(buildStep(subtask, `subtask-${index + 1}`, titleTemplate, "task"));
+    });
+  }
   return {
     id: options.id.trim(),
     name: options.name.trim(),
@@ -113,7 +147,7 @@ export const buildTaskTemplateFromTask = (
       options.description?.trim() ||
       "从现有任务保存的本地模板，可在快速录入中继续复用。",
     defaultSource: "local",
-    steps: [step],
+    steps,
     createdAt: now,
     updatedAt: now,
   };
@@ -294,6 +328,7 @@ export const validateTaskTemplate = (value: unknown): TaskTemplateImportResult =
     const allowedStepKeys = new Set([
       "id",
       "titleTemplate",
+      "parentStepId",
       "notesTemplate",
       "tags",
       "priority",
@@ -306,9 +341,23 @@ export const validateTaskTemplate = (value: unknown): TaskTemplateImportResult =
     }
     const stepId = typeof rawStep.id === "string" ? rawStep.id.trim() : "";
     const titleTemplate = typeof rawStep.titleTemplate === "string" ? rawStep.titleTemplate.trim() : "";
+    const parentStepId =
+      rawStep.parentStepId === undefined
+        ? undefined
+        : typeof rawStep.parentStepId === "string"
+          ? rawStep.parentStepId.trim()
+          : "";
     const notesTemplate = typeof rawStep.notesTemplate === "string" ? rawStep.notesTemplate.trim() : undefined;
     if (!/^[a-z0-9][a-z0-9-]{1,39}$/u.test(stepId) || stepIds.has(stepId)) {
       return { ok: false, message: "每个模板步骤都需要唯一的合法 ID。" };
+    }
+    if (
+      parentStepId !== undefined &&
+      (!/^[a-z0-9][a-z0-9-]{1,39}$/u.test(parentStepId) ||
+        parentStepId === stepId ||
+        !stepIds.has(parentStepId))
+    ) {
+      return { ok: false, message: "子步骤只能引用前面已经定义的父步骤。" };
     }
     if (!titleTemplate || titleTemplate.length > 160 || !validatePlaceholders(titleTemplate)) {
       return { ok: false, message: "步骤标题不能为空、不能超过 160 个字符，且只能使用 {{title}}、{{date}}、{{now}}。" };
@@ -335,6 +384,7 @@ export const validateTaskTemplate = (value: unknown): TaskTemplateImportResult =
     steps.push({
       id: stepId,
       titleTemplate,
+      parentStepId,
       notesTemplate,
       tags: tags?.map((tag) => tag.trim()),
       priority: priority as TaskPriority | undefined,
@@ -465,6 +515,7 @@ export const previewTaskTemplate = (
       return {
         id: step.id,
         title: replaceTemplateVariables(step.titleTemplate, variables),
+        parentStepId: step.parentStepId,
         notes: step.notesTemplate ? replaceTemplateVariables(step.notesTemplate, variables) : "",
         tags: [...(step.tags ?? [])],
         priority: step.priority,
@@ -501,8 +552,33 @@ export const buildTaskTemplateInputs = (
     reminders: index === 0 && options.reminderAt
       ? [{ id: crypto.randomUUID(), at: options.reminderAt, enabled: true, source: "local" }]
       : [],
-    customFields: { templateId: template.id, templateStepId: step.id },
+    customFields: {
+      templateId: template.id,
+      templateStepId: step.id,
+      ...(step.parentStepId
+        ? {
+            templateParentStepId: step.parentStepId,
+          }
+        : {}),
+    },
   }));
+};
+
+/**
+ * Resolves a template child to the task created for its parent step. Remote
+ * templates deliberately return no parent ID: Feishu task creation has its
+ * own remote hierarchy semantics and must not receive a local task ID.
+ */
+export const parentTaskIdForTemplateInput = (
+  input: CreateTaskInput,
+  source: TaskTemplateSource,
+  createdStepIds: ReadonlyMap<string, TaskId>,
+): TaskId | undefined => {
+  if (source !== "local") return undefined;
+  const parentStepId = input.customFields?.templateParentStepId;
+  return typeof parentStepId === "string"
+    ? createdStepIds.get(parentStepId)
+    : undefined;
 };
 
 export function useTaskTemplates(): {

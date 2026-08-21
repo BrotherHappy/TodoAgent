@@ -71,4 +71,31 @@ describe("TaskTemplateSaveSheet", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("请先填写模板名称");
     expect(onConfirm).not.toHaveBeenCalled();
   });
+
+  it("lets the user opt out of copying the parent task's subtasks", async () => {
+    const onConfirm = vi.fn(async (_template: TaskTemplate) => undefined);
+    const subtask: Task = {
+      ...task,
+      id: "subtask-1",
+      parentId: task.id,
+      title: "校对说明",
+      notes: "检查链接",
+      priority: "medium",
+      estimatedMinutes: 15,
+    };
+    render(
+      <TaskTemplateSaveSheet
+        task={task}
+        subtasks={[subtask]}
+        onClose={vi.fn()}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    expect(screen.getByRole("checkbox", { name: /包含 1 个子任务/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: /包含 1 个子任务/ }));
+    fireEvent.click(screen.getByRole("button", { name: "保存本地模板" }));
+    await vi.waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
+    expect(onConfirm.mock.calls[0]![0].steps).toHaveLength(1);
+  });
 });

@@ -9,6 +9,7 @@ import {
 
 export interface TaskTemplateSaveSheetProps {
   task: Task;
+  subtasks?: readonly Task[];
   onClose: () => void;
   onConfirm: (template: TaskTemplate) => Promise<void>;
 }
@@ -29,6 +30,7 @@ const templateIdFor = (name: string): string => {
 
 export function TaskTemplateSaveSheet({
   task,
+  subtasks = [],
   onClose,
   onConfirm,
 }: TaskTemplateSaveSheetProps) {
@@ -36,6 +38,7 @@ export function TaskTemplateSaveSheet({
   const [description, setDescription] = useState(
     "从现有任务保存的本地模板，可在快速录入中继续复用。",
   );
+  const [includeSubtasks, setIncludeSubtasks] = useState(subtasks.length > 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const notesCanBeCopied = !task.notes.trim() || taskTemplateTextSupportsVariables(task.notes);
@@ -45,7 +48,8 @@ export function TaskTemplateSaveSheet({
     setDescription("从现有任务保存的本地模板，可在快速录入中继续复用。");
     setSaving(false);
     setError(undefined);
-  }, [task.id, task.title]);
+    setIncludeSubtasks(subtasks.length > 0);
+  }, [subtasks.length, task.id, task.title]);
 
   const confirm = async (): Promise<void> => {
     if (saving) return;
@@ -71,6 +75,8 @@ export function TaskTemplateSaveSheet({
           id: templateIdFor(nextName),
           name: nextName,
           description: nextDescription,
+          subtasks,
+          includeSubtasks,
         }),
       );
     } catch (reason) {
@@ -149,11 +155,37 @@ export function TaskTemplateSaveSheet({
               />
               <small>{description.length}/{MAX_DESCRIPTION_CHARS}</small>
             </label>
+            {subtasks.length > 0 && (
+              <label className="task-template-save-checkbox">
+                <span>
+                  <input
+                    type="checkbox"
+                    checked={includeSubtasks}
+                    disabled={saving}
+                    onChange={(event) => setIncludeSubtasks(event.target.checked)}
+                  />
+                  <strong>包含 {subtasks.length} 个子任务</strong>
+                </span>
+                <small>使用模板时会按同样的父子关系创建本地任务。</small>
+              </label>
+            )}
           </div>
           <div className="task-template-save-preview">
-            <span>模板会创建 1 个本地步骤</span>
+            <span>
+              模板会创建 {includeSubtasks ? Math.min(subtasks.length, 11) + 1 : 1} 个本地步骤
+            </span>
             <strong>{"{{title}}"}</strong>
-            <small>使用时输入新标题，任务会自动排到当天。</small>
+            {includeSubtasks && (
+              <ul>
+                {subtasks.slice(0, 11).map((subtask) => (
+                  <li key={subtask.id}>{subtask.title}</li>
+                ))}
+              </ul>
+            )}
+            <small>
+              使用时输入新标题，任务会自动排到当天。
+              {includeSubtasks && subtasks.length > 11 ? "最多带入 11 个子任务。" : ""}
+            </small>
           </div>
           {error && <p className="form-error" role="alert">{error}</p>}
         </div>

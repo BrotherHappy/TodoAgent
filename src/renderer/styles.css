@@ -9513,6 +9513,30 @@ select {
   font-weight: 500;
   text-align: right;
 }
+.task-template-save-checkbox {
+  display: grid;
+  gap: 5px;
+  padding: 10px 11px;
+  border: 1px solid var(--app-line);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--app-surface-raised) 72%, transparent);
+}
+.task-template-save-checkbox > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--app-text);
+}
+.task-template-save-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--app-brand);
+}
+.task-template-save-checkbox small {
+  color: var(--app-text-soft);
+  font-size: 11px;
+  font-weight: 500;
+}
 .task-template-save-preview {
   display: grid;
   gap: 4px;
@@ -9532,6 +9556,14 @@ select {
   color: var(--app-brand-strong);
   font-family: var(--app-font-mono, ui-monospace, SFMono-Regular, monospace);
   font-size: 15px;
+}
+.task-template-save-preview ul {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 0;
+  padding-left: 18px;
+  color: var(--app-text-soft);
+  font-size: 12px;
 }
 .calendar-action-items-context {
   display: grid;

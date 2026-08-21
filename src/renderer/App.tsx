@@ -307,6 +307,7 @@ import {
 import {
   buildTaskTemplateInputs,
   installTaskTemplate,
+  parentTaskIdForTemplateInput,
   parseTaskTemplateJson,
   previewTaskTemplate,
   type TaskTemplate,
@@ -5393,6 +5394,7 @@ function TaskInspector({
       {showTemplateSave && (
         <TaskTemplateSaveSheet
           task={task}
+          subtasks={subtasks}
           onClose={() => setShowTemplateSave(false)}
           onConfirm={saveAsTaskTemplate}
         />
@@ -14127,11 +14129,18 @@ function QuickCaptureWindow() {
       );
       let firstResult: Awaited<ReturnType<typeof controller.create>>;
       let createdCount = 0;
+      const createdTemplateStepIds = new Map<string, string>();
       for (const input of destinationInputs) {
         try {
+          const templateParentId = parentTaskIdForTemplateInput(
+            input,
+            effectiveSource,
+            createdTemplateStepIds,
+          );
           const result = await controller.create({
             ...baseInput,
             ...input,
+            ...(templateParentId ? { parentId: templateParentId } : {}),
             source: effectiveSource === "feishu"
               ? { type: "feishu" as const, accountId: feishu?.accountId }
               : { type: "local" as const },
@@ -14141,6 +14150,10 @@ function QuickCaptureWindow() {
           });
           firstResult ??= result;
           createdCount += 1;
+          const templateStepId = input.customFields?.templateStepId;
+          if (result?.task?.id && typeof templateStepId === "string") {
+            createdTemplateStepIds.set(templateStepId, result.task.id);
+          }
         } catch (reason) {
           const detail = reason instanceof Error ? reason.message : "未知错误";
           if (selectedTemplate && createdCount > 0) {

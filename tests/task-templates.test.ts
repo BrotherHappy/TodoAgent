@@ -8,6 +8,7 @@ import {
   loadCustomTaskTemplates,
   parseTaskTemplateJson,
   previewTaskTemplate,
+  parentTaskIdForTemplateInput,
   removeTaskTemplate,
   replaceTemplateVariables,
   validateTaskTemplate,
@@ -58,6 +59,61 @@ describe("task templates", () => {
       createdAt: "2026-08-21T08:00:00.000Z",
       updatedAt: "2026-08-21T08:00:00.000Z",
     });
+  });
+
+  it("can preserve a small parent/subtask checklist while keeping it local", () => {
+    const template = buildTaskTemplateFromTask(
+      {
+        title: "发布版本",
+        notes: "",
+        tags: ["发布"],
+        priority: "high",
+        estimatedMinutes: 30,
+      },
+      {
+        id: "release-checklist-abc",
+        name: "发布清单",
+        subtasks: [
+          {
+            title: "校对说明",
+            notes: "检查链接",
+            tags: ["校对"],
+            priority: "medium",
+            estimatedMinutes: 15,
+          },
+          {
+            title: "通知团队",
+            notes: "",
+            tags: [],
+            priority: "none",
+            estimatedMinutes: undefined,
+          },
+        ],
+        includeSubtasks: true,
+      },
+    );
+    expect(template.steps).toHaveLength(3);
+    expect(template.steps[1]).toMatchObject({
+      id: "subtask-1",
+      titleTemplate: "校对说明",
+      parentStepId: "task",
+    });
+    expect(template.steps[2]?.parentStepId).toBe("task");
+
+    const inputs = buildTaskTemplateInputs(template, "新版本", {
+      date: "2026-08-21",
+    });
+    expect(inputs[1]?.customFields).toMatchObject({
+      templateStepId: "subtask-1",
+      templateParentStepId: "task",
+    });
+    const created = new Map([["task", "created-parent"]]);
+    expect(parentTaskIdForTemplateInput(inputs[1]!, "local", created)).toBe(
+      "created-parent",
+    );
+    expect(parentTaskIdForTemplateInput(inputs[1]!, "feishu", created)).toBe(
+      undefined,
+    );
   });
 
   it("does not copy provider identity or invalid estimates into a template", () => {
@@ -143,6 +199,13 @@ describe("task templates", () => {
     expect(validateTaskTemplate({
       ...base,
       steps: [{ id: "one", titleTemplate: "处理 {{title}}", command: "rm -rf" }],
+    })).toMatchObject({ ok: false });
+    expect(validateTaskTemplate({
+      ...base,
+      steps: [
+        { id: "one", titleTemplate: "父步骤" },
+        { id: "two", titleTemplate: "子步骤", parentStepId: "missing" },
+      ],
     })).toMatchObject({ ok: false });
     expect(parseTaskTemplateJson("not json")).toMatchObject({ ok: false });
   });
