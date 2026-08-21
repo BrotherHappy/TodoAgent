@@ -157,6 +157,7 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { SpeechOutputButton } from "./SpeechOutputButton";
 import { AgentRunActivity } from "./AgentRunActivity";
 import { PetWeatherForecast } from "./PetWeatherForecast";
 import { QuickCaptureHistory } from "./QuickCaptureHistory";
@@ -1494,6 +1495,12 @@ function MorningBrief({
           <Sparkles size={18} />
         </span>
         <span>晨间简报</span>
+        <SpeechOutputButton
+          text={aiSummary ?? localSummary}
+          label="朗读"
+          ariaLabel="朗读晨间简报"
+          className="agent-speak-button brief-speak-button"
+        />
       </div>
       <p className="brief-copy">{aiSummary ?? localSummary}</p>
       {todayCalendar.blocks.length > 0 && (
@@ -14960,6 +14967,11 @@ function FloatingWindow() {
   // The compact completion action follows the visible title. A rotating task
   // bubble must never complete a different, hidden task.
   const current = carousel.task;
+  const petTaskSpeechText = current
+    ? privacyMode
+      ? `${petName}提醒你：有一项私人任务需要处理。`
+      : `${petName}提醒你：当前任务是“${current.title}”。${current.dueAt ? `截止时间是 ${formatDateTime(current.dueAt)}。` : ""}`
+    : `${petName}说：今天可以轻松一点。`;
   const currentTaskTheme: TaskThemeActionPack | undefined = current
     ? inferTaskTheme(current)
     : undefined;
@@ -15391,6 +15403,9 @@ function FloatingWindow() {
       : petFocus?.phase === "long-break"
         ? "长休息"
         : "专注";
+  const petFocusSpeechText = petFocus
+    ? `${petName}陪你${focusPhaseLabel}。${petFocus.taskTitle && !privacyMode ? `当前任务是“${petFocus.taskTitle}”。` : privacyMode ? "当前关联的是私人任务。" : ""}`
+    : "";
   const focusEnvironmentSoundLabel =
     environmentSoundOptions.find(
       (option) => option.value === petSettings.focus.environmentSound,
@@ -16834,6 +16849,12 @@ function FloatingWindow() {
                       {current ? humanDuration(elapsed) : "✓"}
                     </span>
                   </button>
+                  <SpeechOutputButton
+                    text={petTaskSpeechText}
+                    label="朗读"
+                    ariaLabel="朗读当前任务"
+                    className="agent-speak-button pet-speech-button"
+                  />
                   {current && (
                     <button
                       type="button"
@@ -16887,6 +16908,12 @@ function FloatingWindow() {
                           : "站起来走走，喝口水吧"}
                     </p>
                     <div className="pet-focus-bubble-actions">
+                      <SpeechOutputButton
+                        text={petFocusSpeechText}
+                        label="朗读"
+                        ariaLabel="朗读专注状态"
+                        className="agent-speak-button pet-speech-button"
+                      />
                       {petFocus.status === "awaiting-completion" ? (
                         <button
                           type="button"

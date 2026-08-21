@@ -988,6 +988,9 @@ select {
   color: var(--app-brand-strong);
   font-weight: 600;
 }
+.brief-speak-button {
+  margin-left: auto;
+}
 .brief-copy {
   color: var(--app-text-soft);
   line-height: 1.65;
@@ -5467,10 +5470,16 @@ select {
 .pet-task-bubble-body {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 30px;
+  grid-template-columns: minmax(0, 1fr) auto 30px;
   align-items: center;
   gap: 5px;
   padding: 0 7px 7px 9px;
+}
+.pet-speech-button {
+  min-height: 27px;
+  border-radius: 9px;
+  padding: 4px 6px;
+  font-size: 10px;
 }
 .pet-complete-button {
   width: 29px;
@@ -5587,6 +5596,9 @@ select {
   padding: 4px 7px;
   font-size: 11px;
   white-space: nowrap;
+}
+.pet-focus-bubble-actions .pet-speech-button {
+  min-height: 27px;
 }
 .pet-focus-shield-bubble {
   border-color: color-mix(in srgb, #d58a32 40%, var(--floating-line));

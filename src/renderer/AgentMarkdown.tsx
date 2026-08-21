@@ -1,12 +1,7 @@
-import { Volume2, Square } from "lucide-react";
-import { useState, type MouseEvent, type ReactElement } from "react";
+import { type MouseEvent, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  speakMarkdown,
-  speechOutputSupported,
-  stopSpeechOutput,
-} from "./speech-output";
+import { SpeechOutputButton } from "./SpeechOutputButton";
 
 const safeExternalUrl = (value: string | undefined): string | undefined => {
   if (!value) return undefined;
@@ -21,35 +16,10 @@ const safeExternalUrl = (value: string | undefined): string | undefined => {
 };
 
 export function AgentMarkdown({ text }: { text: string }): ReactElement {
-  const [speaking, setSpeaking] = useState(false);
-  const supported = speechOutputSupported();
-  const toggleSpeech = () => {
-    if (speaking) {
-      stopSpeechOutput();
-      setSpeaking(false);
-      return;
-    }
-    const started = speakMarkdown(text, {
-      onEnd: () => setSpeaking(false),
-      onError: () => setSpeaking(false),
-    });
-    if (started) setSpeaking(true);
-  };
   return (
     <div className="agent-markdown">
       <div className="agent-markdown-toolbar">
-        <button
-          type="button"
-          className="agent-speak-button"
-          aria-label={speaking ? "停止朗读" : "朗读回答"}
-          title={supported ? (speaking ? "停止朗读" : "朗读回答") : "当前环境不支持朗读"}
-          disabled={!supported || !text.trim()}
-          aria-pressed={speaking}
-          onClick={toggleSpeech}
-        >
-          {speaking ? <Square size={12} /> : <Volume2 size={14} />}
-          <span>{speaking ? "停止朗读" : "朗读"}</span>
-        </button>
+        <SpeechOutputButton text={text} label="朗读" ariaLabel="朗读回答" />
       </div>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
