@@ -418,6 +418,116 @@ describe("useAgentChat", () => {
     });
   });
 
+  it("projects the correlated tool lifecycle for an explainable Agent run", async () => {
+    const completion = deferred<AgentSendResult>();
+    const harness = installAgentApi(async () => completion.promise);
+    const { result } = renderHook(() =>
+      useAgentChat({ initialMessage: "你好" }),
+    );
+    let sending!: Promise<boolean>;
+    act(() => {
+      sending = result.current.send("请查询并整理任务");
+    });
+    await waitFor(() => expect(harness.send).toHaveBeenCalledOnce());
+    const runId = harness.send.mock.calls[0][0].runId!;
+
+    act(() => {
+      harness.emitEvent({
+        version: 1,
+        runId: "another-run",
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        type: "tool-started",
+        payload: { invocationId: "stale", toolName: "task_list" },
+      });
+      harness.emitEvent({
+        version: 1,
+        runId,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        type: "tool-proposed",
+        payload: {
+          invocationId: "invocation-1",
+          providerCallId: "provider-1",
+          toolName: "task_list",
+          risk: "R0",
+          preview: { action: "list-tasks", scope: "today" },
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.toolActivity).toMatchObject([
+        {
+          invocationId: "invocation-1",
+          toolName: "task_list",
+          status: "proposed",
+          risk: "R0",
+        },
+      ]),
+    );
+
+    act(() => {
+      harness.emitEvent({
+        version: 1,
+        runId,
+        sequence: 2,
+        timestamp: new Date().toISOString(),
+        type: "approval-required",
+        payload: {
+          approvalId: "approval-1",
+          toolName: "task_list",
+          effects: { risk: "R0" },
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.toolActivity[0]?.status).toBe("awaiting-approval"),
+    );
+
+    act(() => {
+      harness.emitEvent({
+        version: 1,
+        runId,
+        sequence: 3,
+        timestamp: new Date().toISOString(),
+        type: "tool-started",
+        payload: {
+          invocationId: "invocation-1",
+          toolName: "task_list",
+        },
+      });
+      harness.emitEvent({
+        version: 1,
+        runId,
+        sequence: 4,
+        timestamp: new Date().toISOString(),
+        type: "tool-finished",
+        payload: {
+          invocationId: "invocation-1",
+          toolName: "task_list",
+          status: "ok",
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.toolActivity[0]).toMatchObject({
+        toolName: "task_list",
+        status: "succeeded",
+      }),
+    );
+    expect(result.current.toolActivity).toHaveLength(1);
+
+    completion.resolve({
+      runId,
+      state: "completed",
+      assistantText: "已完成查询",
+    });
+    await act(async () => {
+      await sending;
+    });
+    expect(result.current.toolActivity[0]?.status).toBe("succeeded");
+  });
+
   it("synchronously prevents duplicate sends", async () => {
     const completion = deferred<AgentSendResult>();
     const harness = installAgentApi(async () => completion.promise);

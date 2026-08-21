@@ -4,7 +4,7 @@ import type {
   AgentFeishuSyncReceipt,
   AgentStatus,
 } from "../shared/desktop-api";
-import type { ApprovalChoice } from "../shared/agent-types";
+import type { ApprovalChoice, AgentJsonValue, RiskLevel } from "../shared/agent-types";
 import { mergeAgentDelta } from "./agent-stream-state";
 import {
   AGENT_CONVERSATIONS_STORAGE_KEY,
@@ -33,6 +33,33 @@ export interface AgentUiMessage {
   syncBaseText?: string;
 }
 
+export type AgentToolActivityStatus =
+  | "proposed"
+  | "awaiting-approval"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "denied"
+  | "cancelled"
+  | "replayed";
+
+/**
+ * A short-lived, renderer-only projection of the trusted Agent event stream.
+ * It is intentionally not persisted with the conversation: the chat history
+ * remains readable while sensitive tool arguments and effects stay behind the
+ * permission/audit boundary.
+ */
+export interface AgentToolActivity {
+  invocationId?: string;
+  providerCallId?: string;
+  toolName: string;
+  status: AgentToolActivityStatus;
+  risk?: RiskLevel;
+  preview?: AgentJsonValue;
+  errorCode?: string;
+  timestamp: string;
+}
+
 interface ActiveAgentStream {
   runId: string;
   messageId: string;
@@ -57,7 +84,33 @@ const runStateLabel = (state?: string): string =>
         ? "等待确认"
         : state === "stopping"
           ? "正在停止"
-          : (state ?? "运行中");
+      : (state ?? "运行中");
+
+const toolActivityStatus = (status: unknown): AgentToolActivityStatus => {
+  if (status === "ok") return "succeeded";
+  if (status === "effect-unknown") return "failed";
+  if (status === "cancelled") return "cancelled";
+  if (status === "denied") return "denied";
+  if (status === "replayed") return "replayed";
+  return "failed";
+};
+
+const activityIdentityMatches = (
+  activity: AgentToolActivity,
+  payload: { invocationId?: unknown; providerCallId?: unknown; toolName?: unknown },
+): boolean => {
+  if (typeof payload.invocationId === "string" && activity.invocationId) {
+    return activity.invocationId === payload.invocationId;
+  }
+  if (typeof payload.providerCallId === "string" && activity.providerCallId) {
+    return activity.providerCallId === payload.providerCallId;
+  }
+  return (
+    typeof payload.toolName === "string" &&
+    activity.toolName === payload.toolName &&
+    activity.status === "proposed"
+  );
+};
 
 const knownAgentErrorMessages: Record<string, string> = {
   AI_DAILY_TOKEN_LIMIT_REACHED:
@@ -218,6 +271,7 @@ export function useAgentChat({
   const [runState, setRunState] = useState("就绪");
   const [isSending, setIsSending] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string>();
+  const [toolActivity, setToolActivity] = useState<AgentToolActivity[]>([]);
   const [hasStoredConversation, setHasStoredConversation] = useState(
     storedConversationRef.current !== undefined,
   );
@@ -378,11 +432,96 @@ export function useAgentChat({
           runStateLabel((event.payload as { state?: string }).state),
         );
       }
+      if (
+        event.type === "tool-proposed" ||
+        event.type === "approval-required" ||
+        event.type === "tool-started" ||
+        event.type === "tool-finished"
+      ) {
+        const payload = event.payload as {
+          invocationId?: unknown;
+          providerCallId?: unknown;
+          toolName?: unknown;
+          risk?: unknown;
+          preview?: unknown;
+          status?: unknown;
+          replayed?: unknown;
+          errorCode?: unknown;
+        };
+        setToolActivity((current) => {
+          const matchIndex = current.findLastIndex((activity) =>
+            activityIdentityMatches(activity, payload),
+          );
+          const existing = matchIndex >= 0 ? current[matchIndex] : undefined;
+          const toolName =
+            typeof payload.toolName === "string"
+              ? payload.toolName
+              : existing?.toolName;
+          if (!toolName) return current;
+          const nextStatus: AgentToolActivityStatus =
+            event.type === "tool-proposed"
+              ? "proposed"
+              : event.type === "approval-required"
+                ? "awaiting-approval"
+                : event.type === "tool-started"
+                  ? "running"
+                  : payload.replayed === true
+                    ? "replayed"
+                    : toolActivityStatus(payload.status);
+          const next: AgentToolActivity = {
+            ...(existing ?? {}),
+            ...(typeof payload.invocationId === "string"
+              ? { invocationId: payload.invocationId }
+              : {}),
+            ...(typeof payload.providerCallId === "string"
+              ? { providerCallId: payload.providerCallId }
+              : {}),
+            toolName,
+            status: nextStatus,
+            ...(payload.risk === "R0" ||
+            payload.risk === "R1" ||
+            payload.risk === "R2" ||
+            payload.risk === "R3" ||
+            payload.risk === "R4"
+              ? { risk: payload.risk }
+              : {}),
+            ...(payload.preview !== undefined
+              ? { preview: payload.preview as AgentJsonValue }
+              : {}),
+            ...(typeof payload.errorCode === "string"
+              ? { errorCode: payload.errorCode }
+              : {}),
+            timestamp: event.timestamp,
+          };
+          const updated =
+            matchIndex >= 0
+              ? current.map((activity, index) =>
+                  index === matchIndex ? next : activity,
+                )
+              : [...current, next];
+          return updated.slice(-12);
+        });
+      }
       if (event.type === "approval-decided") {
         const approvalId = (event.payload as { approvalId?: string }).approvalId;
         setApproval((current) =>
           current?.approvalId === approvalId ? undefined : current,
         );
+        const choice = (event.payload as { choice?: string }).choice;
+        if (choice === "deny") {
+          setToolActivity((current) => {
+            const index = current.findLastIndex(
+              (activity) => activity.status === "awaiting-approval",
+            );
+            return index < 0
+              ? current
+              : current.map((activity, activityIndex) =>
+                  activityIndex === index
+                    ? { ...activity, status: "denied", timestamp: event.timestamp }
+                    : activity,
+                );
+          });
+        }
       }
       if (event.type === "run-terminal") {
         setApproval(undefined);
@@ -619,6 +758,7 @@ export function useAgentChat({
     sendingRef.current = true;
     setIsSending(true);
     setApproval(undefined);
+    setToolActivity([]);
     const history = messagesRef.current.slice(-50).map((message) => ({
       role: message.role,
       content: message.text,
@@ -757,6 +897,7 @@ export function useAgentChat({
     agentStatus,
     approval,
     activeRunId,
+    toolActivity,
     send,
     stop,
     respondToApproval,

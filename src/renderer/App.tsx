@@ -157,6 +157,7 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { AgentRunActivity } from "./AgentRunActivity";
 import { PetWeatherForecast } from "./PetWeatherForecast";
 import { QuickCaptureHistory } from "./QuickCaptureHistory";
 import {
@@ -5753,6 +5754,7 @@ function AgentPage({
     isSending,
     runState,
     agentStatus,
+    toolActivity,
     approval,
     activeRunId,
     send,
@@ -6105,6 +6107,7 @@ function AgentPage({
             </div>
           </div>
         )}
+        <AgentRunActivity activities={toolActivity} active={isSending} />
         {proposal && (
           <div className="action-preview">
             <div className="preview-header">
