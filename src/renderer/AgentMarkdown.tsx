@@ -1,4 +1,4 @@
-import { Sparkles } from "lucide-react";
+import { Check, Clipboard, Sparkles } from "lucide-react";
 import { useEffect, useState, type MouseEvent, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -25,8 +25,10 @@ export function AgentMarkdown({
   streaming?: boolean;
 }): ReactElement {
   const [savedContext, setSavedContext] = useState(false);
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     setSavedContext(false);
+    setCopied(false);
   }, [text]);
   const saveContext = () => {
     const normalized = text.trim();
@@ -47,9 +49,33 @@ export function AgentMarkdown({
     });
     setSavedContext(true);
   };
+  const copyReply = async () => {
+    const normalized = text.trim();
+    if (streaming || !normalized || copied) return;
+    try {
+      if (!navigator.clipboard?.writeText) return;
+      await navigator.clipboard.writeText(normalized);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard permissions are optional. Keep the reply available without
+      // surfacing a second error channel in the conversation.
+    }
+  };
   return (
     <div className="agent-markdown">
       <div className="agent-markdown-toolbar">
+        <button
+          type="button"
+          className="agent-reply-copy-button"
+          aria-label={copied ? "已复制 Markdown 回复" : "复制 Markdown 回复"}
+          title="复制原始 Markdown 到系统剪贴板"
+          disabled={streaming || copied || !text.trim() || !navigator.clipboard?.writeText}
+          onClick={() => void copyReply()}
+        >
+          {copied ? <Check size={12} /> : <Clipboard size={12} />}
+          <span>{copied ? "已复制" : "复制 Markdown"}</span>
+        </button>
         <button
           type="button"
           className="agent-context-save-button"

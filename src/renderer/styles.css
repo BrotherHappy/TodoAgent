@@ -8970,6 +8970,34 @@ select {
   font-size: 10px;
   font-weight: 650;
 }
+.agent-reply-copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: var(--app-text-faint);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 650;
+}
+.agent-reply-copy-button:hover:not(:disabled),
+.agent-reply-copy-button:focus-visible {
+  border-color: color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 64%, transparent);
+}
+.agent-reply-copy-button[aria-label="已复制 Markdown 回复"] {
+  border-color: color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 48%, transparent);
+}
+.agent-reply-copy-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
 .agent-context-save-button:hover:not(:disabled),
 .agent-context-save-button:focus-visible {
   border-color: color-mix(in srgb, var(--app-brand) 30%, var(--app-line));

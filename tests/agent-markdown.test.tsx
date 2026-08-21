@@ -7,6 +7,7 @@ import type { DesktopApi } from "../src/shared/desktop-api";
 afterEach(() => {
   cleanup();
   delete window.desktopApi;
+  delete (navigator as unknown as { clipboard?: Clipboard }).clipboard;
   window.localStorage.clear();
 });
 
@@ -88,9 +89,25 @@ describe("AgentMarkdown", () => {
     });
   });
 
+  it("copies the original Markdown only after an explicit click", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<AgentMarkdown text={"## 研究结论\n\n- 保留来源"} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "复制 Markdown 回复" }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith("## 研究结论\n\n- 保留来源"));
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "已复制 Markdown 回复" })).toBeDisabled(),
+    );
+  });
+
   it("does not save or speak a partial streaming reply", () => {
     render(<AgentMarkdown text="正在生成" streaming />);
 
+    expect(screen.getByRole("button", { name: "复制 Markdown 回复" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "保存到最近上下文" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "朗读回答" })).toBeDisabled();
     expect(window.localStorage.getItem("todo-agent:context-capture-history:v1")).toBeNull();
