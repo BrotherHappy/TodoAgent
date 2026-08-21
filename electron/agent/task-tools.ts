@@ -65,6 +65,9 @@ const localDateSchema = z
   .refine(isValidLocalDate, "Invalid calendar date.");
 const isoDateSchema = z.string().datetime({ offset: true });
 const idSchema = z.string().trim().min(1).max(512);
+// Local heading text; this is deliberately separate from Feishu tasklist
+// bindings and is never sent to the provider.
+const sectionSchema = z.string().trim().min(1).max(80);
 const operationIdSchema = z.string().trim().min(1).max(512);
 const MAX_BULK_CREATE = 25;
 const MAX_BULK_MUTATE = 50;
@@ -123,6 +126,7 @@ const createArgumentsSchema = z.strictObject({
   source: sourceSchema,
   projectId: idSchema.nullable(),
   listId: idSchema.nullable(),
+  sectionId: sectionSchema.nullable().optional(),
   plannedDate: localDateSchema.nullable(),
   deferUntil: localDateSchema.nullable().optional(),
   startAt: isoDateSchema.nullable(),
@@ -143,6 +147,7 @@ const updateArgumentsSchema = z
     deferUntil: localDateSchema.nullable().optional(),
     projectId: idSchema.nullable(),
     listId: idSchema.nullable(),
+    sectionId: sectionSchema.nullable().optional(),
     plannedDate: localDateSchema.nullable(),
     startAt: isoDateSchema.nullable(),
     dueAt: isoDateSchema.nullable(),
@@ -158,6 +163,7 @@ const updateArgumentsSchema = z
           "deferUntil",
           "projectId",
           "listId",
+          "sectionId",
           "plannedDate",
           "startAt",
           "dueAt",
@@ -178,6 +184,7 @@ const updateArgumentsSchema = z
           "deferUntil",
           "projectId",
           "listId",
+          "sectionId",
           "plannedDate",
           "startAt",
           "dueAt",
@@ -259,6 +266,7 @@ const bulkCreateItemSchema = z.strictObject({
   notes: z.string().max(50_000),
   projectId: idSchema.nullable(),
   listId: idSchema.nullable(),
+  sectionId: sectionSchema.nullable().optional(),
   plannedDate: localDateSchema.nullable(),
   deferUntil: localDateSchema.nullable().optional(),
   startAt: isoDateSchema.nullable(),
@@ -473,6 +481,7 @@ const compactTask = (task: Task, scope: ModelDataScope): AgentJsonValue => {
     parentId: task.parentId ?? null,
     projectId: task.projectId ?? null,
     listId: task.listId ?? null,
+    sectionId: task.sectionId ?? null,
     plannedDate: task.plannedDate ?? null,
     startAt: task.startAt ?? null,
     dueAt: task.dueAt ?? null,
@@ -503,6 +512,7 @@ const changedFields = (args: z.infer<typeof updateArgumentsSchema>): string[] =>
         "deferUntil",
         "projectId",
         "listId",
+        "sectionId",
         "plannedDate",
         "startAt",
         "dueAt",
@@ -589,6 +599,7 @@ const patchForUpdate = (
     "deferUntil",
     "projectId",
     "listId",
+    "sectionId",
     "plannedDate",
     "startAt",
     "dueAt",
@@ -971,6 +982,7 @@ export const createTaskTools = (
             accountId: accountId ?? null,
             projectId: args.projectId,
             listId: args.listId,
+            sectionId: args.sectionId ?? null,
             plannedDate: args.plannedDate,
             deferUntil: args.deferUntil ?? null,
             startAt: args.startAt,
@@ -995,6 +1007,7 @@ export const createTaskTools = (
               : { type: "local" },
           projectId: args.projectId ?? undefined,
           listId: args.listId ?? undefined,
+          sectionId: args.sectionId ?? undefined,
           plannedDate: args.plannedDate ?? undefined,
           deferUntil: args.deferUntil ?? undefined,
           startAt: args.startAt ?? undefined,
@@ -1019,7 +1032,7 @@ export const createTaskTools = (
     taskTool({
       name: "task_update",
       description:
-        "Update explicitly supplied fields on one task. Private plan, deferral date and private notes never sync to Feishu.",
+        "Update explicitly supplied fields on one task. Local heading, project/list, private plan, deferral date and private notes never sync to Feishu.",
       schema: updateArgumentsSchema,
       sensitiveArgumentPaths: ["notes", "privateNotes"],
       analyze: async (args) => {
@@ -1260,6 +1273,7 @@ export const createTaskTools = (
               parentId: parent.id,
               projectId: parent.projectId,
               listId: parent.listId,
+              sectionId: parent.sectionId,
               plannedDate: parent.plannedDate,
               priority: item.priority,
               estimatedMinutes: item.estimatedMinutes ?? undefined,
@@ -1488,6 +1502,7 @@ export const createTaskTools = (
               title: task.title,
               projectId: task.projectId,
               listId: task.listId,
+              sectionId: task.sectionId ?? null,
               plannedDate: task.plannedDate,
               deferUntil: task.deferUntil ?? null,
               startAt: task.startAt,
@@ -1529,6 +1544,7 @@ export const createTaskTools = (
               source: { type: "local" },
               projectId: item.projectId ?? undefined,
               listId: item.listId ?? undefined,
+              sectionId: item.sectionId ?? undefined,
               plannedDate: item.plannedDate ?? undefined,
               deferUntil: item.deferUntil ?? undefined,
               startAt: item.startAt ?? undefined,

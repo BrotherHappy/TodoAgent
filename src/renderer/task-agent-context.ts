@@ -7,7 +7,7 @@ import type { Task } from "../shared/models";
  * low-friction entry deterministic and easy to audit without invoking Agent.
  */
 export function buildTaskAgentPrompt(
-  task: Pick<Task, "id" | "title" | "status" | "source">,
+  task: Pick<Task, "id" | "title" | "status" | "source" | "sectionId">,
 ): string {
   const status = taskStatusLabel(task.status);
   const source = taskSourceLabel(task.source.type);
@@ -18,6 +18,7 @@ export function buildTaskAgentPrompt(
     `- 任务 ID：${task.id}`,
     `- 当前状态：${status}`,
     `- 来源：${source}`,
+    ...(task.sectionId ? [`- 分组标题：${task.sectionId}`] : []),
     "请先查询这项任务的详情、截止时间和依赖，给出简短、可执行的建议；默认只读，未经我明确确认不要修改任务。",
   ].join("\n");
 }

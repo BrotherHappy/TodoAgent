@@ -124,7 +124,7 @@ describe("TaskService views and task data", () => {
       priority: "urgent",
       projectId: "product",
       listId: "launch",
-      sectionId: "ready",
+      sectionId: " ready ",
       tags: [" release ", "release", "desktop"],
       contexts: [" 办公室 ", "出门"],
       parentId: "parent-task",
@@ -165,6 +165,7 @@ describe("TaskService views and task data", () => {
       focusElapsedSeconds: 0,
       focusSessions: [],
       estimatedMinutes: 45,
+      sectionId: "ready",
     });
     expect(result.operationId).toBe("operation-1");
   });

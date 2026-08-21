@@ -195,6 +195,7 @@ import {
   buildBulkTaskAgentPrompt,
   buildTaskAgentPrompt,
 } from "./task-agent-context";
+import { groupTasksBySection } from "./task-sections";
 import {
   FocusEnvironmentSound,
   environmentSoundOptions,
@@ -392,6 +393,7 @@ type TaskEditorDirtyField =
   | "notes"
   | "projectId"
   | "listId"
+  | "sectionId"
   | "tags"
   | "contexts"
   | "plannedDate"
@@ -1846,6 +1848,11 @@ function TaskRow({
               稍后至 {task.deferUntil === dateKey() ? "今天" : task.deferUntil}
             </span>
           )}
+          {task.sectionId && (
+            <span className="task-section-pill" title={`分组标题：${task.sectionId}`}>
+              {task.sectionId}
+            </span>
+          )}
           {task.dueAt && (
             <span className={overdue ? "overdue" : ""}>
               {overdue ? "已逾期 · " : "截止 "}
@@ -2941,60 +2948,78 @@ function TaskListPage({
           </div>
         </div>
       ) : (
-        visibleSections.map((section) => (
-          <section key={section.id}>
-            <div className="list-toolbar">
-              <span>{sectionTitles[section.id]}</span>
-              <span className="list-count">{section.tasks.length}</span>
-            </div>
-            <div className="task-list">
-              {section.tasks.map((task, sectionIndex) => {
-                const canReorder =
-                  route === "today" &&
-                  priorityFilter === "all" &&
-                  !flaggedFilter &&
-                  projectFilter === "all" &&
-                  tagFilter === "all" &&
-                  contextFilter === "all" &&
-                  dateFilter === "any" &&
-                  sortFilter === "manual";
-                return (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    selected={controller.selectedId === task.id}
-                    controller={controller}
-                    notify={notify}
-                    selectionMode={bulkMode}
-                    selectedForBulk={bulkSelection.has(task.id)}
-                    onToggleBulk={() => toggleBulkSelection(task.id)}
-                    interactionDisabled={bulkBusy}
-                    subtaskProgress={subtaskProgress.get(task.id)}
-                    onAskAgent={onAskAgent}
-                    moveUp={
-                      canReorder && sectionIndex > 0
-                        ? () =>
-                            void moveTodayTask(
-                              task.id,
-                              section.tasks[sectionIndex - 1].id,
-                            )
-                        : undefined
-                    }
-                    moveDown={
-                      canReorder && sectionIndex < section.tasks.length - 1
-                        ? () =>
-                            void moveTodayTask(
-                              task.id,
-                              section.tasks[sectionIndex + 1].id,
-                            )
-                        : undefined
-                    }
-                  />
-                );
-              })}
-            </div>
-          </section>
-        ))
+        visibleSections.map((section) => {
+          const canReorder =
+            route === "today" &&
+            priorityFilter === "all" &&
+            !flaggedFilter &&
+            projectFilter === "all" &&
+            tagFilter === "all" &&
+            contextFilter === "all" &&
+            dateFilter === "any" &&
+            sortFilter === "manual";
+          const groups = canReorder
+            ? [{ id: "all", label: undefined, tasks: section.tasks }]
+            : groupTasksBySection(section.tasks);
+          return (
+            <section key={section.id}>
+              <div className="list-toolbar">
+                <span>{sectionTitles[section.id]}</span>
+                <span className="list-count">{section.tasks.length}</span>
+              </div>
+              {groups.map((group) => (
+                <div className="task-section-group" key={`${section.id}-${group.id}`}>
+                  {group.label && (
+                    <div className="task-section-heading">
+                      <span>{group.label}</span>
+                      <span>{group.tasks.length}</span>
+                    </div>
+                  )}
+                  <div className="task-list">
+                    {group.tasks.map((task) => {
+                      const sectionIndex = section.tasks.findIndex(
+                        (candidate) => candidate.id === task.id,
+                      );
+                      return (
+                        <TaskRow
+                          key={task.id}
+                          task={task}
+                          selected={controller.selectedId === task.id}
+                          controller={controller}
+                          notify={notify}
+                          selectionMode={bulkMode}
+                          selectedForBulk={bulkSelection.has(task.id)}
+                          onToggleBulk={() => toggleBulkSelection(task.id)}
+                          interactionDisabled={bulkBusy}
+                          subtaskProgress={subtaskProgress.get(task.id)}
+                          onAskAgent={onAskAgent}
+                          moveUp={
+                            canReorder && sectionIndex > 0
+                              ? () =>
+                                  void moveTodayTask(
+                                    task.id,
+                                    section.tasks[sectionIndex - 1].id,
+                                  )
+                              : undefined
+                          }
+                          moveDown={
+                            canReorder && sectionIndex < section.tasks.length - 1
+                              ? () =>
+                                  void moveTodayTask(
+                                    task.id,
+                                    section.tasks[sectionIndex + 1].id,
+                                  )
+                              : undefined
+                          }
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </section>
+          );
+        })
       )}
       {inboxTriageOpen && route === "inbox" && (
         <InboxTriageSheet
@@ -3030,6 +3055,7 @@ function TaskInspector({
   const [notes, setNotes] = useState(task?.notes ?? "");
   const [projectId, setProjectId] = useState(projectLabel(task?.projectId, projects));
   const [listId, setListId] = useState(listLabel(task?.listId, lists));
+  const [sectionId, setSectionId] = useState(task?.sectionId ?? "");
   const [tagsText, setTagsText] = useState(task?.tags.join(", ") ?? "");
   const [contextsText, setContextsText] = useState(
     task?.contexts?.join(", ") ?? "",
@@ -3128,6 +3154,8 @@ function TaskInspector({
         setProjectId(projectLabel(task.projectId, projects));
       if (!dirtyFieldsRef.current.has("listId"))
         setListId(listLabel(task.listId, lists));
+      if (!dirtyFieldsRef.current.has("sectionId"))
+        setSectionId(task.sectionId ?? "");
       if (!dirtyFieldsRef.current.has("tags"))
         setTagsText(task.tags.join(", "));
       if (!dirtyFieldsRef.current.has("contexts"))
@@ -3162,6 +3190,7 @@ function TaskInspector({
     setNotes(task.notes);
     setProjectId(projectLabel(task.projectId, projects));
     setListId(listLabel(task.listId, lists));
+    setSectionId(task.sectionId ?? "");
     setTagsText(task.tags.join(", "));
     setContextsText((task.contexts ?? []).join(", "));
     setStartAtInput(toLocalDateTimeInput(task.startAt));
@@ -3234,6 +3263,7 @@ function TaskInspector({
     task?.deferUntil,
     task?.projectId,
     task?.listId,
+    task?.sectionId,
     task?.reminders,
     task?.startAt,
     task?.startAtIsAllDay,
@@ -3580,6 +3610,7 @@ function TaskInspector({
       priority: task.priority,
       tags: task.tags,
       contexts: task.contexts,
+      sectionId: task.sectionId,
       plannedDate: task.plannedDate,
       deferUntil: task.deferUntil,
       startAt: task.startAt,
@@ -4290,6 +4321,34 @@ function TaskInspector({
             {task.source.type === "feishu" && (
               <small className="field-hint">仅本地，不同步飞书</small>
             )}
+          </div>
+          <div className="detail-field">
+            <label htmlFor="section-id">分组标题</label>
+            <input
+              id="section-id"
+              className="field-input"
+              value={sectionId}
+              onChange={(event) => {
+                markDirty("sectionId");
+                setSectionId(event.target.value);
+              }}
+              onBlur={() => {
+                if (!dirtyFieldsRef.current.has("sectionId")) return;
+                const revision = currentDirtyRevision("sectionId");
+                const next = sectionId.trim();
+                void save({ sectionId: next || null }).then((saved) => {
+                  if (saved) {
+                    setSectionId(next);
+                    clearDirtyIfCurrent("sectionId", revision);
+                  }
+                });
+              }}
+              placeholder="例如：本周发布"
+              maxLength={80}
+            />
+            <small className="field-hint">
+              本地标题，用来把任务聚在一起；不写回飞书
+            </small>
           </div>
           <div className="detail-field">
             <label htmlFor="task-tags">标签</label>
@@ -5681,6 +5740,7 @@ function NewTaskSheet({
   const [reminderAt, setReminderAt] = useState("");
   const [projectId, setProjectId] = useState("");
   const [listId, setListId] = useState("");
+  const [sectionId, setSectionId] = useState("");
   const [tags, setTags] = useState("");
   const [contexts, setContexts] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
@@ -5735,6 +5795,7 @@ function NewTaskSheet({
         dueAt: dueAtIso,
         projectId: resolveProjectInput(projectId, projects) || undefined,
         listId: resolveListInput(listId, lists) || undefined,
+        sectionId: sectionId.trim() || undefined,
         tags: [
           ...new Set(
             tags
@@ -5880,6 +5941,20 @@ function NewTaskSheet({
                 <option key={list.id} value={list.name} label={list.id} />
               ))}
             </datalist>
+          </div>
+          <div className="detail-field">
+            <label htmlFor="new-section">分组标题</label>
+            <input
+              id="new-section"
+              className="field-input"
+              value={sectionId}
+              onChange={(event) => setSectionId(event.target.value)}
+              placeholder="例如：本周发布"
+              maxLength={80}
+            />
+            <small className="field-hint">
+              可选的本地标题，方便在列表中分组；不写回飞书
+            </small>
           </div>
           <div className="detail-field">
             <label htmlFor="new-tags">标签</label>

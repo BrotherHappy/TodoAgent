@@ -526,6 +526,13 @@ const validateTask = (task: Task): Task => {
   if (task.flagged !== undefined && typeof task.flagged !== "boolean") {
     throw new TaskValidationError("Task flagged value must be boolean.");
   }
+  if (task.sectionId !== undefined) {
+    task.sectionId = task.sectionId.trim();
+    if (task.sectionId.length === 0) delete task.sectionId;
+    else if (task.sectionId.length > 80) {
+      throw new TaskValidationError("Task section heading cannot exceed 80 characters.");
+    }
+  }
   task.tags = uniqueStrings(task.tags);
   task.contexts = validateContexts(task.contexts ?? [], "contexts");
   task.dependencyIds = uniqueStrings(task.dependencyIds).filter(

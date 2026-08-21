@@ -1473,6 +1473,26 @@ select {
   gap: 4px;
 }
 
+.task-section-group + .task-section-group {
+  margin-top: 12px;
+}
+
+.task-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 2px 4px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.task-section-heading span:last-child {
+  color: var(--app-text-faint);
+  font-weight: 500;
+}
+
 .task-row {
   min-height: 58px;
   display: grid;
@@ -1673,6 +1693,19 @@ select {
   border-radius: 999px;
   color: var(--app-brand-strong);
   background: color-mix(in srgb, var(--app-brand) 8%, transparent);
+}
+.task-section-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--app-warning) 32%, transparent);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--app-warning) 88%, var(--app-text));
+  background: color-mix(in srgb, var(--app-warning) 9%, transparent);
 }
 .task-meta .task-reason {
   display: inline-flex;

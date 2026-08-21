@@ -455,6 +455,59 @@ describe("task Agent tools", () => {
     expect((await tasks.getTask(taskId))?.deferUntil).toBeUndefined();
   });
 
+  it("lets Agent assign and clear a local section heading", async () => {
+    const tools = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    });
+    const create = tools.find((tool) => tool.name === "task_create")!;
+    const update = tools.find((tool) => tool.name === "task_update")!;
+    const created = await create.execute(
+      {
+        title: "分组任务",
+        notes: "",
+        source: "local",
+        projectId: null,
+        listId: null,
+        sectionId: "本周发布",
+        plannedDate: null,
+        deferUntil: null,
+        startAt: null,
+        dueAt: null,
+        priority: "none",
+        tags: [],
+        contexts: [],
+      },
+      executionContext("task_create-section"),
+    );
+    expect(created.data).toMatchObject({
+      task: { sectionId: "本周发布" },
+    });
+    const taskId = (created.data as { task: { id: string } }).task.id;
+    await update.execute(
+      {
+        id: taskId,
+        title: null,
+        notes: null,
+        privateNotes: null,
+        flagged: null,
+        deferUntil: null,
+        projectId: null,
+        listId: null,
+        sectionId: null,
+        plannedDate: null,
+        startAt: null,
+        dueAt: null,
+        priority: null,
+        tags: null,
+        contexts: null,
+        clearFields: ["sectionId"],
+      },
+      executionContext("task_update-clear-section"),
+    );
+    expect((await tasks.getTask(taskId))?.sectionId).toBeUndefined();
+  });
+
   it("creates, reads, updates, and clears start/project/list task fields", async () => {
     const tools = createTaskTools({
       tasks,
