@@ -10357,6 +10357,63 @@ select {
   flex-direction: column;
   color: var(--app-danger, #c14f59);
 }
+.global-search-start {
+  min-height: 116px;
+  padding: 19px 14px 22px;
+}
+.global-search-recent {
+  display: grid;
+  gap: 11px;
+}
+.global-search-recent-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.global-search-clear-recent {
+  border: 0;
+  padding: 2px 4px;
+  color: var(--app-text-faint);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.global-search-clear-recent:hover {
+  color: var(--app-brand-strong);
+}
+.global-search-recent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.global-search-recent-chip {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 31px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-surface-raised) 78%, transparent);
+  font-size: 11px;
+  cursor: pointer;
+}
+.global-search-recent-chip:hover {
+  border-color: color-mix(in srgb, var(--app-brand) 38%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.global-search-recent-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .global-search-state .spin {
   animation: global-search-spin 900ms linear infinite;
 }

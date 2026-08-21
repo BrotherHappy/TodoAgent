@@ -20,6 +20,11 @@ import {
   type GlobalSearchResultKind,
 } from "../shared/global-search";
 import type { Task, TaskList, TaskProject } from "../shared/models";
+import {
+  clearGlobalSearchHistory,
+  readGlobalSearchHistory,
+  rememberGlobalSearch,
+} from "./global-search-history";
 
 type SearchFilter = "all" | GlobalSearchResultKind;
 
@@ -71,6 +76,7 @@ export function GlobalSearchSheet({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<SearchFilter>("all");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [recentQueries, setRecentQueries] = useState<string[]>(() => readGlobalSearchHistory());
   const inputRef = useRef<HTMLInputElement>(null);
 
   const searchInput: GlobalSearchInput = useMemo(
@@ -95,7 +101,15 @@ export function GlobalSearchSheet({
 
   const selectActive = () => {
     const result = results[activeIndex];
-    if (result) onSelect(result);
+    if (result) {
+      setRecentQueries(rememberGlobalSearch(query));
+      onSelect(result);
+    }
+  };
+
+  const selectResult = (result: GlobalSearchResult): void => {
+    setRecentQueries(rememberGlobalSearch(query));
+    onSelect(result);
   };
 
   return (
@@ -214,9 +228,46 @@ export function GlobalSearchSheet({
               ) : null}
             </div>
           ) : !query.trim() ? (
-            <div className="global-search-state">
-              <Command size={19} aria-hidden="true" />
-              <span>输入关键词，搜索所有本地内容</span>
+            <div className="global-search-start">
+              {recentQueries.length > 0 ? (
+                <div className="global-search-recent">
+                  <div className="global-search-recent-heading">
+                    <span>最近搜索</span>
+                    <button
+                      type="button"
+                      className="global-search-clear-recent"
+                      onClick={() => {
+                        clearGlobalSearchHistory();
+                        setRecentQueries([]);
+                        inputRef.current?.focus();
+                      }}
+                    >
+                      清空
+                    </button>
+                  </div>
+                  <div className="global-search-recent-list">
+                    {recentQueries.map((recent) => (
+                      <button
+                        key={recent}
+                        type="button"
+                        className="global-search-recent-chip"
+                        onClick={() => {
+                          setQuery(recent);
+                          inputRef.current?.focus();
+                        }}
+                      >
+                        <Search size={13} aria-hidden="true" />
+                        <span>{recent}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="global-search-state">
+                  <Command size={19} aria-hidden="true" />
+                  <span>输入关键词，搜索所有本地内容</span>
+                </div>
+              )}
             </div>
           ) : results.length === 0 ? (
             <div className="global-search-state">
@@ -233,7 +284,7 @@ export function GlobalSearchSheet({
                 role="option"
                 aria-selected={index === activeIndex}
                 onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => onSelect(result)}
+                onClick={() => selectResult(result)}
               >
                 <span className={`global-search-result-icon is-${result.kind}`} aria-hidden="true">
                   {resultIcon(result.kind)}
@@ -257,6 +308,7 @@ export function GlobalSearchSheet({
           <span><ArrowUp size={13} /><ArrowDown size={13} /> 选择</span>
           <span><CornerDownLeft size={13} /> 打开</span>
           <span>⌘ ⇧ F 随时打开</span>
+          <span>最近搜索仅保存在本机</span>
         </footer>
       </section>
     </div>
