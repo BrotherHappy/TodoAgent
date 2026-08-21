@@ -1,4 +1,4 @@
-import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, ListChecks, Plus, Sparkles, Upload } from "lucide-react";
+import { CalendarClock, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, GripVertical, Inbox, ListChecks, Plus, Sparkles, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import type { Task, UpdateTaskInput } from "../shared/models";
 import {
@@ -36,6 +36,12 @@ import {
   type WorkCycleWeeks,
 } from "./work-cycles";
 import { buildFocusInsights } from "./focus-insights";
+import {
+  normalizeCalendarSourceName,
+  readHiddenCalendarSources,
+  setCalendarSourceHidden,
+  writeHiddenCalendarSources,
+} from "./calendar-view-preferences";
 
 type ToastKind = "success" | "error" | "info";
 
@@ -108,6 +114,7 @@ export function TimelinePage({
   const nowIndicatorRef = useRef<HTMLSpanElement>(null);
   const autoScrolledKeyRef = useRef<string | undefined>(undefined);
   const calendarInputRef = useRef<HTMLInputElement>(null);
+  const [hiddenCalendarSources, setHiddenCalendarSources] = useState<string[]>(() => readHiddenCalendarSources());
   const [weeklyCapacityHours, setWeeklyCapacityHours] = useState(() => {
     try {
       const stored = Number(localStorage.getItem("todo-agent:weekly-capacity-hours"));
@@ -155,6 +162,20 @@ export function TimelinePage({
       ),
     [boardProjectId, tasks],
   );
+  const calendarSourceNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const event of calendarEvents) {
+      const normalized = normalizeCalendarSourceName(event.sourceName);
+      names.set(normalized.toLocaleLowerCase(), normalized);
+    }
+    return Array.from(names.values()).sort((left, right) => left.localeCompare(right, "zh-CN"));
+  }, [calendarEvents]);
+  const visibleCalendarEvents = useMemo(() => {
+    const hidden = new Set(hiddenCalendarSources.map((source) => source.toLocaleLowerCase()));
+    return calendarEvents.filter(
+      (event) => !hidden.has(normalizeCalendarSourceName(event.sourceName).toLocaleLowerCase()),
+    );
+  }, [calendarEvents, hiddenCalendarSources]);
   const bySlot = useMemo(() => {
     const map = new Map<number, typeof scheduled>();
     scheduled.forEach((placement) => {
@@ -165,17 +186,17 @@ export function TimelinePage({
     return map;
   }, [scheduled]);
   const dayCalendarEvents = useMemo(
-    () => calendarEventsForDate(calendarEvents, date),
-    [calendarEvents, date],
+    () => calendarEventsForDate(visibleCalendarEvents, date),
+    [date, visibleCalendarEvents],
   );
   const dayCalendarBlocks = useMemo(
-    () => calendarBusyBlocksForDate(calendarEvents, date),
-    [calendarEvents, date],
+    () => calendarBusyBlocksForDate(visibleCalendarEvents, date),
+    [date, visibleCalendarEvents],
   );
   const weekCalendarSummaries = useMemo(
     () => weekDates.map((day) => {
-      const events = calendarEventsForDate(calendarEvents, day);
-      const blocks = calendarBusyBlocksForDate(calendarEvents, day);
+      const events = calendarEventsForDate(visibleCalendarEvents, day);
+      const blocks = calendarBusyBlocksForDate(visibleCalendarEvents, day);
       return {
         date: day,
         eventCount: events.length,
@@ -185,7 +206,7 @@ export function TimelinePage({
         ),
       };
     }),
-    [calendarEvents, weekDates],
+    [visibleCalendarEvents, weekDates],
   );
   const weekCalendarEventCount = weekCalendarSummaries.reduce(
     (total, day) => total + day.eventCount,
@@ -315,6 +336,33 @@ export function TimelinePage({
     } catch {
       // A read-only storage area should not make the timeline unusable.
     }
+  };
+
+  const setCalendarSourceVisible = (source: string, visible: boolean) => {
+    const next = setCalendarSourceHidden(hiddenCalendarSources, source, !visible);
+    setHiddenCalendarSources(next);
+    writeHiddenCalendarSources(next);
+  };
+
+  const showAllCalendarSources = () => {
+    writeHiddenCalendarSources([]);
+    setHiddenCalendarSources([]);
+  };
+
+  const clearCalendarSource = (source: string) => {
+    if (!onCalendarEventsChange) return;
+    const normalized = normalizeCalendarSourceName(source);
+    const previous = [...calendarEvents];
+    const next = calendarEvents.filter(
+      (event) => normalizeCalendarSourceName(event.sourceName).toLocaleLowerCase() !== normalized.toLocaleLowerCase(),
+    );
+    if (next.length === previous.length) return;
+    setCalendarSourceVisible(normalized, true);
+    onCalendarEventsChange(next);
+    notify(`已清除“${normalized}”的本地日历事件`, "info", {
+      label: "撤销",
+      run: () => onCalendarEventsChange(previous),
+    });
   };
 
   const importCalendar = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -816,6 +864,47 @@ export function TimelinePage({
                 )}
               </div>
             </div>
+            {calendarSourceNames.length > 0 && (
+              <div className="timeline-calendar-source-filter" role="group" aria-label="日历来源筛选">
+                <span className="timeline-calendar-source-label">显示来源</span>
+                <button
+                  type="button"
+                  className={`timeline-calendar-source-toggle ${hiddenCalendarSources.length === 0 ? "is-active" : ""}`}
+                  aria-pressed={hiddenCalendarSources.length === 0}
+                  onClick={showAllCalendarSources}
+                >
+                  全部
+                </button>
+                {calendarSourceNames.map((source) => {
+                  const visible = !hiddenCalendarSources.some(
+                    (hidden) => hidden.toLocaleLowerCase() === source.toLocaleLowerCase(),
+                  );
+                  return (
+                    <span className="timeline-calendar-source-chip" key={source}>
+                      <button
+                        type="button"
+                        className={`timeline-calendar-source-toggle ${visible ? "is-active" : ""}`}
+                        aria-pressed={visible}
+                        onClick={() => setCalendarSourceVisible(source, !visible)}
+                      >
+                        {source}
+                      </button>
+                      {onCalendarEventsChange && (
+                        <button
+                          type="button"
+                          className="timeline-calendar-source-clear"
+                          aria-label={`清除日历来源：${source}`}
+                          title={`清除“${source}”的本地事件`}
+                          onClick={() => clearCalendarSource(source)}
+                        >
+                          <Trash2 size={12} aria-hidden="true" />
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             {dayCalendarBlocks.length ? (
               <div className="timeline-calendar-event-list">
                 {dayCalendarBlocks.map((block) => {

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelinePage, type TimelinePageProps } from "../src/renderer/TimelinePage";
 import type { Task } from "../src/shared/models";
 import { addLocalDays, localDateKey, localIsoAt } from "../src/renderer/timeline-utils";
+import { writeHiddenCalendarSources } from "../src/renderer/calendar-view-preferences";
 
 const date = localDateKey();
 
@@ -43,7 +44,10 @@ function props(overrides: Partial<TimelinePageProps> = {}): TimelinePageProps {
   };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  writeHiddenCalendarSources([]);
+});
 
 describe("TimelinePage", () => {
   it("shows scheduled and unscheduled tasks on the selected day", () => {
@@ -98,10 +102,71 @@ describe("TimelinePage", () => {
     );
     const agenda = screen.getByRole("region", { name: "今日议程" });
     expect(within(agenda).getByText("产品同步会")).toBeVisible();
-    expect(within(agenda).getByText("工作日历")).toBeVisible();
+    expect(within(agenda).getByRole("button", { name: "工作日历" })).toBeVisible();
     expect(within(agenda).getByText("1 个事件")).toBeVisible();
     fireEvent.click(within(agenda).getByRole("button", { name: "为“产品同步会”创建跟进任务" }));
     expect(onCreateFollowUp).toHaveBeenCalledWith(event);
+  });
+
+  it("filters multiple calendar sources without changing stored events", () => {
+    const workEvent = {
+      id: "calendar-work",
+      summary: "工作评审",
+      startAt: localIsoAt(date, 10 * 60),
+      endAt: localIsoAt(date, 11 * 60),
+      allDay: false,
+      sourceName: "工作日历",
+    };
+    const personalEvent = {
+      id: "calendar-personal",
+      summary: "个人安排",
+      startAt: localIsoAt(date, 13 * 60),
+      endAt: localIsoAt(date, 14 * 60),
+      allDay: false,
+      sourceName: "个人日历",
+    };
+    render(<TimelinePage {...props({ calendarEvents: [workEvent, personalEvent] })} />);
+    const agenda = screen.getByRole("region", { name: "今日议程" });
+    expect(within(agenda).getByText("工作评审")).toBeVisible();
+    expect(within(agenda).getByText("个人安排")).toBeVisible();
+    fireEvent.click(within(agenda).getByRole("button", { name: "工作日历" }));
+    expect(within(agenda).queryByText("工作评审")).toBeNull();
+    expect(within(agenda).getByText("个人安排")).toBeVisible();
+    fireEvent.click(within(agenda).getByRole("button", { name: "全部" }));
+    expect(within(agenda).getByText("工作评审")).toBeVisible();
+  });
+
+  it("can clear one calendar source with an undo action", () => {
+    const notify = vi.fn();
+    const onCalendarEventsChange = vi.fn();
+    const workEvent = {
+      id: "calendar-work",
+      summary: "工作评审",
+      startAt: localIsoAt(date, 10 * 60),
+      endAt: localIsoAt(date, 11 * 60),
+      allDay: false,
+      sourceName: "工作日历",
+    };
+    const personalEvent = {
+      id: "calendar-personal",
+      summary: "个人安排",
+      startAt: localIsoAt(date, 13 * 60),
+      endAt: localIsoAt(date, 14 * 60),
+      allDay: false,
+      sourceName: "个人日历",
+    };
+    render(
+      <TimelinePage
+        {...props({ calendarEvents: [workEvent, personalEvent], onCalendarEventsChange, notify })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "清除日历来源：工作日历" }));
+    expect(onCalendarEventsChange).toHaveBeenCalledWith([personalEvent]);
+    expect(notify).toHaveBeenCalledWith(
+      "已清除“工作日历”的本地日历事件",
+      "info",
+      expect.objectContaining({ label: "撤销" }),
+    );
   });
 
   it("offers action-item extraction when an event has notes", () => {

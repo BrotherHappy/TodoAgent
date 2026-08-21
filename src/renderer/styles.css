@@ -1908,6 +1908,70 @@ select {
   color: var(--app-text-faint);
   font-size: 11px;
 }
+.timeline-calendar-source-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 14%, var(--app-line));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--app-surface-raised) 54%, transparent);
+}
+.timeline-calendar-source-label {
+  margin-right: 2px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.timeline-calendar-source-chip {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  max-width: 100%;
+}
+.timeline-calendar-source-toggle,
+.timeline-calendar-source-clear {
+  min-height: 25px;
+  border: 1px solid var(--app-line);
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-surface-raised) 78%, transparent);
+  font-size: 10px;
+  cursor: pointer;
+}
+.timeline-calendar-source-toggle {
+  max-width: 190px;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 4px 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline-calendar-source-toggle:hover,
+.timeline-calendar-source-toggle.is-active {
+  border-color: color-mix(in srgb, var(--app-brand) 45%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+.timeline-calendar-source-clear {
+  width: 25px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  padding: 0;
+  color: var(--app-text-faint);
+}
+.timeline-calendar-source-clear:hover,
+.timeline-calendar-source-clear:focus-visible {
+  border-color: color-mix(in srgb, var(--app-danger, #c14f59) 42%, var(--app-line));
+  color: var(--app-danger, #c14f59);
+  background: color-mix(in srgb, var(--app-danger, #c14f59) 8%, var(--app-surface-raised));
+}
+.timeline-calendar-source-toggle:focus-visible,
+.timeline-calendar-source-clear:focus-visible {
+  outline: 2px solid var(--app-brand);
+  outline-offset: 2px;
+}
 .timeline-calendar-event-list {
   display: grid;
   gap: 5px;
