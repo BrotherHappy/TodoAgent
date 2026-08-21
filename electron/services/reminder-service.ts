@@ -166,6 +166,11 @@ export class ReminderScheduler {
         body: actionableTaskDue.slice(0, 3).map((candidate) => candidate.title).join('、'),
         kind: 'missed-summary',
         actions: [{ id: 'open', label: '查看 Today' }],
+        reason: {
+          code: 'missed-summary',
+          label: '合并了错过的提醒',
+          detail: `有 ${actionableTaskDue.length} 项提醒同时到期，已合并成一条，避免连续打扰。`,
+        },
       };
       await this.#sink.show(summary);
       deliveries.push(summary);
@@ -182,6 +187,7 @@ export class ReminderScheduler {
           body: candidate.body,
           kind: candidate.kind,
           actions: actionsFor(candidate),
+          ...(candidate.reason === undefined ? {} : { reason: structuredClone(candidate.reason) }),
         };
         await this.#sink.show(delivery);
         deliveries.push(delivery);
@@ -209,6 +215,7 @@ export class ReminderScheduler {
         body: candidate.body,
         kind: candidate.kind,
         actions: actionsFor(candidate),
+        ...(candidate.reason === undefined ? {} : { reason: structuredClone(candidate.reason) }),
       };
       await this.#sink.show(delivery);
       deliveries.push(delivery);

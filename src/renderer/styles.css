@@ -4089,6 +4089,33 @@ select {
   gap: 8px;
   margin: 3px 0 12px;
 }
+.reminder-reason {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 18%, var(--app-line));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--app-brand) 5%, transparent);
+}
+.reminder-reason summary {
+  cursor: pointer;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+.reminder-reason-copy {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+  padding-left: 18px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.reminder-reason-copy strong {
+  color: var(--app-text);
+  font-size: 13px;
+}
 .reminder-custom-row {
   border-top: 1px solid var(--app-line);
 }

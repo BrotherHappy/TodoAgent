@@ -33,11 +33,20 @@ describe('ReminderScheduler', () => {
     const now = new Date('2026-08-09T09:00:00.000Z');
     const { scheduler, shown } = createHarness(now);
     await scheduler.load();
-    await scheduler.replaceCandidates([{ id: 'r1', taskId: 't1', kind: 'task', title: '提交周报', body: '今天到期', scheduledAt: now.toISOString() }]);
+    await scheduler.replaceCandidates([{
+      id: 'r1',
+      taskId: 't1',
+      kind: 'task',
+      title: '提交周报',
+      body: '今天到期',
+      scheduledAt: now.toISOString(),
+      reason: { code: 'deadline', label: '任务已到截止时间' },
+    }]);
     await scheduler.tick();
     await scheduler.tick();
     expect(shown).toHaveLength(1);
     expect(shown[0].actions.map((action) => action.id)).toContain('complete');
+    expect(shown[0].reason).toEqual({ code: 'deadline', label: '任务已到截止时间' });
   });
 
   it('coalesces more than three missed task reminders', async () => {
@@ -55,6 +64,11 @@ describe('ReminderScheduler', () => {
     await scheduler.tick();
     expect(shown).toHaveLength(1);
     expect(shown[0].kind).toBe('missed-summary');
+    expect(shown[0].reason).toEqual({
+      code: 'missed-summary',
+      label: '合并了错过的提醒',
+      detail: '有 4 项提醒同时到期，已合并成一条，避免连续打扰。',
+    });
   });
 
   it('enforces the daily task reminder budget without blocking important notices', async () => {

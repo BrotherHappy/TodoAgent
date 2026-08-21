@@ -13262,6 +13262,15 @@ function ReminderActionSheet({
           </div>
         </div>
         <div className="modal-body">
+          {delivery.reason && (
+            <details className="reminder-reason" open>
+              <summary>为什么现在提醒</summary>
+              <div className="reminder-reason-copy">
+                <strong>{delivery.reason.label}</strong>
+                {delivery.reason.detail && <span>{delivery.reason.detail}</span>}
+              </div>
+            </details>
+          )}
           <div className="settings-subheading">快速稍后</div>
           <div className="reminder-presets">
             {available.has("snooze-10m") && (

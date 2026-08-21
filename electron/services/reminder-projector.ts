@@ -1,5 +1,5 @@
 import type { Task } from '../../src/shared/models';
-import type { ReminderCandidate } from '../../src/shared/reminders';
+import type { ReminderCandidate, ReminderReason } from '../../src/shared/reminders';
 import type { NotificationSettings } from '../../src/shared/settings';
 
 export interface ReminderTaskSource {
@@ -281,6 +281,13 @@ export const projectReminderCandidates = (
         source: reminder.source,
         ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
         priority: task.priority,
+        reason: {
+          code: 'explicit',
+          label: '你设置的提醒',
+          ...(reminder.label?.trim()
+            ? { detail: `提醒内容：${reminder.label.trim()}` }
+            : { detail: '这是任务上的本地提醒时间。' }),
+        } satisfies ReminderReason,
       });
     }
 
@@ -304,6 +311,11 @@ export const projectReminderCandidates = (
           source: task.source.type,
           ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
           priority: task.priority,
+          reason: {
+            code: 'deadline',
+            label: '任务已到截止时间',
+            detail: '截止时间已到，先决定完成、稍后处理，或打开任务查看详情。',
+          } satisfies ReminderReason,
         });
       }
     }
@@ -323,6 +335,11 @@ export const projectReminderCandidates = (
         title: '今日任务简报',
         body: morningBody(tasks, today, inputContext.timeZone),
         scheduledAt: scheduled.toISOString(),
+        reason: {
+          code: 'morning-brief',
+          label: '每日晨间简报',
+          detail: '根据今天的逾期与计划任务生成，不会自动修改任务。',
+        } satisfies ReminderReason,
       });
     }
   }
