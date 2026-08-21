@@ -119,6 +119,36 @@ describe("OpenAIChatCompletionsGateway", () => {
     expect(capturedUrl).toBe(expectedUrl);
   });
 
+  it("trims pasted endpoint, model, and bearer values before sending", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const gateway = new OpenAIChatCompletionsGateway({
+      baseUrl: "  http://models.example/v1/  ",
+      model: "  gpt-5.6-sol\n",
+      credentialRef: "model.default",
+      secretResolver: { resolve: async () => "  provider-key\n" },
+      fetch: async (input, init) => {
+        capturedUrl = input.toString();
+        capturedInit = init;
+        return successfulResponse();
+      },
+    });
+
+    await gateway.complete({
+      messages: [{ role: "user", content: "Reply with OK." }],
+      tools: [],
+      toolChoice: "none",
+    });
+
+    expect(capturedUrl).toBe("http://models.example/v1/chat/completions");
+    expect(new Headers(capturedInit?.headers).get("Authorization")).toBe(
+      "Bearer provider-key",
+    );
+    expect(JSON.parse(String(capturedInit?.body))).toMatchObject({
+      model: "gpt-5.6-sol",
+    });
+  });
+
   it.each([
     "not-a-url",
     "file:///tmp/model",
