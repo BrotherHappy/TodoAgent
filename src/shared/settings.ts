@@ -14,6 +14,45 @@ export const FLOATING_HOVER_EXPAND_DELAY_DEFAULT_MS = 1_000;
 export type AgentPermissionMode = 'read-only' | 'standard' | 'full-access';
 export type PersonaPreset = 'minimal' | 'warm' | 'calm' | 'strict';
 export type TaskReminderSourceMode = 'normal' | 'important-only' | 'off';
+/** Agent CLIs that can publish their live activity to Todo Pet. */
+export type ExternalAgentId =
+  | 'claude-code'
+  | 'codex'
+  | 'copilot-cli'
+  | 'gemini-cli'
+  | 'antigravity-cli'
+  | 'cursor-agent'
+  | 'codebuddy'
+  | 'workbuddy'
+  | 'kiro-cli'
+  | 'kimi-cli'
+  | 'qwen-code'
+  | 'zcode'
+  | 'codewhale'
+  | 'openclaw'
+  | 'hermes'
+  | 'opencode'
+  | 'mimocode'
+  | 'pi'
+  | 'qoder'
+  | 'qoderwork'
+  | 'qwenwork'
+  | 'reasonix-cli'
+  | 'traecode'
+  | 'deepseek-harness'
+  | 'custom';
+
+/** Local-only bridge for external coding agents; no prompt or tool arguments are accepted. */
+export interface AgentActivitySettings {
+  enabled: boolean;
+  /** 0 chooses the first available port in the reserved local range. */
+  port: number;
+  allowedAgents: ExternalAgentId[];
+  /** Remove sessions that stop reporting after this many seconds. */
+  staleAfterSeconds: number;
+  /** Whether the floating pet should reflect the aggregate external state. */
+  showInPet: boolean;
+}
 export type FeishuConnectionMode =
   | 'personal-direct'
   | 'existing-direct'
@@ -215,6 +254,7 @@ export interface AppSettings {
   weather: WeatherSettings;
   pet: PetBehaviorSettings;
   ai: AiProviderSettings;
+  agentActivity: AgentActivitySettings;
   feishu: FeishuIntegrationSettings;
   modelDataScope: ModelDataScope;
   agentCapabilities: AgentCapabilitySettings;
@@ -325,6 +365,39 @@ export const defaultSettings: AppSettings = {
       promptUsdPerMillionTokens: 0,
       completionUsdPerMillionTokens: 0,
     },
+  },
+  agentActivity: {
+    enabled: false,
+    port: 0,
+    allowedAgents: [
+      'claude-code',
+      'codex',
+      'copilot-cli',
+      'gemini-cli',
+      'antigravity-cli',
+      'cursor-agent',
+      'codebuddy',
+      'workbuddy',
+      'kiro-cli',
+      'kimi-cli',
+      'qwen-code',
+      'zcode',
+      'codewhale',
+      'openclaw',
+      'hermes',
+      'opencode',
+      'mimocode',
+      'pi',
+      'qoder',
+      'qoderwork',
+      'qwenwork',
+      'reasonix-cli',
+      'traecode',
+      'deepseek-harness',
+      'custom',
+    ],
+    staleAfterSeconds: 120,
+    showInPet: true,
   },
   feishu: {
     configured: false,

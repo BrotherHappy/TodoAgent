@@ -142,6 +142,19 @@ export interface TaskFocusSession {
   startedAt: IsoDateTime;
   endedAt: IsoDateTime;
   elapsedSeconds: number;
+  /**
+   * Older focus sessions omit this field. Manual work-log entries mark it so
+   * the inspector can distinguish a typed log from a Pomodoro session while
+   * keeping both entries in the same local timeline.
+   */
+  source?: 'focus' | 'manual';
+}
+
+export interface RecordWorkLogInput {
+  /** Whole minutes for one manually recorded work segment. */
+  minutes: number;
+  /** Defaults to the current time; useful for correcting a past entry. */
+  endedAt?: IsoDateTime;
 }
 
 export interface TaskAttachment {
@@ -471,6 +484,7 @@ export type TaskOperationKind =
   | 'bulk'
   | 'move-to-today'
   | 'focus'
+  | 'work-log'
   | 'skip-recurring'
   | 'reorder-today'
   | 'plan-today'

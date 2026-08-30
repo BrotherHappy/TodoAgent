@@ -33,7 +33,25 @@ const task = (patch: Partial<Task>): Task => ({
 describe("PetCompletionStampsCard", () => {
   it("shows stamps and opens the original task", () => {
     const onOpenTask = vi.fn();
-    const completed = task({ id: "task-1", title: "写完发布说明" });
+    // Keep the assertion about the “today” label independent from the clock
+    // on the machine running the suite. The component intentionally derives
+    // the label from the local calendar day, so a fixed historical timestamp
+    // becomes a stale fixture after the test date moves forward.
+    const now = new Date();
+    const completedToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      10,
+      0,
+      0,
+      0,
+    ).toISOString();
+    const completed = task({
+      id: "task-1",
+      title: "写完发布说明",
+      completedAt: completedToday,
+    });
     render(
       <PetCompletionStampsCard
         tasks={[completed]}
@@ -59,4 +77,3 @@ describe("PetCompletionStampsCard", () => {
     expect(screen.getByText("完成第一件任务后，宠物会为你盖下一枚小印章。")).toBeVisible();
   });
 });
-

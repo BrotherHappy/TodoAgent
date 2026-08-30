@@ -16,6 +16,7 @@ import {
   type AppSettings,
 } from "../src/shared/settings";
 import type { AgentDesktopService } from "./agent/agent-desktop-service";
+import type { AgentActivityBridge } from "./agent/agent-activity-bridge";
 import type { SettingsService } from "./services/settings-service";
 import type { TaskService } from "./services/task-service";
 import { parseQuickCapture } from "./services/quick-capture-parser";
@@ -256,6 +257,45 @@ const settingsSchema = z
         credentialId: z.string().trim().min(1).max(512).optional(),
       })
       .strict(),
+    agentActivity: z
+      .object({
+        enabled: z.boolean(),
+        port: z.number().int().min(0).max(65_535),
+        allowedAgents: z
+          .array(
+            z.enum([
+              "claude-code",
+              "codex",
+              "copilot-cli",
+              "gemini-cli",
+              "antigravity-cli",
+              "cursor-agent",
+              "codebuddy",
+              "workbuddy",
+              "kiro-cli",
+              "kimi-cli",
+              "qwen-code",
+              "zcode",
+              "codewhale",
+              "openclaw",
+              "hermes",
+              "opencode",
+              "mimocode",
+              "pi",
+              "qoder",
+              "qoderwork",
+              "qwenwork",
+              "reasonix-cli",
+              "traecode",
+              "deepseek-harness",
+              "custom",
+            ]),
+          )
+          .max(32),
+        staleAfterSeconds: z.number().int().min(15).max(3_600),
+        showInPet: z.boolean(),
+      })
+      .strict(),
     feishu: z
       .object({
         configured: z.boolean(),
@@ -331,6 +371,7 @@ export interface DesktopIpcDependencies {
   };
   settings: SettingsService;
   agent: AgentDesktopService;
+  agentActivity?: AgentActivityBridge;
   feishu: FeishuDesktopApi;
   notifications: NotificationDesktopApi;
   pet: PetDesktopApi;
@@ -346,6 +387,8 @@ export interface DesktopIpcDependencies {
   setFloatingVisible: (visible: boolean) => Promise<AppSettings>;
   setFloatingExpanded: (expanded: boolean) => void;
   setFloatingPetOnly: (petOnly: boolean) => void;
+  setFloatingEdgeDocked: (docked: boolean) => boolean;
+  peekFloatingEdge: () => boolean;
   beginFloatingDrag: (screenX: number, screenY: number) => boolean;
   updateFloatingDrag: (screenX: number, screenY: number) => boolean;
   endFloatingDrag: () => void;
@@ -465,6 +508,22 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.taskResetFocus, (_event, input) =>
     changed(() => dependencies.tasks.resetFocus(idSchema.parse(input))),
   );
+  handle(DESKTOP_CHANNELS.taskRecordWorkLog, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        minutes: z.number().int().min(1).max(720),
+        endedAt: z.string().datetime().optional(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() =>
+      dependencies.tasks.recordWorkLog(request.id, {
+        minutes: request.minutes,
+        endedAt: request.endedAt,
+      }),
+    );
+  });
   handle(DESKTOP_CHANNELS.taskReorderToday, (_event, input) =>
     changed(() =>
       dependencies.tasks.reorderToday(z.array(idSchema).max(500).parse(input)),
@@ -759,6 +818,34 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.credentialDelete, (_event, input) =>
     dependencies.settings.deleteCredential(idSchema.parse(input)),
   );
+  handle(DESKTOP_CHANNELS.agentActivityStatus, () =>
+    dependencies.agentActivity?.status() ?? {
+      enabled: false,
+      running: false,
+      tokenAvailable: false,
+      runtimePath: "",
+      activeSessions: 0,
+      state: "idle",
+    },
+  );
+  handle(DESKTOP_CHANNELS.agentActivitySetup, async () => {
+    if (!dependencies.agentActivity) throw new Error("AGENT_ACTIVITY_UNAVAILABLE");
+    await dependencies.agentActivity.start();
+    return dependencies.agentActivity.setup();
+  });
+  handle(DESKTOP_CHANNELS.agentActivityRotateToken, async () => {
+    if (!dependencies.agentActivity) throw new Error("AGENT_ACTIVITY_UNAVAILABLE");
+    return dependencies.agentActivity.rotateToken();
+  });
+  handle(DESKTOP_CHANNELS.agentActivitySnapshot, () =>
+    dependencies.agentActivity?.snapshot() ?? {
+      version: 1,
+      state: "idle",
+      activeSessionCount: 0,
+      liveSubagentCount: 0,
+      sessions: [],
+    },
+  );
 
   handle(DESKTOP_CHANNELS.shellGetInfo, () => dependencies.getInfo());
   handle(DESKTOP_CHANNELS.shellReadClipboard, () => dependencies.readClipboard());
@@ -781,6 +868,12 @@ export function registerDesktopIpc(
   );
   handle(DESKTOP_CHANNELS.shellSetFloatingPetOnly, (_event, input) =>
     dependencies.setFloatingPetOnly(z.boolean().parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.shellSetFloatingEdgeDocked, (_event, input) =>
+    dependencies.setFloatingEdgeDocked(z.boolean().parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.shellPeekFloatingEdge, () =>
+    dependencies.peekFloatingEdge(),
   );
   const floatingPointerSchema = z
     .object({

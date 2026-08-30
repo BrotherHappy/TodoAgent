@@ -1,4 +1,5 @@
 import { taskThemeAction, type TaskThemeId } from "./task-theme-action-packs";
+import type { AgentActivitySnapshot } from "../shared/agent-activity";
 
 export type PetIdleAction =
   | "idle"
@@ -49,6 +50,7 @@ export type PetAction =
   | "think"
   | "search"
   | "work"
+  | "juggle"
   | "approve"
   | "agent-error";
 
@@ -107,6 +109,8 @@ export interface PetBehaviorContext {
   taskDropActive?: boolean;
   /** Inferred companion posture for the task currently being shown. */
   taskTheme?: TaskThemeId;
+  /** Aggregate posture from Claude/Codex/OpenClaw/Hermes/OpenCode hooks. */
+  externalAgent?: AgentActivitySnapshot;
 }
 
 export interface PetInteractionResponse {
@@ -258,6 +262,7 @@ export const petActionLabels: Record<PetAction, string> = {
   think: "认真思考",
   search: "查找资料",
   work: "执行任务",
+  juggle: "同时照看多个 Agent",
   approve: "等待你的确认",
   "agent-error": "Agent 遇到问题",
 };
@@ -320,6 +325,7 @@ export const petActionDefinitions: Record<PetAction, PetActionDefinition> = {
   think: { priority: 90, durationMs: 0, interruptible: false, emotion: "curious" },
   search: { priority: 92, durationMs: 0, interruptible: false, emotion: "focused" },
   work: { priority: 94, durationMs: 0, interruptible: false, emotion: "focused" },
+  juggle: { priority: 95, durationMs: 0, interruptible: false, emotion: "excited" },
   approve: { priority: 100, durationMs: 0, interruptible: false, emotion: "concerned" },
   "agent-error": { priority: 98, durationMs: 0, interruptible: false, emotion: "concerned" },
 };
@@ -332,6 +338,26 @@ export function resolvePetAction(context: PetBehaviorContext): PetAction {
     if (/搜索|网页|资料|search|research/u.test(context.agentRunState)) return "search";
     if (/工具|执行|写入|命令|tool|running/u.test(context.agentRunState)) return "work";
     return "think";
+  }
+  switch (context.externalAgent?.state) {
+    case "notification":
+      return "approve";
+    case "error":
+      return "agent-error";
+    case "juggling":
+      return "juggle";
+    case "working":
+      return "work";
+    case "thinking":
+      return "think";
+    case "sweeping":
+      return "tidy";
+    case "carrying":
+      return "task-carry";
+    case "attention":
+      return "alert";
+    default:
+      break;
   }
   if (context.syncError) return "sync-error";
   if (context.syncing) return "sync";

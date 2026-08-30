@@ -4510,6 +4510,16 @@ button.dependency-graph-node:focus-visible {
   gap: 8px;
   color: var(--app-text-soft);
 }
+.task-work-log-list {
+  display: grid;
+  gap: 3px;
+  padding: 5px 8px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--app-brand) 6%, transparent);
+  color: var(--app-text-faint);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .section-count {
   margin-left: 4px;
   color: var(--app-text-faint);
@@ -5791,6 +5801,36 @@ button.dependency-graph-node:focus-visible {
   min-height: 230px;
   max-height: 230px;
 }
+.pet-shell.is-expanded.has-external-agent:not(.external-agent-collapsed):not(.has-interaction-wheel):not(.has-coop-game) .pet-compact {
+  min-height: 196px;
+  height: 196px;
+  max-height: 196px;
+}
+.pet-shell.is-expanded.has-external-agent.external-agent-collapsed:not(.has-interaction-wheel):not(.has-coop-game) .pet-compact {
+  min-height: 146px;
+  height: 146px;
+  max-height: 146px;
+}
+.pet-shell.is-expanded.has-external-agent.has-focus-session:not(.external-agent-collapsed):not(.has-interaction-wheel):not(.has-coop-game) .pet-compact {
+  min-height: 286px;
+  height: 286px;
+  max-height: 286px;
+}
+.pet-shell.is-expanded.has-external-agent.has-focus-session.external-agent-collapsed:not(.has-interaction-wheel):not(.has-coop-game) .pet-compact {
+  min-height: 230px;
+  height: 230px;
+  max-height: 230px;
+}
+.pet-shell.is-expanded.has-pet-reaction.has-external-agent:not(.pet-reaction-collapsed):not(.external-agent-collapsed):not(.has-interaction-wheel):not(.has-coop-game) .pet-compact {
+  min-height: 274px;
+  height: 274px;
+  max-height: 274px;
+}
+.pet-shell.is-expanded.has-pet-reaction.has-external-agent.has-focus-session:not(.pet-reaction-collapsed):not(.external-agent-collapsed):not(.has-interaction-wheel):not(.has-coop-game) .pet-compact {
+  min-height: 370px;
+  height: 370px;
+  max-height: 370px;
+}
 .pet-shell.is-expanded.has-pet-reaction:not(.has-interaction-wheel):not(.has-coop-game) .pet-reaction-bubble {
   top: 4px;
   right: 5px;
@@ -6323,6 +6363,8 @@ button.dependency-graph-node:focus-visible {
   --pet-scale: 1;
   --pet-gaze-x: 0;
   --pet-gaze-y: 0;
+  --pet-atlas-column: 0;
+  --pet-atlas-row: 0;
   --pet-body-light: #a8aaff;
   --pet-body-mid: #726ef0;
   --pet-body-dark: #514bcf;
@@ -6350,6 +6392,153 @@ button.dependency-graph-node:focus-visible {
   width: 100%;
   height: 100%;
   overflow: visible;
+}
+.pet-atlas-sprite {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: center bottom;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  contain: paint;
+}
+.pet-atlas-buffer-stack {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  contain: paint;
+  isolation: isolate;
+}
+.pet-atlas-buffer-stack > .pet-atlas-canvas {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: none !important;
+}
+.pet-atlas-buffer-stack[data-active-buffer="0"] > .pet-atlas-buffer-0,
+.pet-atlas-buffer-stack[data-active-buffer="1"] > .pet-atlas-buffer-1 {
+  opacity: 1;
+}
+.pet-atlas-motion {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: center bottom;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.pet-atlas-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  pointer-events: none;
+  image-rendering: auto;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  contain: paint;
+}
+.pet-atlas-sprite img {
+  display: block;
+  width: var(--pet-atlas-image-width, 400%);
+  height: var(--pet-atlas-image-height, 400%);
+  max-width: none;
+  user-select: none;
+  pointer-events: none;
+  transform: translate3d(
+    var(--pet-atlas-offset-x, 0%),
+    var(--pet-atlas-offset-y, 0%),
+    0
+  );
+  transform-origin: top left;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+/* The atlas owns the character silhouette. Keep the old SVG in the DOM as a
+   safe fallback and retain only the explicit interaction overlays that need
+   to sit above a generated frame (rope, pat, poke, tickle, and high-five). */
+.pet-visual-atlas {
+  position: relative;
+}
+.pet-visual-atlas .pet-atlas-sprite {
+  opacity: 1;
+}
+.pet-visual-atlas > svg .pet-rig,
+.pet-visual-atlas > svg .pet-ground,
+.pet-visual-atlas > svg .pet-prop,
+.pet-visual-atlas > svg .pet-season-prop,
+.pet-visual-atlas > svg .pet-weather-prop,
+.pet-visual-atlas > svg .pet-action-mark,
+.pet-visual-atlas > svg .pet-outfit {
+  opacity: 0 !important;
+}
+/* While a large local atlas is still decoding, keep the articulated SVG
+   visible as a graceful fallback. This avoids a blank pet on cold launch and
+   gives action changes an immediate, coherent pose until the double-buffered
+   canvas is ready. */
+.pet-visual-atlas:not([data-pet-atlas-ready="true"]) > svg .pet-rig,
+.pet-visual-atlas:not([data-pet-atlas-ready="true"]) > svg .pet-ground,
+.pet-visual-atlas:not([data-pet-atlas-ready="true"]) > svg .pet-prop,
+.pet-visual-atlas:not([data-pet-atlas-ready="true"]) > svg .pet-season-prop,
+.pet-visual-atlas:not([data-pet-atlas-ready="true"]) > svg .pet-weather-prop,
+.pet-visual-atlas:not([data-pet-atlas-ready="true"]) > svg .pet-action-mark,
+.pet-visual-atlas:not([data-pet-atlas-ready="true"]) > svg .pet-outfit {
+  opacity: 1 !important;
+}
+.pet-visual-atlas.pet-palette-mint .pet-atlas-sprite {
+  filter: hue-rotate(112deg) saturate(.78) brightness(1.03);
+}
+.pet-visual-atlas.pet-palette-sunset .pet-atlas-sprite {
+  filter: hue-rotate(292deg) saturate(1.08) brightness(1.03);
+}
+.pet-visual-atlas.pet-palette-midnight .pet-atlas-sprite {
+  filter: saturate(.72) brightness(.78) contrast(1.05);
+}
+.pet-visual-atlas.pet-action-jump-rope > svg .pet-jump-rope,
+.pet-visual-atlas.pet-action-jump-rope-ready > svg .pet-jump-rope,
+.pet-visual-atlas.pet-action-pet > svg .pet-pat-hand,
+.pet-visual-atlas.pet-action-poke > svg .pet-poke-finger,
+.pet-visual-atlas.pet-action-poke > svg .pet-poke-ripple,
+.pet-visual-atlas.pet-action-tickle > svg .pet-tickle-feather,
+.pet-visual-atlas.pet-action-high-five > svg .pet-high-five-hand {
+  opacity: 1 !important;
+}
+/* The generated interaction sheet already contains its own hand/rope. Do
+   not stack the legacy overlay on top of it (two ropes or two hands reads as
+   a rendering bug rather than a playful interaction). Legacy overlays remain
+   available for interaction actions that use the legacy atlas. */
+.pet-visual-atlas[data-pet-atlas-sheet="interaction"].pet-action-pet > svg .pet-pat-hand,
+.pet-visual-atlas[data-pet-atlas-sheet="interaction"].pet-action-jump-rope > svg .pet-jump-rope,
+.pet-visual-atlas[data-pet-atlas-sheet="interaction"].pet-action-jump-rope-ready > svg .pet-jump-rope {
+  opacity: 0 !important;
+}
+/* Todo Pet's default skin is an original, soft-edged pixel treatment: crisp
+   outline rhythm and a restrained shadow communicate activity like a desktop
+   pet while keeping the articulated SVG readable at every scale. */
+.pet-visual-pixel svg {
+  shape-rendering: crispEdges;
+}
+.pet-visual-pixel .pet-body,
+.pet-visual-pixel .pet-head,
+.pet-visual-pixel .pet-ear,
+.pet-visual-pixel .pet-tail,
+.pet-visual-pixel .pet-foot,
+.pet-visual-pixel .pet-paw {
+  stroke-width: 1.45;
+}
+.pet-visual-pixel .pet-ground {
+  opacity: .72;
+}
+.pet-visual-soft svg {
+  shape-rendering: geometricPrecision;
 }
 .pet-palette-mint {
   --pet-body-light: #9ee6d8;
@@ -6518,6 +6707,7 @@ button.dependency-graph-node:focus-visible {
 .pet-prop-headphones .pet-prop-line { stroke: #a96b20; stroke-width: 3; }
 .pet-prop-cup { fill: #def4ff; stroke: #4f89b6; }
 .pet-prop-ball { fill: #ffcbd6; stroke: #c06179; }
+.pet-prop-juggle { fill: #ffd66b; stroke: #a87925; }
 .pet-prop-snack { fill: #e7ad61; stroke: #9b632f; }
 .pet-prop-snack .pet-snack-chip { fill: #7b4a2a; stroke: none; }
 .pet-prop-task-card { fill: #fff; stroke: color-mix(in srgb, var(--pet-body-dark) 70%, #fff); }
@@ -6639,6 +6829,7 @@ button.dependency-graph-node:focus-visible {
 .pet-action-drink .pet-prop-cup,
 .pet-action-break .pet-prop-cup,
   .pet-action-play .pet-prop-ball,
+  .pet-action-juggle .pet-prop-juggle,
   .pet-action-snack .pet-prop-snack,
   .pet-action-focus .pet-prop-headphones,
 .pet-action-yawn .pet-sleep-mark,
@@ -9817,12 +10008,374 @@ button.dependency-graph-node:focus-visible {
   color: var(--app-brand-strong);
   font-weight: 700;
 }
+.agent-activity-agent-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.agent-activity-agent-option {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--app-line);
+  border-radius: 11px;
+  padding: 8px 9px;
+  background: var(--app-glass-soft);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+.agent-activity-agent-option:hover,
+.agent-activity-agent-option:focus-within {
+  border-color: color-mix(in srgb, var(--app-brand) 42%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 54%, var(--app-glass-soft));
+}
+.agent-activity-agent-option.is-selected {
+  border-color: color-mix(in srgb, var(--app-brand) 52%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 72%, var(--app-glass-soft));
+}
+.agent-activity-agent-option input {
+  flex: 0 0 auto;
+  accent-color: var(--app-brand);
+}
+.agent-activity-agent-option > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.agent-activity-agent-option strong,
+.agent-activity-agent-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-activity-agent-option strong { font-size: 11px; }
+.agent-activity-agent-option small { color: var(--app-text-faint); font-size: 9px; }
+.agent-activity-setup-card {
+  display: grid;
+  gap: 9px;
+  margin: 4px 0 16px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 28%, var(--app-line));
+  border-radius: 14px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--app-brand-soft) 42%, var(--app-glass-soft));
+}
+.agent-activity-setup-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.agent-activity-setup-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 240px);
+  align-items: center;
+  gap: 8px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.agent-activity-setup-picker .settings-input {
+  min-height: 32px;
+  padding: 6px 8px;
+}
+.agent-activity-setup-card small {
+  color: var(--app-text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.agent-activity-setup-card code {
+  display: block;
+  max-height: 72px;
+  overflow: auto;
+  border: 1px solid var(--app-line);
+  border-radius: 9px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--app-surface) 74%, transparent);
+  color: var(--app-text-soft);
+  font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-activity-actions { align-items: center; }
+.settings-hint.is-success { color: var(--app-success); }
+.pet-agent-activity-bubble {
+  border-color: color-mix(in srgb, #766cf2 42%, var(--floating-line));
+  background: color-mix(in srgb, var(--floating-surface-strong) 94%, #e8e6ff 6%);
+}
+.pet-agent-activity-bubble::before {
+  border-color: color-mix(in srgb, #766cf2 42%, var(--floating-line));
+  background: color-mix(in srgb, var(--floating-surface-strong) 94%, #e8e6ff 6%);
+}
+.pet-agent-activity-toggle {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.pet-agent-activity-body {
+  display: grid;
+  gap: 7px;
+  padding: 0 9px 9px;
+}
+.pet-agent-activity-body > p {
+  margin: 0;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.pet-agent-activity-meta,
+.pet-agent-session-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pet-agent-activity-meta span,
+.pet-agent-session-list span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  padding: 3px 6px;
+  color: var(--app-text-faint);
+  background: var(--app-glass-soft);
+  font-size: 9px;
+}
+.pet-agent-session-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pet-agent-session-list i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--app-brand);
+}
+.pet-agent-session-list i[data-state="error"],
+.pet-agent-session-list i[data-state="notification"] { background: var(--app-warning); }
+.pet-agent-session-list i[data-state="working"],
+.pet-agent-session-list i[data-state="juggling"] { background: var(--app-success); }
+.pet-agent-activity-open {
+  justify-self: start;
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 9px;
+  padding: 4px 8px;
+  font-size: 10px;
+}
+.pet-agent-activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.activity-agent-panel {
+  display: grid;
+  gap: 13px;
+  margin: 0 0 20px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 24%, var(--app-line));
+  border-radius: 18px;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--app-brand-soft) 78%, transparent), transparent 42%),
+    color-mix(in srgb, var(--app-surface-raised) 86%, transparent);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--app-brand) 8%, transparent);
+}
+.activity-agent-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.activity-agent-panel-header h2 {
+  margin: 5px 0 0;
+  font-size: 18px;
+}
+.activity-agent-panel-header p {
+  margin: 4px 0 0;
+  color: var(--app-text-soft);
+  font-size: 11px;
+}
+.activity-panel-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--app-brand-strong);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.activity-agent-refresh {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+.activity-agent-refresh .spin {
+  animation: global-search-spin 700ms linear infinite;
+}
+.activity-agent-empty {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px dashed color-mix(in srgb, var(--app-brand) 30%, var(--app-line));
+  border-radius: 13px;
+  padding: 13px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 42%, transparent);
+}
+.activity-agent-empty > div {
+  min-width: 0;
+}
+.activity-agent-empty strong,
+.activity-agent-empty p {
+  display: block;
+}
+.activity-agent-empty p {
+  margin: 3px 0 0;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.activity-agent-session-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 9px;
+}
+.activity-agent-session {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--app-line);
+  border-radius: 13px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--app-surface) 76%, transparent);
+  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+.activity-agent-session:hover {
+  border-color: color-mix(in srgb, var(--app-brand) 34%, var(--app-line));
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--app-brand) 8%, transparent);
+}
+.activity-agent-session-heading {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+}
+.activity-agent-session-heading > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.activity-agent-session-heading strong,
+.activity-agent-session-heading small,
+.activity-agent-session-heading time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-agent-session-heading strong {
+  font-size: 12px;
+}
+.activity-agent-session-heading small,
+.activity-agent-session-heading time {
+  color: var(--app-text-soft);
+  font-size: 10px;
+}
+.activity-agent-session-heading time {
+  color: var(--app-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.activity-agent-state-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--app-brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-brand) 14%, transparent);
+}
+.activity-agent-session.is-working .activity-agent-state-dot,
+.activity-agent-session.is-juggling .activity-agent-state-dot,
+.activity-agent-session.is-carrying .activity-agent-state-dot {
+  background: var(--app-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-success) 14%, transparent);
+  animation: activity-agent-pulse 1.7s ease-in-out infinite;
+}
+.activity-agent-session.is-error .activity-agent-state-dot,
+.activity-agent-session.is-notification .activity-agent-state-dot {
+  background: var(--app-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-warning) 15%, transparent);
+}
+@keyframes activity-agent-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(.72); opacity: .62; }
+}
+.activity-agent-session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.activity-agent-session-meta span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  padding: 3px 6px;
+  color: var(--app-text-faint);
+  background: var(--app-glass-soft);
+  font-size: 9px;
+}
+.activity-agent-session-event {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.activity-agent-boundary {
+  margin: 0;
+  color: var(--app-text-faint);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.activity-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 3px 0 9px;
+  color: var(--app-text-soft);
+}
+.activity-section-heading span {
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+.activity-section-heading p {
+  margin: 3px 0 0;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.activity-section-heading > small {
+  color: var(--app-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-agent-session.is-working .activity-agent-state-dot,
+  .activity-agent-session.is-juggling .activity-agent-state-dot,
+  .activity-agent-session.is-carrying .activity-agent-state-dot,
+  .activity-agent-refresh .spin { animation: none; }
+}
 @media (max-width: 900px) {
   .pet-room-section,
   .pet-adventure-section,
   .pet-games-grid { grid-template-columns: 1fr; }
   .pet-room-stage,
   .pet-adventure-scene { min-height: 300px; }
+}
+@media (max-width: 620px) {
+  .agent-activity-agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-activity-setup-picker { grid-template-columns: 1fr; }
 }
 @media (max-width: 520px) {
   .pet-collection-grid { grid-template-columns: 1fr; }
@@ -14174,6 +14727,83 @@ button.dependency-graph-node:focus-visible {
   .agent-orb {
     animation: orb-breathe 3.8s ease-in-out infinite;
   }
+  .pet-visual-atlas .pet-atlas-sprite {
+    animation: pet-atlas-enter 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .pet-visual-atlas .pet-atlas-motion {
+    animation: pet-atlas-breathe 3.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  .pet-visual-atlas.pet-action-wave .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-high-five .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-dance .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-tail-wag .pet-atlas-motion {
+    animation: pet-atlas-wave 1.45s ease-in-out 2;
+  }
+  .pet-visual-atlas.pet-action-head-tilt .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-look-left .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-look-right .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-ear-twitch .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-play .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-poke .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-tickle .pet-atlas-motion {
+    animation: pet-atlas-curious 1.2s ease-in-out 2;
+  }
+  .pet-visual-atlas.pet-action-think .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-search .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-inspect .pet-atlas-motion {
+    animation: pet-atlas-think 1.8s ease-in-out infinite;
+  }
+  .pet-visual-atlas.pet-action-type .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-work .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-focus .pet-atlas-motion {
+    animation: pet-atlas-work 1.15s ease-in-out infinite;
+  }
+  .pet-visual-atlas.pet-action-tidy .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-task-plan .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-sync .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-task-carry .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-task-drop .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-drag .pet-atlas-motion {
+    animation: pet-atlas-carry 720ms ease-in-out infinite;
+  }
+  .pet-visual-atlas.pet-action-juggle .pet-atlas-motion {
+    animation: pet-atlas-juggle 1.15s ease-in-out infinite;
+  }
+  .pet-visual-atlas.pet-action-alert .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-approve .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-focus-paused .pet-atlas-motion {
+    animation: pet-atlas-attention 1.35s ease-in-out infinite;
+  }
+  .pet-visual-atlas.pet-action-celebrate .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-task-complete .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-task-clear .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-sync-success .pet-atlas-motion {
+    animation: pet-atlas-celebrate 760ms cubic-bezier(0.34, 1.56, 0.64, 1) 3;
+  }
+  .pet-visual-atlas.pet-action-agent-error .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-sync-error .pet-atlas-motion {
+    animation: pet-atlas-error 520ms ease-in-out 4;
+  }
+  .pet-visual-atlas.pet-action-nap .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-yawn .pet-atlas-motion {
+    animation: pet-atlas-sleep 4.4s ease-in-out infinite;
+  }
+  .pet-visual-atlas.pet-action-stretch .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-jump-rope-ready .pet-atlas-motion {
+    animation: pet-atlas-wake 1.5s ease-in-out 2;
+  }
+  .pet-visual-atlas.pet-action-jump-rope .pet-atlas-motion {
+    animation: pet-atlas-jump-rope 820ms cubic-bezier(0.25, 0.8, 0.25, 1) 2;
+  }
+  .pet-visual-atlas.pet-action-pet .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-snack .pet-atlas-motion,
+  .pet-visual-atlas.pet-action-drink .pet-atlas-motion {
+    animation: pet-atlas-soft-interaction 1.4s ease-in-out 2;
+  }
+  .pet-motion-gentle .pet-visual-atlas .pet-atlas-motion {
+    animation-duration: 4.8s !important;
+    animation-timing-function: ease-in-out !important;
+  }
   .pet-body-rig {
     animation: pet-chest-breathe 3.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   }
@@ -14334,6 +14964,9 @@ button.dependency-graph-node:focus-visible {
     animation: pet-thought 1.4s ease-in-out infinite;
   }
   .pet-action-work .pet-rig { animation: pet-work 900ms ease-in-out infinite; }
+  .pet-action-juggle .pet-prop-juggle { animation: pet-juggle 1.15s ease-in-out infinite; }
+  .pet-action-juggle .pet-arm-left-rig,
+  .pet-action-juggle .pet-arm-right-rig { animation: pet-juggle-arms 575ms ease-in-out infinite alternate; }
   .pet-action-approve .pet-approval-mark {
     animation: pet-approval 1.4s ease-in-out infinite;
   }
@@ -14409,6 +15042,74 @@ button.dependency-graph-node:focus-visible {
       box-shadow: 0 10px 30px
         color-mix(in srgb, var(--app-brand) 28%, transparent);
     }
+  }
+  @keyframes pet-atlas-enter {
+    from { opacity: 0; transform: translateY(5px) scale(0.9); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes pet-atlas-breathe {
+    0%, 100% { transform: translateY(0) scale(1, 1); }
+    50% { transform: translateY(-1px) scale(1.014, 1.022); }
+  }
+  @keyframes pet-atlas-wave {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    30% { transform: translateY(-3px) rotate(-3deg); }
+    62% { transform: translateY(-1px) rotate(3deg); }
+  }
+  @keyframes pet-atlas-curious {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    35% { transform: translateY(-2px) rotate(-4deg); }
+    68% { transform: translateY(0) rotate(4deg); }
+  }
+  @keyframes pet-atlas-think {
+    0%, 100% { transform: translateY(0) rotate(-1deg); }
+    50% { transform: translateY(-2px) rotate(3deg); }
+  }
+  @keyframes pet-atlas-work {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-2px) scale(0.985, 1.02); }
+  }
+  @keyframes pet-atlas-carry {
+    0%, 100% { transform: translateY(0) rotate(-1deg); }
+    50% { transform: translateY(-4px) rotate(1deg); }
+  }
+  @keyframes pet-atlas-juggle {
+    0%, 100% { transform: translateY(1px) rotate(-2deg); }
+    50% { transform: translateY(-4px) rotate(2deg); }
+  }
+  @keyframes pet-atlas-attention {
+    0%, 100% { transform: scale(1); }
+    48% { transform: scale(1.035); }
+  }
+  @keyframes pet-atlas-celebrate {
+    0%, 100% { transform: translateY(0) scale(1); }
+    18% { transform: translateY(2px) scale(1.08, 0.93); }
+    52% { transform: translateY(-9px) scale(0.96, 1.06); }
+    80% { transform: translateY(-2px) scale(1.02, 0.98); }
+  }
+  @keyframes pet-atlas-error {
+    0%, 100% { transform: translateX(0) rotate(0deg); }
+    25% { transform: translateX(-3px) rotate(-2deg); }
+    75% { transform: translateX(3px) rotate(2deg); }
+  }
+  @keyframes pet-atlas-sleep {
+    0%, 100% { transform: translateY(2px) rotate(2deg) scale(1, 0.97); }
+    50% { transform: translateY(3px) rotate(2deg) scale(1.015, 0.95); }
+  }
+  @keyframes pet-atlas-wake {
+    0%, 100% { transform: translateY(0) scale(1, 1); }
+    38% { transform: translateY(-3px) scale(0.96, 1.08); }
+    72% { transform: translateY(0) scale(1.03, 0.97); }
+  }
+  @keyframes pet-atlas-jump-rope {
+    0%, 100% { transform: translateY(0) scale(1.02, 0.98); }
+    18%, 62% { transform: translateY(-11px) scale(0.98, 1.03); }
+    84% { transform: translateY(-2px) scale(1.01, 0.99); }
+  }
+  @keyframes pet-atlas-soft-interaction {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    35% { transform: translateY(-2px) rotate(-2deg); }
+    68% { transform: translateY(1px) rotate(2deg); }
   }
   @keyframes pet-chest-breathe {
     0%, 100% { transform: scale(1, 1); }
@@ -14727,6 +15428,14 @@ button.dependency-graph-node:focus-visible {
     0%, 100% { transform: translateY(0) rotate(0deg); }
     50% { transform: translateY(-3px) rotate(-1.8deg); }
   }
+  @keyframes pet-juggle {
+    0%, 100% { transform: translateY(2px) rotate(-3deg); }
+    50% { transform: translateY(-4px) rotate(3deg); }
+  }
+  @keyframes pet-juggle-arms {
+    0%, 100% { transform: rotate(-9deg); }
+    50% { transform: rotate(9deg); }
+  }
   @keyframes pet-approval {
     0%, 100% { transform: scale(0.96); }
     50% { transform: scale(1.07); }
@@ -14848,4 +15557,719 @@ button.dependency-graph-node:focus-visible {
     overflow: auto;
     padding: 17px 14px;
   }
+}
+
+/* Project documentation center. The reading surface intentionally feels
+ * closer to a calm open-source handbook than to another settings panel: a
+ * quiet catalogue on the left, generous reading measure in the middle, and a
+ * lightweight local table of contents on the right. */
+.docs-page {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(238px, 280px) minmax(0, 1fr);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--app-glass-strong) 45%, transparent);
+}
+
+.docs-sidebar {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 25px 16px 30px;
+  border-right: 1px solid var(--app-line);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--app-brand-soft) 36%, transparent), transparent 260px),
+    color-mix(in srgb, var(--app-glass-soft) 70%, transparent);
+}
+
+.docs-sidebar-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 2px 7px 19px;
+}
+
+.docs-sidebar-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--app-brand) 14%, transparent);
+}
+
+.docs-eyebrow {
+  display: block;
+  color: var(--app-brand-strong);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.13em;
+  line-height: 1.2;
+}
+
+.docs-sidebar-intro h1 {
+  margin-top: 3px;
+  font-size: 20px;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.docs-sidebar-intro p {
+  max-width: 190px;
+  margin-top: 6px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.docs-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  margin: 0 4px 11px;
+  padding: 0 9px;
+  border: 1px solid var(--app-line);
+  border-radius: 11px;
+  color: var(--app-text-faint);
+  background: color-mix(in srgb, var(--app-surface) 65%, transparent);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.docs-search:focus-within {
+  border-color: color-mix(in srgb, var(--app-brand) 48%, var(--app-line));
+  background: var(--app-surface-raised);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-brand) 12%, transparent);
+}
+
+.docs-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 12px;
+}
+
+.docs-search kbd {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 1px solid var(--app-line);
+  border-radius: 5px;
+  color: var(--app-text-faint);
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.docs-sidebar-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 8px 14px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+
+.docs-catalog {
+  display: grid;
+  gap: 16px;
+}
+
+.docs-catalog-group {
+  display: grid;
+  gap: 3px;
+}
+
+.docs-catalog-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 9px 5px;
+  color: var(--app-text-soft);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.docs-catalog-group-heading small {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: var(--app-text-faint);
+  background: color-mix(in srgb, var(--app-line) 55%, transparent);
+  font-size: 9px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.docs-catalog-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: var(--app-text-soft);
+  background: transparent;
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.docs-catalog-item:hover {
+  border-color: var(--app-line);
+  color: var(--app-text);
+  background: color-mix(in srgb, var(--app-surface) 72%, transparent);
+  transform: translateX(1px);
+}
+
+.docs-catalog-item.is-active {
+  border-color: color-mix(in srgb, var(--app-brand) 22%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+
+.docs-catalog-item-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 23px;
+  border-radius: 8px;
+  color: var(--app-text-faint);
+  background: color-mix(in srgb, var(--app-surface-raised) 65%, transparent);
+}
+
+.docs-catalog-item.is-active .docs-catalog-item-icon {
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand) 14%, var(--app-surface-raised));
+}
+
+.docs-catalog-item-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.docs-catalog-item-copy strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.32;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docs-catalog-item-copy small {
+  overflow: hidden;
+  color: var(--app-text-faint);
+  font-size: 9px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docs-catalog-item-dot {
+  width: 5px;
+  height: 5px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--app-brand);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--app-brand) 13%, transparent);
+}
+
+.docs-empty-search {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 12px;
+  color: var(--app-text-faint);
+  text-align: center;
+}
+
+.docs-empty-search strong {
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+
+.docs-empty-search span {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.docs-article {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 38px clamp(24px, 5vw, 72px) 48px;
+  scroll-behavior: smooth;
+}
+
+.docs-article-header,
+.docs-reading-grid,
+.docs-pagination {
+  width: min(1120px, 100%);
+  margin-inline: auto;
+}
+
+.docs-breadcrumbs,
+.docs-article-meta-line,
+.docs-source-row,
+.docs-updated {
+  display: flex;
+  align-items: center;
+}
+
+.docs-breadcrumbs {
+  gap: 5px;
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+
+.docs-breadcrumbs span:last-child {
+  color: var(--app-text-soft);
+}
+
+.docs-article-meta-line {
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.docs-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 25%, var(--app-line));
+  border-radius: 999px;
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.docs-updated {
+  gap: 4px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+
+.docs-article-header h2 {
+  max-width: 800px;
+  margin-top: 10px;
+  font-size: clamp(27px, 3.1vw, 42px);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+}
+
+.docs-article-header > p {
+  max-width: 760px;
+  margin-top: 11px;
+  color: var(--app-text-soft);
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.docs-source-row {
+  flex-wrap: wrap;
+  gap: 7px 10px;
+  margin-top: 17px;
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+
+.docs-source-row code {
+  padding: 4px 7px;
+  border: 1px solid var(--app-line);
+  border-radius: 6px;
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-surface) 65%, transparent);
+  font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.docs-reading-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 760px) minmax(145px, 190px);
+  align-items: start;
+  gap: clamp(24px, 4vw, 58px);
+  margin-top: 34px;
+}
+
+.docs-markdown {
+  min-width: 0;
+  color: var(--app-text);
+  font-size: 14px;
+  line-height: 1.78;
+}
+
+.docs-markdown > :first-child {
+  margin-top: 0;
+}
+
+.docs-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.docs-markdown h1,
+.docs-markdown h2,
+.docs-markdown h3,
+.docs-markdown h4,
+.docs-markdown h5,
+.docs-markdown h6 {
+  scroll-margin-top: 24px;
+  margin: 1.7em 0 0.48em;
+  color: var(--app-text);
+  line-height: 1.28;
+  letter-spacing: -0.02em;
+}
+
+.docs-markdown h1 { font-size: 1.7em; }
+.docs-markdown h2 { font-size: 1.4em; }
+.docs-markdown h3 { font-size: 1.18em; }
+.docs-markdown h4,
+.docs-markdown h5,
+.docs-markdown h6 { font-size: 1.04em; }
+
+.docs-markdown p,
+.docs-markdown ul,
+.docs-markdown ol,
+.docs-markdown blockquote,
+.docs-markdown .docs-markdown-table-scroll,
+.docs-markdown .docs-code-block {
+  margin: 0.86em 0;
+}
+
+.docs-markdown ul,
+.docs-markdown ol {
+  padding-left: 1.55em;
+}
+
+.docs-markdown li + li {
+  margin-top: 0.28em;
+}
+
+.docs-markdown a {
+  color: var(--app-brand-strong);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--app-brand) 35%, transparent);
+  text-underline-offset: 3px;
+}
+
+.docs-markdown a:hover {
+  text-decoration-color: currentColor;
+}
+
+.docs-markdown strong {
+  font-weight: 720;
+}
+
+.docs-markdown blockquote {
+  padding: 9px 14px;
+  border-left: 3px solid color-mix(in srgb, var(--app-brand) 54%, var(--app-line));
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-brand-soft) 45%, transparent);
+}
+
+.docs-markdown hr {
+  margin: 1.8em 0;
+  border: 0;
+  border-top: 1px solid var(--app-line);
+}
+
+.docs-markdown code {
+  padding: 0.12em 0.35em;
+  border: 1px solid var(--app-line);
+  border-radius: 5px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 55%, transparent);
+  font: 0.88em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.docs-code-block {
+  overflow: auto;
+  padding: 13px 15px;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-surface) 76%, transparent);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.docs-code-block code {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+
+.docs-markdown-table-scroll {
+  overflow: auto;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+}
+
+.docs-markdown table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.docs-markdown th,
+.docs-markdown td {
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--app-line);
+  border-right: 1px solid var(--app-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-markdown th:last-child,
+.docs-markdown td:last-child {
+  border-right: 0;
+}
+
+.docs-markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+.docs-markdown th {
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-surface) 78%, transparent);
+  font-weight: 700;
+}
+
+.docs-markdown-image {
+  display: inline-flex;
+  padding: 6px 9px;
+  border: 1px dashed var(--app-line-strong);
+  border-radius: 8px;
+  color: var(--app-text-faint);
+  background: color-mix(in srgb, var(--app-surface) 62%, transparent);
+  font-size: 11px;
+}
+
+.docs-toc {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+  padding: 2px 0 0 16px;
+  border-left: 1px solid var(--app-line);
+}
+
+.docs-toc-heading {
+  margin-bottom: 9px;
+  color: var(--app-text-soft);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+}
+
+.docs-toc nav {
+  display: grid;
+  gap: 2px;
+}
+
+.docs-toc-link {
+  display: block;
+  overflow: hidden;
+  padding: 4px 0;
+  color: var(--app-text-faint);
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.docs-toc-link:hover {
+  color: var(--app-brand-strong);
+}
+
+.docs-toc-link.level-2 { padding-left: 8px; }
+.docs-toc-link.level-3 { padding-left: 16px; }
+
+.docs-toc-empty,
+.docs-toc-more {
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+
+.docs-toc-more {
+  display: block;
+  padding-top: 5px;
+}
+
+.docs-pagination {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 44px;
+  padding-top: 17px;
+  border-top: 1px solid var(--app-line);
+}
+
+.docs-pagination-button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  max-width: 48%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: var(--app-text-soft);
+  background: transparent;
+  text-align: left;
+}
+
+.docs-pagination-button:hover:not(:disabled) {
+  border-color: var(--app-line);
+  background: color-mix(in srgb, var(--app-surface) 68%, transparent);
+}
+
+.docs-pagination-button.is-next {
+  margin-left: auto;
+  text-align: right;
+}
+
+.docs-pagination-button span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.docs-pagination-button small {
+  color: var(--app-text-faint);
+  font-size: 9px;
+}
+
+.docs-pagination-button strong {
+  overflow: hidden;
+  color: var(--app-text);
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1120px) {
+  .docs-reading-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .docs-toc {
+    position: static;
+    order: -1;
+    padding: 11px 0 12px;
+    border: 0;
+    border-bottom: 1px solid var(--app-line);
+  }
+  .docs-toc nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+  }
+  .docs-toc-link,
+  .docs-toc-link.level-2,
+  .docs-toc-link.level-3 {
+    padding: 3px 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .docs-page {
+    display: block;
+    overflow: auto;
+  }
+  .docs-sidebar {
+    max-height: 300px;
+    border-right: 0;
+    border-bottom: 1px solid var(--app-line);
+  }
+  .docs-article {
+    overflow: visible;
+    padding: 25px 16px 36px;
+  }
+  .docs-article-header h2 {
+    font-size: 30px;
+  }
+  .docs-reading-grid {
+    margin-top: 25px;
+  }
+  .docs-markdown {
+    font-size: 13px;
+  }
+  .docs-pagination-button strong {
+    max-width: 150px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .docs-catalog-item,
+  .docs-search,
+  .docs-article {
+    transition: none;
+    scroll-behavior: auto;
+  }
+}
+
+/* The canvas owns the atlas pixels.  Generated frames already contain the
+ * complete pose (including the hop, wave and carry), so a second transform on
+ * the whole canvas makes limbs appear to jump independently of the body.  The
+ * only retained secondary rhythm is a very small idle breath. */
+@media (prefers-reduced-motion: no-preference) {
+  .pet-visual-atlas .pet-atlas-motion {
+    transform-origin: center bottom;
+    animation: none !important;
+  }
+  .pet-visual-atlas.pet-action-idle .pet-atlas-motion {
+    animation: pet-atlas-canvas-breathe 4.8s cubic-bezier(0.45, 0, 0.55, 1) infinite !important;
+  }
+}
+
+@keyframes pet-atlas-canvas-breathe {
+  0%, 100% { transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+  50% { transform: translate3d(0, -1.4px, 0) scale3d(1.012, 1.018, 1); }
+}
+@keyframes pet-atlas-canvas-wave {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  30% { transform: translate3d(0, -2.5px, 0) rotate(-1.8deg); }
+  62% { transform: translate3d(0, -0.8px, 0) rotate(1.8deg); }
+}
+@keyframes pet-atlas-canvas-work {
+  0%, 100% { transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+  50% { transform: translate3d(0, -1.8px, 0) scale3d(0.988, 1.018, 1); }
+}
+@keyframes pet-atlas-canvas-carry {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-0.8deg); }
+  50% { transform: translate3d(0, -3px, 0) rotate(0.8deg); }
+}
+@keyframes pet-atlas-canvas-celebrate {
+  0%, 100% { transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+  18% { transform: translate3d(0, 1.5px, 0) scale3d(1.055, 0.95, 1); }
+  52% { transform: translate3d(0, -7px, 0) scale3d(0.97, 1.045, 1); }
+  80% { transform: translate3d(0, -1.5px, 0) scale3d(1.015, 0.99, 1); }
+}
+@keyframes pet-atlas-canvas-jump {
+  0%, 100% { transform: translate3d(0, 0, 0) scale3d(1.018, 0.982, 1); }
+  18%, 62% { transform: translate3d(0, -9px, 0) scale3d(0.985, 1.025, 1); }
+  84% { transform: translate3d(0, -1px, 0) scale3d(1.008, 0.992, 1); }
+}
+@keyframes pet-atlas-canvas-soft {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  35% { transform: translate3d(0, -1.5px, 0) rotate(-1.2deg); }
+  68% { transform: translate3d(0, 0.8px, 0) rotate(1.2deg); }
 }

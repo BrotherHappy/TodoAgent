@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { DESKTOP_CHANNELS, type DesktopApi } from "../src/shared/desktop-api";
 import type { AppSettings } from "../src/shared/settings";
 import type { AgentRunEvent } from "../src/shared/agent-types";
+import type { AgentActivitySnapshot } from "../src/shared/agent-activity";
 import type {
   AgentApprovalView,
   FeishuStatusView,
@@ -72,6 +73,8 @@ const desktopApi: DesktopApi = {
     startFocus: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskStartFocus, id),
     pauseFocus: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskPauseFocus, id),
     resetFocus: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskResetFocus, id),
+    recordWorkLog: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskRecordWorkLog, request),
     reorderToday: (taskIds) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskReorderToday, taskIds),
     applyTodayPlan: (request) =>
@@ -151,6 +154,10 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingExpanded, expanded),
     setFloatingPetOnly: (petOnly) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingPetOnly, petOnly),
+    setFloatingEdgeDocked: (docked) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingEdgeDocked, docked),
+    peekFloatingEdge: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellPeekFloatingEdge),
     beginFloatingDrag: (screenX, screenY) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellBeginFloatingDrag, {
         screenX,
@@ -187,6 +194,13 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.agentFullAccessCreate, request),
     revokeFullAccess: () =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.agentFullAccessRevoke),
+  },
+  agentActivity: {
+    status: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentActivityStatus),
+    setup: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentActivitySetup),
+    rotateToken: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.agentActivityRotateToken),
+    snapshot: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentActivitySnapshot),
   },
   feishu: {
     status: () => ipcRenderer.invoke(DESKTOP_CHANNELS.feishuStatus),
@@ -321,6 +335,11 @@ const desktopApi: DesktopApi = {
     onAgentApproval: (listener) =>
       subscribe<AgentApprovalView>(
         DESKTOP_CHANNELS.eventAgentApproval,
+        listener,
+      ),
+    onAgentActivity: (listener: (snapshot: AgentActivitySnapshot) => void) =>
+      subscribe<AgentActivitySnapshot>(
+        DESKTOP_CHANNELS.eventAgentActivity,
         listener,
       ),
     onFeishuStatus: (listener) =>

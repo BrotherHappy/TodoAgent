@@ -17,6 +17,8 @@ describe("PetCharacter personality", () => {
 
     const pet = screen.getByRole("img", { name: /冷静管家/u });
     expect(pet).toHaveClass("pet-personality-calm");
+    expect(pet).toHaveClass("pet-visual-pixel");
+    expect(pet).toHaveAttribute("data-pet-visual-style", "pixel");
     expect(pet).toHaveAttribute("data-pet-personality", "calm");
     expect(pet).toHaveAttribute("aria-label", expect.stringContaining("正在陪伴你"));
   });
@@ -26,5 +28,21 @@ describe("PetCharacter personality", () => {
     const pet = screen.getByRole("img", { name: /小序/u });
     expect(pet).toHaveClass("pet-weather-rain");
     expect(pet).toHaveAttribute("data-pet-weather-effect", "rain");
+  });
+
+  it("uses the generated interaction sheet for animated atlas states", () => {
+    render(
+      <PetCharacter
+        name="小序"
+        action="pet"
+        visualStyle="atlas"
+      />,
+    );
+    const pet = screen.getByRole("img", { name: /小序/u });
+    expect(pet).toHaveAttribute("data-pet-atlas-sheet", "interaction");
+    expect(pet).toHaveAttribute("data-pet-atlas-animation", "head-pat");
+    expect(pet).toHaveAttribute("data-pet-atlas-step", "0");
+    expect(pet).toHaveAttribute("data-pet-atlas-ready", "false");
+    expect(pet.querySelectorAll(".pet-atlas-buffer-stack > canvas")).toHaveLength(2);
   });
 });

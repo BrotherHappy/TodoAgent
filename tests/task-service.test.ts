@@ -1582,6 +1582,104 @@ describe("TaskService mutations, recovery, and recurrence", () => {
     );
   });
 
+  it("records manual work on a Feishu task as a private, undoable timeline entry", async () => {
+    const { service, setNow } = await createFixture();
+    const task = await service.createTask({
+      title: "补记投入",
+      source: { type: "feishu", externalId: "remote-work-log" },
+      actualMinutes: 20,
+      focusSessions: [
+        {
+          id: "focus-1",
+          startedAt: "2026-08-09T09:00:00.000Z",
+          endedAt: "2026-08-09T09:25:00.000Z",
+          elapsedSeconds: 1_500,
+        },
+      ],
+      sync: { status: "synced" },
+    });
+    setNow("2026-08-09T12:00:00.000Z");
+
+    const logged = await service.recordWorkLog(task.task.id, {
+      minutes: 35,
+      endedAt: "2026-08-08T18:30:00.000Z",
+    });
+
+    expect(logged.task).toMatchObject({
+      actualMinutes: 55,
+      sync: { status: "synced" },
+      focusSessions: [
+        { id: "focus-1", elapsedSeconds: 1_500 },
+        {
+          startedAt: "2026-08-08T17:55:00.000Z",
+          endedAt: "2026-08-08T18:30:00.000Z",
+          elapsedSeconds: 2_100,
+          source: "manual",
+        },
+      ],
+    });
+    expect((await service.getOperations(1))[0]).toMatchObject({
+      id: logged.operationId,
+      kind: "work-log",
+    });
+
+    await service.undo(logged.operationId);
+    expect(await service.getTask(task.task.id)).toEqual(task.task);
+  });
+
+  it("derives the existing total when a legacy task has sessions but no actualMinutes", async () => {
+    const { service } = await createFixture();
+    const task = await service.createTask({
+      title: "旧专注数据",
+      focusSessions: [
+        {
+          id: "legacy-focus",
+          startedAt: "2026-08-09T09:00:00.000Z",
+          endedAt: "2026-08-09T09:40:00.000Z",
+          elapsedSeconds: 2_400,
+        },
+      ],
+    });
+
+    const logged = await service.recordWorkLog(task.task.id, { minutes: 15 });
+
+    expect(logged.task.actualMinutes).toBe(55);
+    expect(logged.task.focusSessions?.at(-1)).toMatchObject({
+      elapsedSeconds: 900,
+      source: "manual",
+    });
+  });
+
+  it.each([
+    0,
+    721,
+    12.5,
+  ])("rejects an invalid manual work-log duration: %s", async (minutes) => {
+    const { service } = await createFixture();
+    const task = await service.createTask({ title: "校验投入" });
+
+    await expect(service.recordWorkLog(task.task.id, { minutes })).rejects.toBeInstanceOf(
+      TaskValidationError,
+    );
+    expect((await service.getTask(task.task.id))?.focusSessions).toEqual([]);
+    expect((await service.getOperations()).map((operation) => operation.kind)).toEqual([
+      "create",
+    ]);
+  });
+
+  it("rejects a future manual work-log end without changing the task", async () => {
+    const { service } = await createFixture();
+    const task = await service.createTask({ title: "未来投入" });
+
+    await expect(
+      service.recordWorkLog(task.task.id, {
+        minutes: 20,
+        endedAt: "2026-08-09T10:00:01.000Z",
+      }),
+    ).rejects.toThrow("future");
+    expect((await service.getTask(task.task.id))?.actualMinutes).toBeUndefined();
+  });
+
   it("marks Feishu assignee and follower edits pending while keeping local organization private", async () => {
     const { service } = await createFixture();
     const task = await service.createTask({

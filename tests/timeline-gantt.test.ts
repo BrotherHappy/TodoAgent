@@ -93,6 +93,31 @@ describe("buildGanttPlan", () => {
     expect(plan.unscheduledTasks.map((task) => task.id)).toEqual(["发布未排"]);
   });
 
+  it("shows progress for legacy focus sessions without an aggregate field", () => {
+    const plan = buildGanttPlan(
+      [
+        makeTask("旧专注任务", {
+          projectId: "发布",
+          plannedDate: "2026-08-19",
+          estimatedMinutes: 60,
+          focusSessions: [
+            {
+              id: "legacy-session",
+              startedAt: "2026-08-19T09:00:00.000Z",
+              endedAt: "2026-08-19T09:30:00.000Z",
+              elapsedSeconds: 1_800,
+            },
+          ],
+        }),
+      ],
+      "2026-08-19",
+      "all",
+      "2026-08-19",
+    );
+
+    expect(plan.groups[0]?.rows[0]?.bar?.progressPercent).toBe(50);
+  });
+
   it("supports a longer horizon without changing the Monday-first anchor", () => {
     const plan = buildGanttPlan(
       [

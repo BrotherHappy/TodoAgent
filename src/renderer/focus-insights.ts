@@ -1,4 +1,5 @@
 import type { Task } from "../shared/models";
+import { actualMinutesForTask } from "../shared/task-time-accounting";
 import { localDateKey, weekDateKeys } from "./timeline-utils";
 
 export interface FocusInsightDay {
@@ -134,8 +135,7 @@ export function buildFocusInsights(
       // value. Attribute that legacy value to completion, or to the task's
       // planned/start date when it remains open, without double-counting a task
       // that already has granular sessions.
-      const legacySeconds =
-        Number(task.actualMinutes ?? 0) * 60 || Number(task.focusElapsedSeconds ?? 0);
+      const legacySeconds = actualMinutesForTask(task) * 60;
       const legacyDate =
         validDatePart(task.completedAt) ??
         validDatePart(task.timeBlock?.startAt) ??

@@ -46,6 +46,7 @@ import { TrayManager, type TrayStatus } from "./tray-manager";
 import { buildTrayTodaySummary } from "./tray-task-preview";
 import { WindowManager } from "./window-manager";
 import { AgentDesktopService } from "./agent/agent-desktop-service";
+import { AgentActivityBridge } from "./agent/agent-activity-bridge";
 import { AuditLog } from "./agent/audit-log";
 import { createBuiltinTools } from "./agent/builtin-tools";
 import { createElectronToolAdapters } from "./agent/electron-tool-adapters";
@@ -92,6 +93,7 @@ let tray: TrayManager | undefined;
 let unregisterIpc: (() => void) | undefined;
 let settingsService: SettingsService | undefined;
 let agentService: AgentDesktopService | undefined;
+let agentActivityBridge: AgentActivityBridge | undefined;
 let feishuController: FeishuDesktopController | undefined;
 let feishuAutoSync: FeishuAutoSyncCoordinator | undefined;
 let feishuMutationSync: FeishuMutationSyncCoordinator | undefined;
@@ -1059,6 +1061,14 @@ async function startApplication(): Promise<void> {
       tray?.refresh();
     },
   });
+  agentActivityBridge = new AgentActivityBridge({
+    userDataPath,
+    settings: () => settingsService!.get().agentActivity,
+    onSnapshot: (snapshot) => {
+      windows?.broadcast(DESKTOP_CHANNELS.eventAgentActivity, snapshot);
+    },
+  });
+  await agentActivityBridge.initialize();
   tray = new TrayManager({
     iconPath: path.join(app.getAppPath(), "assets", "trayTemplate.svg"),
     getStatus: () => ({
@@ -1556,6 +1566,7 @@ async function startApplication(): Promise<void> {
     },
     settings: settingsService,
     agent: agentService,
+    agentActivity: agentActivityBridge,
     feishu: feishuApi,
     notifications: {
       handleAction: (event) => notificationRuntime!.handleAction(event),
@@ -1604,6 +1615,9 @@ async function startApplication(): Promise<void> {
     },
     setFloatingExpanded: (expanded) => windows?.setFloatingExpanded(expanded),
     setFloatingPetOnly: (petOnly) => windows?.setFloatingPetOnly(petOnly),
+    setFloatingEdgeDocked: (docked) =>
+      windows?.setFloatingEdgeDocked(docked) ?? false,
+    peekFloatingEdge: () => windows?.peekFloatingEdge() ?? false,
     beginFloatingDrag: (screenX, screenY) =>
       windows?.beginFloatingDrag(screenX, screenY) ?? false,
     updateFloatingDrag: (screenX, screenY) =>
@@ -1662,6 +1676,12 @@ async function startApplication(): Promise<void> {
             );
           });
       }
+      void agentActivityBridge?.applySettings().catch((error: unknown) => {
+        console.error(
+          "Failed to apply external Agent activity bridge settings",
+          error instanceof Error ? error.message : error,
+        );
+      });
       broadcastSettings(settings);
     },
     authenticateFullAccess: async () => {
@@ -1836,6 +1856,7 @@ app.on("will-quit", () => {
   if (petInputActivityTimer) clearInterval(petInputActivityTimer);
   if (weatherRefreshTimer) clearInterval(weatherRefreshTimer);
   feishuMutationSync?.dispose();
+  void agentActivityBridge?.stop();
   feishuController?.stopPolling();
   void feishuController?.cancelOAuth().catch(() => undefined);
   void notificationRuntime?.stop();

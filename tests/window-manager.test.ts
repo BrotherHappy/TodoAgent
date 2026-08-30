@@ -4,6 +4,8 @@ import {
   floatingWindowSize,
   floatingWindowInteractionOptions,
   floatingMousePassthroughOptions,
+  dockFloatingToEdge,
+  floatingEdgeForBounds,
   snapToWorkArea,
 } from '../electron/window-manager';
 
@@ -46,5 +48,29 @@ describe('snapToWorkArea', () => {
 
   it('preserves a position that is not near an edge', () => {
     expect(snapToWorkArea({ x: 500, y: 300, width: 300, height: 100 }, workArea)).toEqual({ x: 500, y: 300, width: 300, height: 100 });
+  });
+});
+
+describe('edge peek positioning', () => {
+  const workArea = { x: 0, y: 24, width: 1440, height: 876 };
+
+  it('leaves a discoverable strip at either horizontal edge while clamping Y', () => {
+    expect(dockFloatingToEdge({ x: 600, y: -20, width: 148, height: 148 }, workArea, 'left')).toEqual({
+      x: -120,
+      y: 24,
+      width: 148,
+      height: 148,
+    });
+    expect(dockFloatingToEdge({ x: 600, y: 999, width: 148, height: 148 }, workArea, 'right')).toEqual({
+      x: 1412,
+      y: 752,
+      width: 148,
+      height: 148,
+    });
+  });
+
+  it('chooses the nearest edge based on the pet center', () => {
+    expect(floatingEdgeForBounds({ x: 20, y: 100, width: 148, height: 148 }, workArea)).toBe('left');
+    expect(floatingEdgeForBounds({ x: 1300, y: 100, width: 148, height: 148 }, workArea)).toBe('right');
   });
 });

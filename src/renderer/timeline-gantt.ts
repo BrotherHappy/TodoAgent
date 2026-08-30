@@ -1,4 +1,5 @@
 import type { Task } from "../shared/models";
+import { actualMinutesForTask } from "../shared/task-time-accounting";
 import { addLocalDays, localDateKey, weekDateKeys } from "./timeline-utils";
 
 /** The compact Gantt surface starts on Monday and supports a few readable horizons. */
@@ -131,13 +132,13 @@ const buildDays = (startDate: string, today: string, windowDays: GanttWindowDays
 
 const progressFor = (task: Task): number | undefined => {
   if (task.status === "completed") return 100;
+  const actualMinutes = actualMinutesForTask(task);
   if (
     task.estimatedMinutes &&
     task.estimatedMinutes > 0 &&
-    task.actualMinutes &&
-    task.actualMinutes > 0
+    actualMinutes > 0
   ) {
-    return Math.min(100, Math.max(4, Math.round((task.actualMinutes / task.estimatedMinutes) * 100)));
+    return Math.min(100, Math.max(4, Math.round((actualMinutes / task.estimatedMinutes) * 100)));
   }
   return undefined;
 };

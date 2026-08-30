@@ -25,6 +25,7 @@ import type {
   TaskProject,
   TaskProjectColor,
   TaskPriority,
+  RecordWorkLogInput,
   TaskResearchCard,
   TaskSnapshotChange,
   TaskSort,
@@ -50,6 +51,7 @@ import {
   taskAutomationPatch,
   type TaskAutomationApplyRequest,
 } from "../../src/shared/task-automations";
+import { actualMinutesForTask } from "../../src/shared/task-time-accounting";
 
 export interface TaskServiceOptions {
   clock?: () => Date;
@@ -603,6 +605,11 @@ const validateTask = (task: Task): Task => {
     ) {
       throw new TaskValidationError(
         "A focus session must have a valid non-negative duration.",
+      );
+    }
+    if (session.source !== undefined && !["focus", "manual"].includes(session.source)) {
+      throw new TaskValidationError(
+        "A focus session source must be focus or manual.",
       );
     }
   });
@@ -1929,6 +1936,70 @@ export class TaskService {
       { focusStartedAt: null, focusElapsedSeconds: 0 },
       false,
     );
+  }
+
+  /**
+   * Record work that happened outside the built-in focus timer.  The entry is
+   * deliberately stored beside focus sessions so weekly insights, estimate
+   * variance and exports all use one chronological source of truth.  Both
+   * fields are private task fields, so Feishu tasks never enqueue a remote
+   * write for this operation.
+   */
+  async recordWorkLog(
+    id: TaskId,
+    input: RecordWorkLogInput,
+  ): Promise<TaskMutationResult> {
+    return this.store.transact((state) => {
+      const task = this.requireTask(state, id);
+      this.requireNotDeleted(task);
+      if (
+        !Number.isInteger(input.minutes) ||
+        input.minutes < 1 ||
+        input.minutes > 720
+      ) {
+        throw new TaskValidationError(
+          "A work log must be a whole number of minutes between 1 and 720.",
+        );
+      }
+
+      const now = this.now();
+      const endedAt = input.endedAt ?? now;
+      assertDateTime(endedAt, "endedAt");
+      if (new Date(endedAt).getTime() > new Date(now).getTime()) {
+        throw new TaskValidationError("A work log cannot end in the future.");
+      }
+      const startedAt = new Date(
+        new Date(endedAt).getTime() - input.minutes * 60_000,
+      ).toISOString();
+      const existingActualMinutes = actualMinutesForTask(task);
+      const before = deepClone(task);
+      const updated = this.applyPatch(
+        task,
+        {
+          actualMinutes: existingActualMinutes + input.minutes,
+          focusSessions: [
+            ...(task.focusSessions ?? []),
+            {
+              id: `${task.id}:manual:${randomUUID()}`,
+              startedAt,
+              endedAt,
+              elapsedSeconds: input.minutes * 60,
+              source: "manual",
+            },
+          ],
+        },
+        now,
+        false,
+      );
+      state.tasks[id] = updated;
+      const operation = this.recordOperation(
+        state,
+        "work-log",
+        [this.change(before, updated)],
+        now,
+      );
+      return { task: deepClone(updated), operationId: operation.id };
+    });
   }
 
   async moveToTrash(id: TaskId): Promise<TaskMutationResult> {

@@ -419,6 +419,7 @@ test.describe("Todo Agent desktop shell", () => {
       { label: "同步问题", heading: "飞书连接与同步" },
       { label: "Agent", heading: "任务助理" },
       { label: "动态", heading: "动态与审计" },
+      { label: "文档中心", heading: "Todo Agent 项目文档" },
       { label: "设置", heading: "通用" },
     ];
 
@@ -1107,6 +1108,11 @@ test.describe("Todo Agent desktop shell", () => {
     await wheel.getByRole("menuitem", { name: "摸摸头" }).click();
     const pattedPet = floating.locator('.pet-character[data-pet-action="pet"]');
     await expect(pattedPet).toBeVisible();
+    await expect(pattedPet).toHaveAttribute("data-pet-atlas-animation", "head-pat");
+    const patStep = Number(await pattedPet.getAttribute("data-pet-atlas-step"));
+    await expect
+      .poll(async () => Number(await pattedPet.getAttribute("data-pet-atlas-step")))
+      .not.toBe(patStep);
     expect(
       await pattedPet.locator(".pet-pat-hand").evaluate((element) =>
         getComputedStyle(element).animationName,
@@ -1172,8 +1178,15 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(ropePet.locator(".pet-jump-rope-front")).toHaveCount(1);
     await expect(jumpButton).toHaveClass(/is-ready/u);
     await floating.screenshot({ path: testInfo.outputPath("pet-jump-rope-ready.png") });
-    await jumpButton.click();
     const jumpingPet = rope.locator('.pet-character[data-pet-action="jump-rope"]');
+    // The game intentionally has a timing window. Retry only the test click
+    // until it lands in the visible cue so a slow CI paint cannot turn this
+    // visual regression check into a random miss.
+    for (let attempt = 0; attempt < 30 && (await jumpingPet.count()) === 0; attempt += 1) {
+      await jumpButton.click();
+      if ((await jumpingPet.count()) > 0) break;
+      await floating.waitForTimeout(80);
+    }
     await expect(jumpingPet).toBeVisible();
     expect(
       await jumpingPet.locator(".pet-rig").evaluate((element) =>
@@ -1888,6 +1901,7 @@ test.describe("Todo Agent desktop shell", () => {
     expect(security.processType).toBe("undefined");
     expect(security.exposedNamespaces).toEqual([
       "agent",
+      "agentActivity",
       "capture",
       "data",
       "events",

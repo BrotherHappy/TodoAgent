@@ -19,6 +19,7 @@ import type {
   TaskList,
   TaskMutationResult,
   TaskOperation,
+  RecordWorkLogInput,
   TaskProject,
   TaskSyncStatus,
   TaskViewSection,
@@ -42,6 +43,11 @@ import type {
   FullAccessLease,
   FullAccessToolScope,
 } from "./agent-types";
+import type {
+  AgentActivitySetup,
+  AgentActivitySnapshot,
+  AgentActivityStatus,
+} from "./agent-activity";
 import type { AppSettings, PublicCredentialState } from "./settings";
 import type {
   PetAdventure,
@@ -118,6 +124,9 @@ export interface TaskDesktopApi {
   startFocus(id: TaskId): Promise<TaskMutationResult>;
   pauseFocus(id: TaskId): Promise<TaskMutationResult>;
   resetFocus(id: TaskId): Promise<TaskMutationResult>;
+  recordWorkLog(
+    request: RecordWorkLogInput & { id: TaskId },
+  ): Promise<TaskMutationResult>;
   reorderToday(taskIds: TaskId[]): Promise<TaskOperation>;
   applyTodayPlan(request: ApplyTodayPlanRequest): Promise<TaskOperation>;
   applyBulkTaskAction(request: BulkTaskRequest): Promise<TaskOperation>;
@@ -178,6 +187,8 @@ export interface ShellDesktopApi {
   setFloatingVisible(visible: boolean): Promise<AppSettings>;
   setFloatingExpanded(expanded: boolean): Promise<void>;
   setFloatingPetOnly(petOnly: boolean): Promise<void>;
+  setFloatingEdgeDocked(docked: boolean): Promise<boolean>;
+  peekFloatingEdge(): Promise<boolean>;
   beginFloatingDrag(screenX: number, screenY: number): Promise<boolean>;
   updateFloatingDrag(screenX: number, screenY: number): Promise<boolean>;
   endFloatingDrag(): Promise<void>;
@@ -376,6 +387,13 @@ export interface AgentDesktopApi {
     request: FullAccessLeaseRequest,
   ): Promise<FullAccessLease>;
   revokeFullAccess(): Promise<void>;
+}
+
+export interface AgentActivityDesktopApi {
+  status(): Promise<AgentActivityStatus>;
+  setup(): Promise<AgentActivitySetup>;
+  rotateToken(): Promise<AgentActivitySetup>;
+  snapshot(): Promise<AgentActivitySnapshot>;
 }
 
 export type FeishuConnectionState =
@@ -771,6 +789,7 @@ export interface DesktopEventApi {
   onShortcutError(listener: (shortcut: string) => void): () => void;
   onAgentEvent(listener: (event: AgentRunEvent) => void): () => void;
   onAgentApproval(listener: (approval: AgentApprovalView) => void): () => void;
+  onAgentActivity(listener: (snapshot: AgentActivitySnapshot) => void): () => void;
   onFeishuStatus(listener: (status: FeishuStatusView) => void): () => void;
   onNotification(listener: (event: InAppNotificationView) => void): () => void;
   onPetEvent(listener: (event: PetEvent) => void): () => void;
@@ -783,6 +802,7 @@ export interface DesktopApi {
   shell: ShellDesktopApi;
   capture: CaptureDesktopApi;
   agent: AgentDesktopApi;
+  agentActivity: AgentActivityDesktopApi;
   feishu: FeishuDesktopApi;
   notifications: NotificationDesktopApi;
   pet: PetDesktopApi;
@@ -803,6 +823,7 @@ export const DESKTOP_CHANNELS = {
   taskStartFocus: "tasks:start-focus",
   taskPauseFocus: "tasks:pause-focus",
   taskResetFocus: "tasks:reset-focus",
+  taskRecordWorkLog: "tasks:record-work-log",
   taskReorderToday: "tasks:reorder-today",
   taskApplyTodayPlan: "tasks:apply-today-plan",
   taskApplyBulkAction: "tasks:apply-bulk-action",
@@ -843,6 +864,8 @@ export const DESKTOP_CHANNELS = {
   shellSetFloatingVisible: "shell:set-floating-visible",
   shellSetFloatingExpanded: "shell:set-floating-expanded",
   shellSetFloatingPetOnly: "shell:set-floating-pet-only",
+  shellSetFloatingEdgeDocked: "shell:set-floating-edge-docked",
+  shellPeekFloatingEdge: "shell:peek-floating-edge",
   shellBeginFloatingDrag: "shell:begin-floating-drag",
   shellUpdateFloatingDrag: "shell:update-floating-drag",
   shellEndFloatingDrag: "shell:end-floating-drag",
@@ -859,6 +882,10 @@ export const DESKTOP_CHANNELS = {
   agentAudit: "agent:audit",
   agentFullAccessCreate: "agent:full-access-create",
   agentFullAccessRevoke: "agent:full-access-revoke",
+  agentActivityStatus: "agent-activity:status",
+  agentActivitySetup: "agent-activity:setup",
+  agentActivityRotateToken: "agent-activity:rotate-token",
+  agentActivitySnapshot: "agent-activity:snapshot",
   feishuStatus: "feishu:status",
   feishuConfigure: "feishu:configure",
   feishuBeginPersonalConnect: "feishu:begin-personal-connect",
@@ -922,6 +949,7 @@ export const DESKTOP_CHANNELS = {
   eventShortcutError: "system:shortcut-error",
   eventAgentRun: "event:agent-run",
   eventAgentApproval: "event:agent-approval",
+  eventAgentActivity: "event:agent-activity",
   eventFeishuStatus: "event:feishu-status",
   eventNotification: "event:notification",
   eventPet: "event:pet",

@@ -1,4 +1,5 @@
 import type { Task } from "../shared/models";
+import { actualMinutesForTask } from "../shared/task-time-accounting";
 
 /** The compact desktop timeline deliberately uses a half-hour rhythm. */
 export const TIMELINE_START_HOUR = 8;
@@ -133,7 +134,7 @@ export const weeklyReviewSummary = (
   }).length;
   const focusMinutes = tasks.reduce((total, task) => {
     if (task.status !== "completed" || !inWeek(temporalDateKey(task.completedAt))) return total;
-    return total + (task.actualMinutes ?? Math.round((task.focusElapsedSeconds ?? 0) / 60));
+    return total + actualMinutesForTask(task);
   }, 0);
   const nextWeekCandidates = open
     .filter((task) => taskDateKey(task) === undefined || (taskDateKey(task) ?? "") > weekEnd)

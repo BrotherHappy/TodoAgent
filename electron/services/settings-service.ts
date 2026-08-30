@@ -34,6 +34,14 @@ const focusShieldModes = new Set(['off', 'gentle', 'pause']);
 const aiRoutingModes = new Set(['primary-only', 'fallback-on-error', 'local-only']);
 const aiAuthenticationModes = new Set(['bearer', 'none']);
 const taskReminderSourceModes = new Set(['normal', 'important-only', 'off']);
+const externalAgentIds = new Set([
+  'claude-code', 'codex', 'copilot-cli', 'gemini-cli',
+  'antigravity-cli', 'cursor-agent', 'codebuddy', 'workbuddy',
+  'kiro-cli', 'kimi-cli', 'qwen-code', 'zcode', 'codewhale',
+  'openclaw', 'hermes', 'opencode', 'mimocode', 'pi',
+  'qoder', 'qoderwork', 'qwenwork', 'reasonix-cli', 'traecode',
+  'deepseek-harness', 'custom',
+]);
 
 function clampInteger(
   value: unknown,
@@ -139,6 +147,13 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
           ...value?.ai?.fallback?.pricing,
         },
       },
+    },
+    agentActivity: {
+      ...defaultSettings.agentActivity,
+      ...value?.agentActivity,
+      allowedAgents: Array.isArray(value?.agentActivity?.allowedAgents)
+        ? value.agentActivity!.allowedAgents
+        : defaultSettings.agentActivity.allowedAgents,
     },
     feishu: { ...defaultSettings.feishu, ...value?.feishu },
     modelDataScope: { ...defaultSettings.modelDataScope, ...value?.modelDataScope },
@@ -320,6 +335,25 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   if (!aiAuthenticationModes.has(merged.ai.authMode)) {
     merged.ai.authMode = defaultSettings.ai.authMode;
   }
+  merged.agentActivity.port = clampInteger(
+    merged.agentActivity.port,
+    defaultSettings.agentActivity.port,
+    0,
+    65_535,
+  );
+  merged.agentActivity.staleAfterSeconds = clampInteger(
+    merged.agentActivity.staleAfterSeconds,
+    defaultSettings.agentActivity.staleAfterSeconds,
+    15,
+    3_600,
+  );
+  const allowedExternalAgents = Array.isArray(merged.agentActivity.allowedAgents)
+    ? merged.agentActivity.allowedAgents.filter(
+        (value): value is AppSettings['agentActivity']['allowedAgents'][number] =>
+          typeof value === 'string' && externalAgentIds.has(value),
+      )
+    : [];
+  merged.agentActivity.allowedAgents = Array.from(new Set(allowedExternalAgents));
   merged.ai.pricing = normalizeModelPricing(
     merged.ai.pricing,
     defaultSettings.ai.pricing,
@@ -455,6 +489,13 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       },
       credentialId: merged.ai.credentialId,
     },
+    agentActivity: {
+      enabled: merged.agentActivity.enabled,
+      port: merged.agentActivity.port,
+      allowedAgents: [...merged.agentActivity.allowedAgents],
+      staleAfterSeconds: merged.agentActivity.staleAfterSeconds,
+      showInPet: merged.agentActivity.showInPet,
+    },
     feishu: {
       configured: merged.feishu.configured,
       mode: merged.feishu.mode,
@@ -523,6 +564,10 @@ export class SettingsService {
         raw.ai?.pricing === undefined ||
         raw.ai?.fallback === undefined ||
         raw.ai?.fallback?.pricing === undefined ||
+        raw.agentActivity === undefined ||
+        raw.agentActivity.staleAfterSeconds !== this.#settings.agentActivity.staleAfterSeconds ||
+        raw.agentActivity.port !== this.#settings.agentActivity.port ||
+        JSON.stringify(raw.agentActivity.allowedAgents) !== JSON.stringify(this.#settings.agentActivity.allowedAgents) ||
         raw.notifications?.dailyTaskReminderLimit !== this.#settings.notifications.dailyTaskReminderLimit ||
         raw.notifications?.taskIgnoreBackoffEnabled !== this.#settings.notifications.taskIgnoreBackoffEnabled ||
         raw.notifications?.taskReminderMinIntervalMinutes !== this.#settings.notifications.taskReminderMinIntervalMinutes ||

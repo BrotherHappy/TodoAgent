@@ -18,6 +18,34 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("usePetBehavior direct-action priority", () => {
+  it("settles rapid lifecycle updates before changing the visible pose", () => {
+    vi.useFakeTimers();
+    const { result, rerender } = renderHook(
+      ({ context }: { context: PetBehaviorContext }) =>
+        usePetBehavior(context, "小序", true),
+      {
+        initialProps: {
+          context: { ...baseContext, agentSending: true, agentRunState: "思考中" },
+        },
+      },
+    );
+
+    expect(result.current.action).toBe("think");
+    rerender({
+      context: { ...baseContext, agentSending: true, agentRunState: "执行工具" },
+    });
+    expect(result.current.action).toBe("think");
+    act(() => vi.advanceTimersByTime(119));
+    expect(result.current.action).toBe("think");
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current.action).toBe("work");
+
+    rerender({ context: baseContext });
+    expect(result.current.action).toBe("work");
+    act(() => vi.advanceTimersByTime(120));
+    expect(result.current.action).toBe("idle");
+  });
+
   it("lets an explicit drag lift the focused pet, then returns to focus", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() =>

@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AppSettings } from "../src/shared/settings";
 
 export type WindowKind = "main" | "quick" | "floating";
+export type FloatingEdge = "left" | "right";
 
 interface WindowManagerOptions {
   preloadPath: string;
@@ -84,6 +85,42 @@ export function snapToWorkArea(
 }
 
 /**
+ * Place a compact pet partly outside the chosen horizontal work-area edge.
+ * Keeping a small visible strip makes the pet discoverable and clickable,
+ * while the native window itself remains the source of truth for hit-testing.
+ */
+export function dockFloatingToEdge(
+  bounds: Rectangle,
+  workArea: Rectangle,
+  edge: FloatingEdge,
+  peek = 28,
+): Rectangle {
+  const safePeek = Math.max(12, Math.min(bounds.width, Math.round(peek)));
+  const width = Math.min(bounds.width, workArea.width);
+  const height = Math.min(bounds.height, workArea.height);
+  const x = edge === "left"
+    ? workArea.x - width + safePeek
+    : workArea.x + workArea.width - safePeek;
+  return {
+    width,
+    height,
+    x,
+    y: Math.max(
+      workArea.y,
+      Math.min(bounds.y, workArea.y + workArea.height - height),
+    ),
+  };
+}
+
+export function floatingEdgeForBounds(
+  bounds: Rectangle,
+  workArea: Rectangle,
+): FloatingEdge {
+  const center = workArea.x + workArea.width / 2;
+  return bounds.x + bounds.width / 2 <= center ? "left" : "right";
+}
+
+/**
  * The floating surface is intentionally shown without taking keyboard focus.
  * On macOS, an inactive frameless window normally consumes the first pointer
  * press just to activate itself, which made Todo Pet's expand control feel
@@ -123,6 +160,10 @@ export class WindowManager {
     hasMoved: boolean;
   };
   #floatingPointerDragTimer?: ReturnType<typeof setInterval>;
+  #floatingEdgeDocked = false;
+  #floatingEdgePeeked = false;
+  #floatingEdge?: FloatingEdge;
+  #floatingUndockedBounds?: Rectangle;
 
   constructor(options: WindowManagerOptions) {
     this.#options = options;
@@ -333,6 +374,10 @@ export class WindowManager {
         this.#floatingPointerDragTimer = undefined;
       }
       this.#floatingPointerDrag = undefined;
+      this.#floatingEdgeDocked = false;
+      this.#floatingEdgePeeked = false;
+      this.#floatingEdge = undefined;
+      this.#floatingUndockedBounds = undefined;
       this.#floating = undefined;
     });
     if (settings.enabled)
@@ -363,6 +408,9 @@ export class WindowManager {
   setFloatingExpanded(expanded: boolean): void {
     this.#floatingExpanded = expanded;
     if (expanded) this.#floatingPetOnly = false;
+    if (expanded && this.#floatingEdgeDocked) {
+      this.setFloatingEdgeDocked(false, { preserveEdge: this.#floatingEdgePeeked });
+    }
     const window = this.createFloating();
     const settings = this.#options.settings().floating;
     const current = window.getBounds();
@@ -392,6 +440,9 @@ export class WindowManager {
   }
 
   setFloatingPetOnly(petOnly: boolean): void {
+    if (!petOnly && this.#floatingEdgeDocked) {
+      this.setFloatingEdgeDocked(false, { preserveEdge: this.#floatingEdgePeeked });
+    }
     this.#floatingPetOnly = petOnly;
     if (petOnly) this.#floatingExpanded = false;
     const window = this.createFloating();
@@ -415,6 +466,86 @@ export class WindowManager {
     this.#keepFloatingOnTop(window);
   }
 
+  /**
+   * Enter/leave the optional edge-peek mode inspired by clawd-on-desk's mini
+   * mode. Only the compact pet is docked; expanding the rail or beginning a
+   * drag automatically restores the pre-dock position.
+   */
+  setFloatingEdgeDocked(
+    docked: boolean,
+    options: { preserveEdge?: boolean } = {},
+  ): boolean {
+    const window = this.createFloating();
+    if (!docked && !this.#floatingEdgeDocked) return true;
+    // Position locking protects the user's manual drag gesture.  It should
+    // not block an explicit system placement such as Edge Peek: otherwise a
+    // locked pet can get stuck in the middle of the screen when the user
+    // chooses the mini/edge mode from its own menu.
+    if (docked && (!this.#floatingPetOnly || this.#floatingExpanded)) {
+      this.setFloatingPetOnly(true);
+    }
+    const current = window.getBounds();
+    if (docked) {
+      if (!this.#floatingEdgeDocked) {
+        this.#floatingUndockedBounds = { ...current };
+        const display = screen.getDisplayMatching(current);
+        this.#floatingEdge = floatingEdgeForBounds(current, display.workArea);
+      }
+      const display = screen.getDisplayMatching(current);
+      const next = dockFloatingToEdge(
+        this.#floatingUndockedBounds ?? current,
+        display.workArea,
+        this.#floatingEdge ?? floatingEdgeForBounds(current, display.workArea),
+      );
+      this.#floatingEdgeDocked = true;
+      this.#floatingEdgePeeked = false;
+      window.setFocusable(false);
+      window.setBounds(next, true);
+      this.#keepFloatingOnTop(window);
+      return true;
+    }
+    const display = screen.getDisplayMatching(current);
+    const restored = options.preserveEdge && this.#floatingEdge
+      ? dockFloatingToEdge(
+          this.#floatingUndockedBounds ?? current,
+          display.workArea,
+          this.#floatingEdge,
+          (this.#floatingUndockedBounds ?? current).width,
+        )
+      : clampWindowToWorkArea(
+          this.#floatingUndockedBounds ?? current,
+          display.workArea,
+        );
+    this.#floatingEdgeDocked = false;
+    this.#floatingEdgePeeked = false;
+    this.#floatingEdge = undefined;
+    this.#floatingUndockedBounds = undefined;
+    const settings = this.#options.settings().floating;
+    window.setBounds(restored, true);
+    window.setFocusable(this.#floatingExpanded && !this.#floatingPetOnly && !settings.mousePassthrough);
+    this.#keepFloatingOnTop(window);
+    return true;
+  }
+
+  /** Reveal a docked pet into the same edge without abandoning mini mode. */
+  peekFloatingEdge(): boolean {
+    if (!this.#floatingEdgeDocked) return true;
+    const window = this.createFloating();
+    const current = window.getBounds();
+    const display = screen.getDisplayMatching(current);
+    const edge = this.#floatingEdge ?? floatingEdgeForBounds(current, display.workArea);
+    const baseline = this.#floatingUndockedBounds ?? current;
+    const next = dockFloatingToEdge(baseline, display.workArea, edge, baseline.width);
+    this.#floatingEdgePeeked = true;
+    window.setBounds(next, true);
+    this.#keepFloatingOnTop(window);
+    return true;
+  }
+
+  get floatingEdgeDocked(): boolean {
+    return this.#floatingEdgeDocked;
+  }
+
   #applyFloatingMousePassthrough(window: BrowserWindow, enabled: boolean): void {
     // `forward` keeps hover telemetry flowing to the renderer while clicks
     // pass to the window underneath. The mode is opt-in and can be disabled
@@ -431,6 +562,9 @@ export class WindowManager {
    */
   beginFloatingDrag(screenX: number, screenY: number): boolean {
     if (this.#options.settings().floating.locked) return false;
+    if (this.#floatingEdgeDocked) {
+      this.setFloatingEdgeDocked(false, { preserveEdge: this.#floatingEdgePeeked });
+    }
     const window = this.createFloating();
     this.endFloatingDrag();
     const pointer =
@@ -525,6 +659,20 @@ export class WindowManager {
     this.#keepFloatingOnTop(this.#floating);
     const current = this.#floating.getBounds();
     const display = screen.getDisplayMatching(current);
+    if (this.#floatingEdgeDocked) {
+      const next = dockFloatingToEdge(
+        this.#floatingUndockedBounds ?? current,
+        display.workArea,
+        this.#floatingEdge ?? floatingEdgeForBounds(current, display.workArea),
+        this.#floatingEdgePeeked
+          ? (this.#floatingUndockedBounds ?? current).width
+          : undefined,
+      );
+      if (next.x !== current.x || next.y !== current.y || next.width !== current.width || next.height !== current.height) {
+        this.#floating.setBounds(next, false);
+      }
+      return;
+    }
     const next = clampWindowToWorkArea(current, display.workArea);
     if (
       next.x !== current.x ||
@@ -605,7 +753,10 @@ export class WindowManager {
 
   #saveFloatingPosition(): void {
     if (!this.#floating || this.#floating.isDestroyed()) return;
-    const bounds = this.#floating.getBounds();
+    // A peeked window intentionally sits partly outside the work area. Save
+    // the user's real position so leaving edge mode or restarting does not
+    // turn the hidden strip into the new permanent origin.
+    const bounds = this.#floatingUndockedBounds ?? this.#floating.getBounds();
     const display = screen.getDisplayMatching(bounds);
     this.#options.onFloatingPosition(String(display.id), {
       x: bounds.x,

@@ -106,7 +106,14 @@ describe("timeline-utils", () => {
     const completed = task("done", {
       status: "completed",
       completedAt: "2026-08-18T10:00:00.000Z",
-      focusElapsedSeconds: 1_800,
+      focusSessions: [
+        {
+          id: "done-session",
+          startedAt: "2026-08-18T09:30:00.000Z",
+          endedAt: "2026-08-18T10:00:00.000Z",
+          elapsedSeconds: 1_800,
+        },
+      ],
     });
     const scheduled = task("scheduled", {
       plannedDate: monday,

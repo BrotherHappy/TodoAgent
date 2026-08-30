@@ -3,6 +3,7 @@ import type {
   ApplyTodayPlanRequest,
   BulkTaskRequest,
   CreateTaskInput,
+  RecordWorkLogInput,
   RecurrenceEditScope,
   Task,
   TaskFilter,
@@ -14,6 +15,7 @@ import type {
   UpdateTaskInput,
 } from "../shared/models";
 import type { ApplyTaskAutomationRequest } from "../shared/desktop-api";
+import { actualMinutesForTask } from "../shared/task-time-accounting";
 
 const localDate = (date = new Date()): string => {
   const year = date.getFullYear();
@@ -159,6 +161,10 @@ export interface TaskController {
   startFocus(id: TaskId): Promise<string | undefined>;
   pauseFocus(id: TaskId): Promise<string | undefined>;
   resetFocus(id: TaskId): Promise<string | undefined>;
+  recordWorkLog(
+    id: TaskId,
+    input: RecordWorkLogInput,
+  ): Promise<string | undefined>;
   trash(id: TaskId): Promise<string | undefined>;
   restore(id: TaskId): Promise<string | undefined>;
   purge(id: TaskId): Promise<string | undefined>;
@@ -228,18 +234,22 @@ export function useTaskController(
           : undefined;
         let nextSelection = visibleSelection;
         if (currentSelection && !visibleSelection && typeof api.get === "function") {
-          // A filtered-out task is still a valid selection. `get(..., true)`
-          // also lets a concurrent trash/restore operation clear an inspector
-          // whose deletion state no longer belongs in the active view. Other
-          // filter changes (for example, moving Today to tomorrow) keep the
-          // editor open so a multi-field edit is not interrupted.
+          // A filtered-out task is still a valid selection while it remains a
+          // member of the same semantic collection. `get(..., true)` also
+          // lets a concurrent trash/restore or complete/reopen operation
+          // clear an inspector whose status no longer belongs in the active
+          // view. Other filter changes (for example, moving Today to
+          // tomorrow) keep the editor open so a multi-field edit is not
+          // interrupted.
           const fetchedSelection = await api.get(currentSelection, true);
           if (requestId !== refreshRequestRef.current) return;
-          const deletionMatchesView =
+          const selectionMatchesView =
             view === "trash"
               ? Boolean(fetchedSelection?.deletedAt)
-              : !fetchedSelection?.deletedAt;
-          nextSelection = deletionMatchesView
+              : view === "completed"
+                ? fetchedSelection?.status === "completed" && !fetchedSelection?.deletedAt
+                : !fetchedSelection?.deletedAt;
+          nextSelection = selectionMatchesView
             ? fetchedSelection
             : undefined;
         }
@@ -290,6 +300,19 @@ export function useTaskController(
       void refresh();
     });
   }, [refresh]);
+
+  // A mutation can clear the selection just as a collection navigation
+  // finishes loading (most noticeable when moving a task into the Trash).
+  // Keep the inspector useful by selecting the first task once the settled
+  // snapshot has arrived. `refresh` already preserves an intentional
+  // filtered-out selection, so this only fills an actually empty selection.
+  useEffect(() => {
+    if (loading || tasks.length === 0 || selectedIdRef.current) return;
+    const first = tasks[0];
+    selectedIdRef.current = first.id;
+    setSelectedId(first.id);
+    setSelectedTask(first);
+  }, [loading, tasks]);
 
   const applyFallback = useCallback((id: TaskId, patch: Partial<Task>) => {
     setFallback((current) =>
@@ -634,6 +657,50 @@ export function useTaskController(
     [api, lastOperationId, refresh],
   );
 
+  const recordWorkLog = useCallback(
+    async (id: TaskId, input: RecordWorkLogInput) => {
+      if (api) {
+        const mutationRequest = ++mutationRequestRef.current;
+        const result = await api.recordWorkLog({ id, ...input });
+        if (mutationRequest !== mutationRequestRef.current) return result.operationId;
+        setLastOperationId(result.operationId);
+        await refresh();
+        if (mutationRequest !== mutationRequestRef.current) return result.operationId;
+        selectedIdRef.current = result.task.id;
+        setSelectedId(result.task.id);
+        setSelectedTask(result.task);
+        return result.operationId;
+      }
+
+      const task = fallback.find((candidate) => candidate.id === id);
+      if (!task || task.deletedAt !== undefined) return undefined;
+      const minutes = input.minutes;
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 720) {
+        throw new Error("投入时长必须是 1–720 分钟的整数");
+      }
+      const endedAt = input.endedAt ?? new Date().toISOString();
+      const startedAt = new Date(
+        new Date(endedAt).getTime() - minutes * 60_000,
+      ).toISOString();
+      const existingActualMinutes = actualMinutesForTask(task);
+      applyFallback(id, {
+        actualMinutes: existingActualMinutes + minutes,
+        focusSessions: [
+          ...(task.focusSessions ?? []),
+          {
+            id: `${task.id}:manual:${crypto.randomUUID()}`,
+            startedAt,
+            endedAt,
+            elapsedSeconds: minutes * 60,
+            source: "manual",
+          },
+        ],
+      });
+      return undefined;
+    },
+    [api, applyFallback, fallback, refresh],
+  );
+
   const purge = useCallback(
     async (id: TaskId) => {
       if (api) {
@@ -681,6 +748,7 @@ export function useTaskController(
       startFocus: (id) => runMutation("startFocus", id),
       pauseFocus: (id) => runMutation("pauseFocus", id),
       resetFocus: (id) => runMutation("resetFocus", id),
+      recordWorkLog,
       trash: (id) => runMutation("moveToTrash", id),
       restore: (id) => runMutation("restore", id),
       purge,
@@ -703,6 +771,7 @@ export function useTaskController(
       update,
       toggleComplete,
       runMutation,
+      recordWorkLog,
       purge,
       reorderToday,
       applyTodayPlan,

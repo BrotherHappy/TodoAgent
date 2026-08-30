@@ -710,11 +710,14 @@ const validateTask = (value: unknown, path: string): Task => {
     task.focusSessions.forEach((entry, index) => {
       const sessionPath = `${path}.focusSessions[${index}]`;
       const session = expectRecord(entry, sessionPath);
-      assertOnlyKeys(session, ['id', 'startedAt', 'endedAt', 'elapsedSeconds'], sessionPath);
+      assertOnlyKeys(session, ['id', 'startedAt', 'endedAt', 'elapsedSeconds', 'source'], sessionPath);
       expectId(session.id, `${sessionPath}.id`);
       expectIsoDateTime(session.startedAt, `${sessionPath}.startedAt`);
       expectIsoDateTime(session.endedAt, `${sessionPath}.endedAt`);
       expectNumber(session.elapsedSeconds, `${sessionPath}.elapsedSeconds`, { integer: true, minimum: 0 });
+      expectOptional(session, 'source', sessionPath, (value, valuePath) =>
+        expectEnum(value, ['focus', 'manual'] as const, valuePath),
+      );
     });
   }
   expectOptional(task, 'completionMode', path, (entry, entryPath) =>
@@ -778,7 +781,7 @@ const validateOperation = (value: unknown, path: string): TaskOperation => {
   assertOnlyKeys(operation, ['id', 'kind', 'createdAt', 'changes', 'undoneAt'], path);
   expectId(operation.id, `${path}.id`);
   expectEnum(operation.kind, [
-    'create', 'update', 'complete', 'reopen', 'bulk', 'move-to-today', 'focus',
+    'create', 'update', 'complete', 'reopen', 'bulk', 'move-to-today', 'focus', 'work-log',
     'skip-recurring', 'reorder-today', 'plan-today', 'trash', 'restore', 'purge',
   ] as const, `${path}.kind`);
   expectIsoDateTime(operation.createdAt, `${path}.createdAt`);
@@ -842,7 +845,7 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
   const settings = expectRecord(value, path);
   assertOnlyKeys(settings, [
     'schemaVersion', 'theme', 'launchAtLogin', 'closeToTray', 'quickCaptureShortcut',
-    'notifications', 'floating', 'focus', 'planning', 'weather', 'pet', 'ai', 'feishu', 'modelDataScope', 'agentCapabilities', 'persona', 'automations', 'permissionMode',
+    'notifications', 'floating', 'focus', 'planning', 'weather', 'pet', 'ai', 'agentActivity', 'feishu', 'modelDataScope', 'agentCapabilities', 'persona', 'automations', 'permissionMode',
     'onboardingComplete',
   ], path);
   if (settings.schemaVersion !== 1) throw new DataImportValidationError('Unsupported settings schema', `${path}.schemaVersion`);
@@ -1110,6 +1113,41 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     expectNumber(ai[key], `${path}.ai.${key}`, { minimum: 0 }),
   );
 
+  const importedAgentActivity = settings.agentActivity === undefined
+    ? expectRecord(clone(defaultSettings.agentActivity), `${path}.agentActivity`)
+    : expectRecord(settings.agentActivity, `${path}.agentActivity`);
+  assertOnlyKeys(importedAgentActivity, [
+    'enabled', 'port', 'allowedAgents', 'staleAfterSeconds', 'showInPet',
+  ], `${path}.agentActivity`);
+  expectBoolean(importedAgentActivity.enabled, `${path}.agentActivity.enabled`);
+  expectNumber(importedAgentActivity.port, `${path}.agentActivity.port`, {
+    integer: true,
+    minimum: 0,
+    maximum: 65_535,
+  });
+  if (!Array.isArray(importedAgentActivity.allowedAgents)) {
+    throw new DataImportValidationError('Expected an array', `${path}.agentActivity.allowedAgents`);
+  }
+  if (importedAgentActivity.allowedAgents.length > 32) {
+    throw new DataImportValidationError('Too many Agent integrations', `${path}.agentActivity.allowedAgents`);
+  }
+  importedAgentActivity.allowedAgents.forEach((entry, index) =>
+    expectEnum(entry, [
+      'claude-code', 'codex', 'copilot-cli', 'gemini-cli',
+      'antigravity-cli', 'cursor-agent', 'codebuddy', 'workbuddy',
+      'kiro-cli', 'kimi-cli', 'qwen-code', 'zcode', 'codewhale',
+      'openclaw', 'hermes', 'opencode', 'mimocode', 'pi',
+      'qoder', 'qoderwork', 'qwenwork', 'reasonix-cli', 'traecode',
+      'deepseek-harness', 'custom',
+    ] as const, `${path}.agentActivity.allowedAgents[${index}]`),
+  );
+  expectNumber(importedAgentActivity.staleAfterSeconds, `${path}.agentActivity.staleAfterSeconds`, {
+    integer: true,
+    minimum: 15,
+    maximum: 3_600,
+  });
+  expectBoolean(importedAgentActivity.showInPet, `${path}.agentActivity.showInPet`);
+
   if (settings.feishu !== undefined) {
     const feishu = expectRecord(settings.feishu, `${path}.feishu`);
     assertOnlyKeys(feishu, [
@@ -1224,6 +1262,11 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
       },
     },
   } as AppSettings['ai'];
+  validated.agentActivity = {
+    ...clone(defaultSettings.agentActivity),
+    ...clone(importedAgentActivity),
+    allowedAgents: [...importedAgentActivity.allowedAgents] as AppSettings['agentActivity']['allowedAgents'],
+  };
   // The import format intentionally carries authentication *mode*, but never
   // an OS credential reference. Keep this explicit so later defaults cannot
   // silently reintroduce a credential identifier.
@@ -1680,6 +1723,7 @@ const markdownOperationLabels: Record<TaskOperation['kind'], string> = {
   bulk: '批量操作',
   'move-to-today': '移到今天',
   focus: '专注记录',
+  'work-log': '手动记录投入',
   'skip-recurring': '跳过本次循环',
   'reorder-today': '调整今日顺序',
   'plan-today': '安排今日计划',
