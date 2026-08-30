@@ -33,7 +33,11 @@ import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v21-12.
  * 16,384px texture limit and could make the compositor tear while sampling a
  * new cell. Every v23/v21 page is 2,048×2,048px (the final page is padded
  * transparent), so no hidden driver tiling is needed. Cells are authored at
- * 128px and retain the v23/v21 body/prop interpolation pass.
+ * 128px and retain the authored high-density frames from the v23/v21 source
+ * strips. Runtime pages are deliberately a lossless split of those strips:
+ * the offline interpolator remains available for experiments, but generated
+ * contour blends are not shipped when they introduce a coloured edge or
+ * double silhouette around a key pose.
  */
 export const TODO_PET_ATLAS_URL = atlasUrl;
 export const TODO_PET_MOTION_ATLAS_URLS = [
@@ -333,14 +337,13 @@ const sequence = (
   name,
 });
 
-// The source sheets contain complete poses rather than separated limbs. Sixty-
-// three offline contour in-betweens per authored source cell turn even the
-// larger hop/rope displacement into small, coherent steps. Fast loops use a
-// 16ms target: a 60Hz display advances at most one generated cell per refresh
-// while the renderer chooses the nearest complete cell (never a transparent
-// blend of two moving silhouettes). This keeps the motion dense without the
-// ghosting that made the previous 18ms fractional blend look torn.
-const fastFrameMs = 16;
+// The source strips contain complete, authored frames rather than separated
+// limbs. Fast loops use an 8ms target so a 120Hz panel can present one clean
+// cell on every refresh (60Hz still caps at one cell per refresh); the
+// renderer always chooses a complete cell and never blends two moving pets.
+// This is intentionally faster than the old 16ms cadence, which made a
+// high-refresh display repeat every other frame and read as low-FPS motion.
+const fastFrameMs = 8;
 const idleLoop = motion("idle-breathe-blink", 0, fastFrameMs);
 const waveLoop = motion("wave", 1, fastFrameMs);
 const workLoop = motion("focus-work", 2, fastFrameMs);

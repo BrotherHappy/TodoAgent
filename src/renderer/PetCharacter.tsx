@@ -316,10 +316,10 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
     };
     const authoredFrameDuration = Math.max(1, animation.frameDurationMs);
     // Keep a fractional playhead instead of tying motion to integer wall-clock
-    // ticks. At 60Hz the 16ms target advances about one generated cell; the
-    // presentation step below rounds that playhead to one complete cell, so
-    // every compositor refresh is atomic and no authored in-between is
-    // replaced by a translucent double exposure.
+    // ticks. At 60Hz the 8ms target is capped to one complete cell per
+    // refresh, while a 120Hz panel can advance one cell on every refresh.
+    // The presentation step below always chooses a complete cell, so no
+    // authored frame is replaced by a translucent double exposure.
     let sequencePosition = 0;
     let sequenceStarted = false;
     // The first two refresh callbacks can straddle image decode and a window
@@ -463,9 +463,10 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
       const currentImage = imageForFrame(current);
       const nextImage = imageForFrame(next);
       const currentPage = pageForFrame(current);
-      // Decode one extra page ahead of the look-ahead frame. At the 16ms
-      // cadence this gives a 0.9–2.2s warm window before a page boundary,
-      // even if the user is on a high-refresh display.
+      // Decode one extra page ahead of the look-ahead frame. At the 8ms
+      // cadence this gives a 0.45–1.1s warm window before a page boundary;
+      // two pages are requested so a high-refresh display never waits on a
+      // texture decode during an active gesture.
       requestPage(currentPage + 1);
       requestPage(currentPage + 2);
       // A page boundary should never expose a blank or partially decoded

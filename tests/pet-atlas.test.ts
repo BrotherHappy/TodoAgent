@@ -97,10 +97,10 @@ describe("Todo Pet generated action atlas", () => {
       expect(animation.columns).toBe(TODO_PET_ATLAS_PAGE_COLUMNS);
       expect(animation.rows).toBe(TODO_PET_ATLAS_PAGE_ROWS);
       expect(animation.loop).toBe(true);
-      // Keep the fast timeline at or above one display beat on a 60Hz panel.
-      // A shorter target makes the rAF playhead skip generated in-betweens and
-      // is perceptible as a low-frame-rate tear even with a dense atlas.
-      expect(animation.frameDurationMs).toBeGreaterThanOrEqual(16);
+      // Fast loops target 8ms so 120Hz panels can present a fresh authored
+      // cell on every refresh. The renderer still caps advancement at one
+      // cell per paint, so 60Hz displays never skip across the atlas.
+      expect(animation.frameDurationMs).toBeGreaterThanOrEqual(8);
     }
   });
 
