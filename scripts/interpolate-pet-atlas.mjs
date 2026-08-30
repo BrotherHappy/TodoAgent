@@ -363,51 +363,32 @@ const blend = (
   // trades a single pose switch at the midpoint for a much safer visual result
   // than showing two semi-overlapping bodies during a hop.
   if (transformOnly) {
-    // Large translations (the hop/rope beats) used to switch from the
-    // translated A pose to the translated B pose at exactly t=.5. That kept
-    // the silhouette single, but the midpoint cut was visible as a low-FPS
-    // tear. Move each contour toward the shared midpoint and continuously
-    // blend the two shifted rasters instead. The SDF envelope keeps one
-    // connected silhouette while the premultiplied colour ramp gives the
-    // prop and body pixels a real temporal hand-off.
-    for (let index = 0, pixel = 0; index < a.length; index += 4, pixel += 1) {
-      const x = pixel % cellWidth;
-      const y = Math.floor(pixel / cellWidth);
-      const isBodyCore = bodyMaskA[pixel] || bodyMaskB[pixel];
-      const isProp = propMaskA[pixel] || propMaskB[pixel];
+    // Large translations (hop, rope and carry beats) cannot be morphed by
+    // averaging two full rasters: at the midpoint their ears, feet and tails
+    // occupy two different positions and the result is visibly torn. Keep a
+    // single complete source pose on screen instead. The outgoing pose moves
+    // along the same anchor path until the midpoint; the incoming pose takes
+    // over at that exact position and continues to the target. The silhouette
+    // therefore never doubles or becomes translucent, while the only change
+    // at the midpoint is the intended pose hand-off (not a second ghost).
+    const source = t < 0.5 ? a : b;
+    const sourceBodyMask = t < 0.5 ? bodyMaskA : bodyMaskB;
+    const sourcePropMask = t < 0.5 ? propMaskA : propMaskB;
+    // A starts at anchor A and moves +delta; B starts at anchor B and moves
+    // back -delta. Both therefore meet at the same midpoint before the pose
+    // hand-off instead of B overshooting past its target.
+    const translationProgress = t < 0.5 ? t : t - 1;
+    for (let index = 0, pixel = 0; index < source.length; index += 4, pixel += 1) {
+      const isBodyCore = sourceBodyMask[pixel];
+      const isProp = sourcePropMask[pixel];
       if (!isBodyCore && !isProp) continue;
       const moveX = isBodyCore ? deltaX : propDeltaX;
       const moveY = isBodyCore ? deltaY : propDeltaY;
-      const xShiftA = moveX * t;
-      const yShiftA = moveY * t;
-      const xShiftB = moveX * (t - 1);
-      const yShiftB = moveY * (t - 1);
-      const sdfA = isBodyCore
-        ? sampleField(bodySdfA, x - xShiftA, y - yShiftA)
-        : sampleField(propSdfA, x - xShiftA, y - yShiftA);
-      const sdfB = isBodyCore
-        ? sampleField(bodySdfB, x - xShiftB, y - yShiftB)
-        : sampleField(propSdfB, x - xShiftB, y - yShiftB);
-      const pixelA = samplePixel(a, x - xShiftA, y - yShiftA);
-      const pixelB = samplePixel(b, x - xShiftB, y - yShiftB);
-      const alphaA = pixelA[3] / 255;
-      const alphaB = pixelB[3] / 255;
-      // Detached effects (shadow, rope, sparkles) are intentionally treated
-      // as raster layers here. Their fields can be disconnected between key
-      // poses, and averaging those fields creates holes or a late pop. A
-      // premultiplied alpha cross-fade keeps the entire prop visible while it
-      // moves; only the body contour needs the SDF envelope.
-      const propOnly = isProp && !isBodyCore;
-      const silhouette = propOnly ? 1 : silhouetteFor(sdfA, sdfB, pixelA, pixelB, t);
-      const weightA = alphaA * (1 - t);
-      const weightB = alphaB * t;
-      const weight = weightA + weightB;
-      const outAlpha = Math.min(1, weight) * silhouette;
-      result[index + 3] = Math.round(outAlpha * 255);
-      if (weight <= 0.0001 || outAlpha <= 0.0001) continue;
-      result[index] = Math.round((pixelA[0] * weightA + pixelB[0] * weightB) / weight);
-      result[index + 1] = Math.round((pixelA[1] * weightA + pixelB[1] * weightB) / weight);
-      result[index + 2] = Math.round((pixelA[2] * weightA + pixelB[2] * weightB) / weight);
+      const sampled = samplePixel(source, (pixel % cellWidth) - moveX * translationProgress, Math.floor(pixel / cellWidth) - moveY * translationProgress);
+      result[index] = sampled[0];
+      result[index + 1] = sampled[1];
+      result[index + 2] = sampled[2];
+      result[index + 3] = sampled[3];
     }
     return result;
   }
@@ -555,11 +536,14 @@ for (let row = 0; row < rows; row += 1) {
           anchorB,
           propAnchorA,
           propAnchorB,
-          // Extremely large body translations are kept as a clean single-pose
-          // move. Ordinary hops and rope beats use the aligned SDF contour;
-          // this avoids a midpoint shape switch while still protecting the
-          // renderer from a genuine teleport in the source art.
-          Math.hypot(anchorB.x - anchorA.x, anchorB.y - anchorA.y) > 44,
+          // A raster cross-fade is never safe for a desktop pet: even a small
+          // ear/eye/leg change leaves two silhouettes visible for a few
+          // milliseconds.  Keep every in-between as one complete pose moving
+          // along the anchor path, then hand off to the incoming pose at the
+          // midpoint.  At the 8ms runtime cadence that hand-off is one
+          // display beat, while the remaining 62 cells provide the smooth
+          // motion; most importantly there is no translucent double pet.
+          true,
         ),
         outputColumn++,
         row,

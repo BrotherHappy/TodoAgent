@@ -33,11 +33,10 @@ import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v21-12.
  * 16,384px texture limit and could make the compositor tear while sampling a
  * new cell. Every v23/v21 page is 2,048×2,048px (the final page is padded
  * transparent), so no hidden driver tiling is needed. Cells are authored at
- * 128px and retain the authored high-density frames from the v23/v21 source
- * strips. Runtime pages are deliberately a lossless split of those strips:
- * the offline interpolator remains available for experiments, but generated
- * contour blends are not shipped when they introduce a coloured edge or
- * double silhouette around a key pose.
+ * 128px and retain the authored high-density timing from the v23/v21 source
+ * strips. Runtime pages are generated with a single-pose hand-off
+ * interpolator: each dense cell contains one complete pet, never a coloured
+ * edge or double silhouette from a raster cross-fade.
  */
 export const TODO_PET_ATLAS_URL = atlasUrl;
 export const TODO_PET_MOTION_ATLAS_URLS = [

@@ -97,9 +97,10 @@ describe("Todo Pet generated action atlas", () => {
       expect(animation.columns).toBe(TODO_PET_ATLAS_PAGE_COLUMNS);
       expect(animation.rows).toBe(TODO_PET_ATLAS_PAGE_ROWS);
       expect(animation.loop).toBe(true);
-      // Fast loops target 8ms so 120Hz panels can present a fresh authored
-      // cell on every refresh. The renderer still caps advancement at one
-      // cell per paint, so 60Hz displays never skip across the atlas.
+      // Fast loops target 8ms so 120Hz panels can present a fresh dense cell
+      // on every refresh. The renderer advances by the elapsed authored time
+      // (up to three neighbouring cells per paint), so 60Hz displays keep
+      // the intended action duration without a large catch-up jump.
       expect(animation.frameDurationMs).toBeGreaterThanOrEqual(8);
     }
   });

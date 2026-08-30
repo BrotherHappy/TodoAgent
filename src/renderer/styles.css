@@ -5838,6 +5838,33 @@ button.dependency-graph-node:focus-visible {
   left: 104px;
   max-width: none;
 }
+/* Keep the reaction card and the task stack in two real grid rows. The old
+   absolute reaction card painted over the first task card whenever a pet
+   message was long (or the window was in the compact 184px height), making
+   the task appear to jump behind the bubble. The row hand-off reserves the
+   exact measured reaction height and leaves the remaining space scrollable. */
+.pet-shell.is-expanded.has-pet-reaction:not(.has-interaction-wheel):not(.has-coop-game) .pet-compact {
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: start;
+}
+.pet-shell.is-expanded.has-pet-reaction:not(.has-interaction-wheel):not(.has-coop-game) .pet-reaction-bubble {
+  position: relative;
+  inset: auto;
+  grid-column: 2;
+  grid-row: 1;
+  width: auto;
+  max-width: none;
+  margin: 4px 5px 0 0;
+  align-self: start;
+}
+.pet-shell.is-expanded.has-pet-reaction:not(.has-interaction-wheel):not(.has-coop-game) .pet-bubble-stack {
+  grid-column: 2;
+  grid-row: 2;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  align-self: stretch;
+}
 .pet-shell.is-expanded.pet-reaction-collapsed .pet-reaction-bubble {
   right: auto;
   width: max-content;
@@ -6411,7 +6438,7 @@ button.dependency-graph-node:focus-visible {
   inset: 0;
   display: block;
   overflow: hidden;
-  contain: paint;
+  contain: layout paint;
   isolation: isolate;
 }
 .pet-atlas-buffer-stack > .pet-atlas-canvas {
@@ -6419,6 +6446,10 @@ button.dependency-graph-node:focus-visible {
   inset: 0;
   opacity: 0;
   transition: none !important;
+  /* Both buffers are small, stable compositor layers. Explicitly promoting
+     opacity (instead of an unused transform layer) keeps the buffer flip on
+     one vsync commit and avoids a half-painted canvas under load. */
+  will-change: opacity;
 }
 .pet-atlas-buffer-stack[data-active-buffer="0"] > .pet-atlas-buffer-0,
 .pet-atlas-buffer-stack[data-active-buffer="1"] > .pet-atlas-buffer-1 {
@@ -6429,7 +6460,11 @@ button.dependency-graph-node:focus-visible {
   width: 100%;
   height: 100%;
   transform-origin: center bottom;
-  will-change: transform;
+  /* The atlas is a complete-pose surface. It is swapped through opacity,
+     never moved with a CSS transform; advertising a transform layer here
+     makes Chromium promote each buffer twice and can let the two layers land
+     on different compositor commits. */
+  will-change: auto;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
@@ -6440,7 +6475,10 @@ button.dependency-graph-node:focus-visible {
   user-select: none;
   pointer-events: none;
   image-rendering: auto;
-  will-change: transform;
+  /* Keep the promotion aligned with the buffer flip above. A transform hint
+     on this element is unused and was a source of one-vsync stale frames on
+     transparent always-on-top windows. */
+  will-change: opacity;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   contain: paint;
@@ -6992,10 +7030,24 @@ button.dependency-graph-node:focus-visible {
 .pet-bubble-stack {
   min-width: 0;
   max-height: 100%;
+  min-height: 0;
+  height: 100%;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 7px;
+  /* A focus card, a task card and a gentle reminder can coexist in the
+     compact 184px surface. Keep their geometry in one scroll container
+     instead of allowing the cards to paint on top of one another (which also
+     makes the pet appear to jump when a card opens or closes). The left
+     padding reserves room for each speech-tail without clipping it. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 3px 5px 3px 8px;
+  scrollbar-width: thin;
 }
 .pet-speech-bubble {
   position: relative;
@@ -7010,6 +7062,15 @@ button.dependency-graph-node:focus-visible {
   backdrop-filter: blur(20px) saturate(1.08);
   -webkit-backdrop-filter: blur(20px) saturate(1.08);
   transform-origin: left center;
+}
+/* A transparent always-on-top window has no reliable backdrop surface on
+   macOS/Windows. Blurring it every time the pet repaints can force the whole
+   window through the compositor and show a one-frame glow/tear. The bubble
+   already has a 96% opaque surface, so keeping this layer solid preserves the
+   glass look while letting the atlas stay on its own refresh path. */
+.floating-shell .pet-speech-bubble {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .pet-speech-bubble::before {
   content: "";

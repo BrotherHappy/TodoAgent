@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -158,7 +159,7 @@ function schedulePetAtlasWarmup(): void {
  * cross-fading complete silhouettes: two overlapping transparent pets read as
  * a tearing tail/ear, especially during carrying and rope actions.
  */
-function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasProps) {
+const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasProps) {
   const stackRef = useRef<HTMLSpanElement>(null);
   const imageMapRef = useRef(new Map<string, HTMLImageElement>());
   const animationKey = `${sources.join(",")}:${animation.name}:${animation.frames.length}:${animation.frames[0] ?? 0}`;
@@ -316,10 +317,12 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
     };
     const authoredFrameDuration = Math.max(1, animation.frameDurationMs);
     // Keep a fractional playhead instead of tying motion to integer wall-clock
-    // ticks. At 60Hz the 8ms target is capped to one complete cell per
-    // refresh, while a 120Hz panel can advance one cell on every refresh.
-    // The presentation step below always chooses a complete cell, so no
-    // authored frame is replaced by a translucent double exposure.
+    // ticks. The authored 8ms cadence is time-accurate: a 60Hz panel consumes
+    // roughly two dense source cells per refresh, while a 120Hz panel usually
+    // consumes one. Dense source cells are intentionally much closer than a
+    // traditional keyframe, so this preserves the intended action duration
+    // without introducing a second translucent silhouette. The presentation
+    // step below still chooses one complete cell at a time.
     let sequencePosition = 0;
     let sequenceStarted = false;
     // The first two refresh callbacks can straddle image decode and a window
@@ -413,10 +416,10 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
 
     const paint = (now: number): void => {
       // Do not fast-forward across a long main-thread/compositor pause. Keep
-      // at most one generated cell per paint. The fractional playhead below
-      // chooses a neighbouring complete pose, so a 60Hz display never skips
-      // over a whole in-between. The small warm-up gate prevents the first
-      // post-decode callback from inheriting a stale timestamp.
+      // at most three dense source cells per paint; this is enough to catch up
+      // from a single missed refresh while preventing a visible teleport. The
+      // small warm-up gate prevents the first post-decode callback from
+      // inheriting a stale timestamp.
       if (previousTimestamp === undefined) previousTimestamp = now;
       const delta = Math.max(0, now - previousTimestamp);
       previousTimestamp = now;
@@ -435,7 +438,7 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
         );
         const positionAdvance = warmupPaints < 2
           ? 0
-          : Math.min(1, cappedDelta / authoredFrameDuration);
+          : Math.min(3, cappedDelta / authoredFrameDuration);
         if (shouldLoop) {
           sequencePosition = (sequencePosition + positionAdvance) % travelCount;
         } else {
@@ -500,12 +503,11 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
       // one-attribute buffer flip. Adjacent offline cells are already dense
       // contour neighbours; keeping one opaque cell on screen avoids the
       // ghosting/tearing that an alpha blend of two moving bodies creates.
+      // `copy` replaces the hidden surface in one draw operation. There is no
+      // clear → draw gap for the compositor to observe, even on a busy
+      // transparent window. Compositing the previous pose with the new one
+      // was the source of the visible double exposure during handoff.
       nextContext.globalCompositeOperation = "copy";
-      // `copy` replaces the hidden surface in one operation. There is no
-      // active-canvas draw here: compositing the previous pose with the new
-      // one was the source of the visible double exposure during handoff.
-      nextContext.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
-      nextContext.globalCompositeOperation = "source-over";
       nextContext.globalAlpha = 1;
       // A page boundary can briefly have the current cell decoded while the
       // look-ahead cell is still being decoded. Keep the current complete
@@ -563,14 +565,19 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
       <canvas className="pet-atlas-canvas pet-atlas-motion pet-atlas-buffer-1" aria-hidden="true" data-ready={ready ? "true" : "false"} />
     </span>
   );
-}
+}, (previous, next) =>
+  previous.sources === next.sources &&
+  previous.animation === next.animation &&
+  previous.onStep === next.onStep &&
+  previous.onReady === next.onReady,
+);
 
 /**
  * The mascot combines generated frame-by-frame loops with the articulated
  * SVG rig kept below as a fallback and for precise interaction overlays. A
  * business state therefore changes both the pet's pose and its motion rhythm.
  */
-export function PetCharacter({
+function PetCharacterView({
   mood = "idle",
   emotion,
   action = "idle",
@@ -925,3 +932,28 @@ export function PetCharacter({
     </span>
   );
 }
+
+/**
+ * The floating window contains a streaming Agent transcript, a focus clock
+ * and several independently updating bubbles. Those updates must not cause
+ * the pet subtree to reconcile while its canvas is between two vsync paints:
+ * a React commit at that point can invalidate the compositor layer and make a
+ * perfectly paced atlas look like a low-FPS flipbook. The visual props below
+ * are the only inputs that can change the pet, so memoising on this small
+ * surface keeps the animation clock independent from the rest of the app.
+ */
+export const PetCharacter = memo(PetCharacterView, (previous, next) =>
+  previous.mood === next.mood &&
+  previous.emotion === next.emotion &&
+  previous.action === next.action &&
+  previous.name === next.name &&
+  previous.scalePercent === next.scalePercent &&
+  previous.compact === next.compact &&
+  previous.interactive === next.interactive &&
+  previous.palette === next.palette &&
+  previous.outfit === next.outfit &&
+  previous.season === next.season &&
+  previous.weatherEffect === next.weatherEffect &&
+  previous.personality === next.personality &&
+  previous.visualStyle === next.visualStyle,
+);
