@@ -6,13 +6,13 @@
  * The source sheets are hand/generated poses. Signed-distance contour
  * interpolation is deliberately kept offline: the renderer only has to swap
  * one complete cell at a time, so it never exposes a partially painted frame.
- * Body and detached props use their own moving contour fields. Each pixel is
- * sourced from the nearer weighted pose instead of colour-blending two
- * translated rasters. A normal alpha cross-fade is deceptively smooth at the
- * file level but creates two eyes/ears whenever the source artists moved the
- * whole character between keys. Picking one complete source pixel keeps the
- * silhouette single; a distance-field envelope and one-sided alpha hand-off
- * still make hands, ropes and sparkles enter/leave without a hard cut.
+ * Body and detached props use their own moving contour fields. Props keep a
+ * single winning source raster so ropes/sparkles never double. The stable
+ * body interior is colour-cross-faded at a shared coordinate; this is what
+ * lets a hand or facial feature enter over several frames without the hard
+ * midpoint cut that a whole-pose winner would create. A distance-field
+ * envelope keeps the silhouette single while the one-sided alpha hand-off
+ * handles genuinely new/removed pixels.
  */
 import fs from "node:fs";
 import zlib from "node:zlib";
@@ -376,17 +376,21 @@ const blend = (
     // detached prop use their own distance field, so a rope or sparkle cannot
     // pull the pet silhouette into a second ghost shape.
     const silhouette = smoothstep(-1.25, 1.25, sdfA * (1 - t) + sdfB * t);
-    // Keep each region on one complete pose. Blending two translated rasters
-    // creates a faint second ear/eye/arm even though the contour is single.
-    // The weighted winner changes at the temporal midpoint while the
-    // distance-field contour and alpha envelope make the silhouette itself
-    // travel smoothly. This is the same visual rule used by polished desktop
-    // pets: never expose two complete bodies at once.
-    const pixelA = samplePixel(a, x - xShift, y - yShift);
-    const pixelB = samplePixel(b, x - xShiftB, y - yShiftB);
+    // Props are sampled in their moving frame and stay on one winning raster.
+    // For the stable body core, however, keep both colours at the same canvas
+    // coordinate and cross-fade them. A complete-pose winner makes an entering
+    // hand appear in a single frame at t=.5; a shared-coordinate blend gives
+    // that hand a real temporal ramp without ever drawing two translated
+    // bodies on top of each other.
+    const propBlend = isProp && !isBodyCore;
+    const pixelA = propBlend
+      ? samplePixel(a, x - xShift, y - yShift)
+      : samplePixel(a, x, y);
+    const pixelB = propBlend
+      ? samplePixel(b, x - xShiftB, y - yShiftB)
+      : samplePixel(b, x, y);
     const alphaA = pixelA[3] / 255;
     const alphaB = pixelB[3] / 255;
-    const propBlend = isProp && !isBodyCore;
     const weightA = alphaA * (1 - t);
     const weightB = alphaB * t;
     const sourceWeight = Math.max(weightA, weightB);
@@ -394,17 +398,18 @@ const blend = (
     const primary = t < 0.5 ? pixelA : pixelB;
     // Body pixels that exist in only one key pose need an alpha hand-off (for
     // example the patting hand first touches the head). Pixels present in both
-    // poses keep their nearest complete raster. The contour and alpha are
-    // still interpolated, so an entering hand can fade in and a moving body
-    // can travel without exposing a second colour-blended silhouette.
+    // poses use a premultiplied colour blend at the shared coordinate. The
+    // contour and alpha are still interpolated, so an entering hand can fade
+    // in and a moving body can travel without exposing a translated duplicate.
     const oneSidedBody = !propBlend && (alphaA <= 0.02 || alphaB <= 0.02);
     const bodyBlendWeightA = alphaA * (1 - t);
     const bodyBlendWeightB = alphaB * t;
+    const bodyBlendWeight = bodyBlendWeightA + bodyBlendWeightB;
     const sourceAlpha = propBlend
       ? Math.min(1, sourceWeight)
       : oneSidedBody
         ? alphaA > alphaB ? alphaA * (1 - t) : alphaB * t
-        : Math.max(bodyBlendWeightA, bodyBlendWeightB);
+        : Math.min(1, bodyBlendWeight);
     const outAlpha = sourceAlpha * silhouette;
     result[index + 3] = Math.round(outAlpha * 255);
     if (outAlpha <= 0.0001) continue;
@@ -420,10 +425,13 @@ const blend = (
       result[index] = pixelA[0];
       result[index + 1] = pixelA[1];
       result[index + 2] = pixelA[2];
-    } else if (Math.max(bodyBlendWeightA, bodyBlendWeightB) > 0.0001) {
-      result[index] = source[0];
-      result[index + 1] = source[1];
-      result[index + 2] = source[2];
+    } else if (bodyBlendWeight > 0.0001) {
+      const red = (pixelA[0] * bodyBlendWeightA + pixelB[0] * bodyBlendWeightB) / bodyBlendWeight;
+      const green = (pixelA[1] * bodyBlendWeightA + pixelB[1] * bodyBlendWeightB) / bodyBlendWeight;
+      const blue = (pixelA[2] * bodyBlendWeightA + pixelB[2] * bodyBlendWeightB) / bodyBlendWeight;
+      result[index] = Math.round(red);
+      result[index + 1] = Math.round(green);
+      result[index + 2] = Math.round(blue);
     } else {
       result[index] = primary[0];
       result[index + 1] = primary[1];

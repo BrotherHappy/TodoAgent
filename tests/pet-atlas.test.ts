@@ -24,8 +24,8 @@ describe("Todo Pet generated action atlas", () => {
   };
 
   it("keeps runtime grid metadata aligned with the PNG dimensions", () => {
-    const motion = pngSize("todo-pet-motion-atlas-v20.png");
-    const interaction = pngSize("todo-pet-interaction-atlas-v18.png");
+    const motion = pngSize("todo-pet-motion-atlas-v21.png");
+    const interaction = pngSize("todo-pet-interaction-atlas-v19.png");
     expect(motion.width).toBe(TODO_PET_MOTION_COLUMNS * 128);
     expect(motion.height).toBe(TODO_PET_MOTION_ROWS * 128);
     expect(interaction.width).toBe(TODO_PET_INTERACTION_COLUMNS * 128);

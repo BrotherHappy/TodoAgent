@@ -1,7 +1,7 @@
 import type { PetAction } from "./pet-behavior";
 import atlasUrl from "../assets/todo-pet-action-atlas-v2.png";
-import motionAtlasUrl from "../assets/todo-pet-motion-atlas-v20.png";
-import interactionAtlasUrl from "../assets/todo-pet-interaction-atlas-v18.png";
+import motionAtlasUrl from "../assets/todo-pet-motion-atlas-v21.png";
+import interactionAtlasUrl from "../assets/todo-pet-interaction-atlas-v19.png";
 
 /**
  * The generated atlases are deterministic visual layers. The legacy sheet
@@ -10,11 +10,12 @@ import interactionAtlasUrl from "../assets/todo-pet-interaction-atlas-v18.png";
  * 16-column grid and stacked vertically. Cells are authored at 128px and
  * rendered into the device-pixel canvas, keeping each decoded texture at
  * 2048px wide while leaving 63 complete poses between every authored key
- * pose. The v20/v18 interpolation pass uses a single winning source raster
- * per region (rather than blending two translated bodies), so eyes, ears and
- * hands never appear as a translucent duplicate between key poses. All cells
- * share a stable body baseline, and the page mapping is kept here instead of
- * in CSS so the Canvas renderer cannot clip a neighboring cell.
+ * pose. The v21/v19 interpolation pass cross-fades the stable body colour at
+ * one shared coordinate while keeping detached props on a single source
+ * raster; this avoids a hard midpoint hand/face switch that can read as
+ * tearing on a 60Hz desktop. All cells share a stable body baseline, and the
+ * page mapping is kept here instead of in CSS so the Canvas renderer cannot
+ * clip a neighboring cell.
  */
 export const TODO_PET_ATLAS_URL = atlasUrl;
 export const TODO_PET_MOTION_ATLAS_URL = motionAtlasUrl;
@@ -150,7 +151,7 @@ const singleFrameAnimation = (
 });
 
 /**
- * The v20/v18 sheets are packed from the high-frame source strips and include
+ * The v21/v19 sheets are packed from the high-frame source strips and include
  * offline in-between cells. Keeping the mapping in data (rather than CSS
  * selectors) means every PetCharacter gets the same timing and a state change
  * always restarts at the entrance frame.
