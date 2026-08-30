@@ -163,14 +163,11 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
   const imageMapRef = useRef(new Map<string, HTMLImageElement>());
   const animationKey = `${sources.join(",")}:${animation.name}:${animation.frames.length}:${animation.frames[0] ?? 0}`;
   const previousAnimationKeyRef = useRef(animationKey);
-  // A state change (idle → pet, work → celebrate, etc.) used to reveal the
-  // first frame of the new sheet in one compositor tick. Even with a double
-  // buffer that is a complete frame, it is still a visible teleport when the
-  // two authored poses have different props. The old implementation copied
-  // the active canvas into ImageData here. That
-  // synchronous GPU readback could stall a refresh and was itself visible as
-  // a dropped frame. Keep only a boolean; the paint loop copies the already
-  // presented canvas directly into the hidden buffer instead.
+  // A state change (idle → pet, work → celebrate, etc.) keeps the last
+  // complete canvas frame visible until the first complete cell of the new
+  // timeline is ready. We deliberately do not cross-fade the two poses: two
+  // moving pets in the same pixels read as a tear/ghost, especially when a
+  // hand, rope or task card changes position.
   const handoffRef = useRef(false);
   // Once one complete canvas frame has reached the screen, keep that frame
   // visible while a different sheet is decoding. Falling back to the SVG on
@@ -194,8 +191,9 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
   useLayoutEffect(() => {
     if (previousAnimationKeyRef.current === animationKey) return;
     // The currently visible canvas remains mounted across an action change.
-    // Mark a short bridge and let the next rAF copy that surface without a
-    // CPU readback. On a true cold start there is no previous frame to bridge.
+    // Mark a bridge so the next rAF can keep the existing complete pose until
+    // it can atomically present the first decoded cell from the new timeline.
+    // On a true cold start there is no previous frame to bridge.
     handoffRef.current = presentedFrameRef.current;
     previousAnimationKeyRef.current = animationKey;
   }, [animationKey]);
@@ -299,10 +297,9 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
       ? frameCount * 2 - 2
       : frameCount;
     // Observe the compositor cadence so long background pauses can be capped
-    // without making the playhead jump. Keep the playhead fractional: a clock
-    // that advances more than one cell at a time silently drops the
-    // in-betweens that make the pet feel alive. The cap below deliberately
-    // trades catch-up speed for a continuous pose path.
+    // without making the playhead jump. Keep the playhead fractional so a
+    // clock pause cannot force a large integer jump; the presentation step
+    // below rounds it to one complete neighbouring cell.
     let refreshQuantum = 1000 / 60;
     const refreshSamples: number[] = [];
     const observeRefresh = (delta: number): void => {
@@ -318,11 +315,11 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
       refreshQuantum = Math.max(1000 / 240, Math.min(1000 / 30, middle));
     };
     const authoredFrameDuration = Math.max(1, animation.frameDurationMs);
-    // Keep a fractional playhead instead of rounding to a cell at every
-    // refresh. At 60Hz the 18ms target advances just under one generated cell;
-    // the hidden buffer blends the fractional remainder into the next cell,
-    // so every compositor refresh presents a genuinely new pose without
-    // skipping an authored in-between.
+    // Keep a fractional playhead instead of tying motion to integer wall-clock
+    // ticks. At 60Hz the 16ms target advances about one generated cell; the
+    // presentation step below rounds that playhead to one complete cell, so
+    // every compositor refresh is atomic and no authored in-between is
+    // replaced by a translucent double exposure.
     let sequencePosition = 0;
     let sequenceStarted = false;
     // The first two refresh callbacks can straddle image decode and a window
@@ -405,28 +402,30 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
     let activeBuffer = stack.dataset.activeBuffer === "1" ? 1 : 0;
     let firstFramePainted = false;
     if (!stack.dataset.activeBuffer) stack.dataset.activeBuffer = String(activeBuffer);
-    // Keep the bridge short enough that it reads as a soft handoff rather
-    // than a ghosting effect. Five display beats are ~42ms at 120Hz and
-    // ~83ms at 60Hz, long enough to remove a hard cut while keeping the new
-    // action immediate. The previous visible canvas is copied directly into
-    // the hidden buffer; no ImageData allocation or GPU readback happens in
-    // the frame loop.
+    // The handoff is a hold, not a fade. The previous implementation blended
+    // the old and new full-pet canvases for five display beats; that produced
+    // a translucent duplicate whenever an action changed direction. The
+    // hidden buffer is now painted at full opacity and flipped once, so the
+    // screen contains either one complete old pose or one complete new pose.
     let handoffPending = handoffRef.current;
     handoffRef.current = false;
-    let handoffFrame = handoffPending ? 0 : 5;
-    const handoffFrameCount = 5;
     stack.dataset.handoff = handoffPending ? "true" : "false";
 
     const paint = (now: number): void => {
       // Do not fast-forward across a long main-thread/compositor pause. Keep
       // at most one generated cell per paint. The fractional playhead below
-      // turns the remainder into a cross-faded pose, so a 60Hz display never
-      // skips over a whole in-between. The small warm-up gate prevents the
-      // first post-decode callback from inheriting a stale timestamp.
+      // chooses a neighbouring complete pose, so a 60Hz display never skips
+      // over a whole in-between. The small warm-up gate prevents the first
+      // post-decode callback from inheriting a stale timestamp.
       if (previousTimestamp === undefined) previousTimestamp = now;
       const delta = Math.max(0, now - previousTimestamp);
       previousTimestamp = now;
       observeRefresh(delta);
+      // Keep the last presented position so a page decode can never make the
+      // playhead run ahead of the pixels on screen. If either the current or
+      // look-ahead cell is not ready, the paint below simply leaves the
+      // already-complete buffer visible and retries on the next refresh.
+      const previousSequencePosition = sequencePosition;
       if (!sequenceStarted) {
         sequenceStarted = true;
       } else {
@@ -464,7 +463,7 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
       const currentImage = imageForFrame(current);
       const nextImage = imageForFrame(next);
       const currentPage = pageForFrame(current);
-      // Decode one extra page ahead of the look-ahead frame. At the 18ms
+      // Decode one extra page ahead of the look-ahead frame. At the 16ms
       // cadence this gives a 0.9–2.2s warm window before a page boundary,
       // even if the user is on a high-refresh display.
       requestPage(currentPage + 1);
@@ -473,6 +472,20 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
       // canvas. Keep the last complete pose on screen for one refresh while
       // the bounded page finishes decoding, then resume at the same playhead.
       if (!currentImage) {
+        sequencePosition = previousSequencePosition;
+        frameRequest = window.requestAnimationFrame(paint);
+        return;
+      }
+      // The current cell can arrive a few milliseconds before the next cell
+      // on a cold page. The renderer presents one complete atlas cell at a
+      // time (nearest to the fractional playhead) instead of alpha-blending
+      // two translated silhouettes. That keeps ears, tails and shadows from
+      // appearing as a translucent double exposure while still allowing the
+      // dense offline in-betweens to advance on every display refresh.
+      const wantsNextImage =
+        fractionalProgress >= 0.5 && next !== current;
+      if (wantsNextImage && !nextImage) {
+        sequencePosition = previousSequencePosition;
         frameRequest = window.requestAnimationFrame(paint);
         return;
       }
@@ -482,50 +495,27 @@ function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasP
       const nextCanvas = canvases[nextBuffer];
       const nextContext = contexts[nextBuffer];
       if (!nextCanvas || !nextContext) return;
-      // Draw the complete fractional pose into the hidden surface before the
-      // one-attribute buffer flip. Adjacent offline cells are already contour
-      // neighbours, so this short premultiplied canvas cross-fade removes the
-      // remaining 60Hz stepping without creating a second visible pet.
-      const activeCanvas = canvases[activeBuffer];
-      const canBridge = handoffPending
-        && Boolean(activeCanvas)
-        && activeCanvas.width === nextCanvas.width
-        && activeCanvas.height === nextCanvas.height;
-      const handoffProgress = canBridge
-        ? Math.max(0, Math.min(1, (handoffFrame + 1) / handoffFrameCount))
-        : 1;
+      // Draw the complete nearest pose into the hidden surface before the
+      // one-attribute buffer flip. Adjacent offline cells are already dense
+      // contour neighbours; keeping one opaque cell on screen avoids the
+      // ghosting/tearing that an alpha blend of two moving bodies creates.
       nextContext.globalCompositeOperation = "copy";
-      if (canBridge && activeCanvas) {
-        // Copy the last fully presented frame as the bridge base. This is a
-        // GPU-to-GPU copy and does not block the renderer like getImageData().
-        nextContext.globalAlpha = 1 - handoffProgress;
-        nextContext.drawImage(activeCanvas, 0, 0, nextCanvas.width, nextCanvas.height);
-      } else {
-        nextContext.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
-      }
+      // `copy` replaces the hidden surface in one operation. There is no
+      // active-canvas draw here: compositing the previous pose with the new
+      // one was the source of the visible double exposure during handoff.
+      nextContext.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
       nextContext.globalCompositeOperation = "source-over";
       nextContext.globalAlpha = 1;
-      const targetOpacity = canBridge ? handoffProgress : 1;
-      drawFrame(
-        nextContext,
-        nextCanvas,
-        currentImage,
-        current,
-        (1 - fractionalProgress) * targetOpacity,
-      );
-      if (fractionalProgress > 0.0001 && next !== current && nextImage) {
-        nextContext.globalCompositeOperation = "source-over";
-        drawFrame(nextContext, nextCanvas, nextImage, next, fractionalProgress * targetOpacity);
-      }
+      // A page boundary can briefly have the current cell decoded while the
+      // look-ahead cell is still being decoded. Keep the current complete
+      // pose until the next cell is ready, then switch atomically at the
+      // halfway point of the fractional playhead.
+      const presentationImage = wantsNextImage && nextImage ? nextImage : currentImage;
+      const presentationFrame = wantsNextImage && nextImage ? next : current;
+      drawFrame(nextContext, nextCanvas, presentationImage, presentationFrame, 1);
       nextContext.globalCompositeOperation = "source-over";
       nextContext.globalAlpha = 1;
-      if (canBridge) {
-        handoffFrame += 1;
-        if (handoffFrame >= handoffFrameCount) {
-          handoffPending = false;
-          stack.dataset.handoff = "false";
-        }
-      } else if (handoffPending) {
+      if (handoffPending) {
         handoffPending = false;
         stack.dataset.handoff = "false";
       }

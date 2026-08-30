@@ -6,13 +6,12 @@
  * The source sheets are hand/generated poses. Signed-distance contour
  * interpolation is deliberately kept offline: the renderer only has to swap
  * one complete cell at a time, so it never exposes a partially painted frame.
- * Body and detached props use their own moving contour fields. Props keep a
- * single winning source raster so ropes/sparkles never double. The stable
- * body interior is colour-cross-faded at a shared coordinate; this is what
- * lets a hand or facial feature enter over several frames without the hard
- * midpoint cut that a whole-pose winner would create. A distance-field
- * envelope keeps the silhouette single while the one-sided alpha hand-off
- * handles genuinely new/removed pixels.
+ * Body and detached props use separate layers. The stable body interior is
+ * colour-cross-faded at a shared coordinate; detached props (rope, sparkles
+ * and floor shadow) use premultiplied raster blending so a thin effect cannot
+ * disappear until the final cell or leave an SDF hole. A distance-field
+ * envelope keeps the body silhouette single while one-sided alpha hand-offs
+ * handle genuinely new/removed pixels.
  */
 import fs from "node:fs";
 import zlib from "node:zlib";
@@ -172,6 +171,22 @@ const bodyMask = (cell) => {
   const mask = new Uint8Array(size);
   const queue = new Int32Array(size);
   const isOpaque = (index) => cell[index * 4 + 3] > 20;
+  const isGroundShadow = (index) => {
+    const y = Math.floor(index / cellWidth);
+    if (y < cellHeight * 0.86) return false;
+    const offset = index * 4;
+    const alpha = cell[offset + 3] ?? 0;
+    if (alpha <= 20) return false;
+    const red = cell[offset] ?? 0;
+    const green = cell[offset + 1] ?? 0;
+    const blue = cell[offset + 2] ?? 0;
+    const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
+    const luminance = (red + green + blue) / 3;
+    // The authored floor shadow is a cool, near-neutral light stroke. Feet,
+    // tail and the lower body remain saturated, so this conservative colour
+    // test removes only the shadow even when it touches the body component.
+    return luminance >= 150 && chroma <= 36;
+  };
   const touchesBodyCore = (index) => {
     const x = index % cellWidth;
     const y = Math.floor(index / cellWidth);
@@ -213,7 +228,9 @@ const bodyMask = (cell) => {
       }
     }
     if (touches) {
-      for (const index of component) mask[index] = 1;
+      for (const index of component) {
+        if (!isGroundShadow(index)) mask[index] = 1;
+      }
     }
   }
   return mask;
@@ -296,6 +313,24 @@ const smoothstep = (edge0, edge1, value) => {
   const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 };
+/**
+ * Keep one-sided pixels on the contour of the pose that owns them. A plain
+ * SDF cross-fade averages an occupied field with the large negative field of
+ * a transparent pose, so a detached prop (the floor shadow is the common
+ * case) can stay invisible until the very last generated cell and then pop
+ * in at t=1. When only one source contributes colour, use that source's
+ * contour and let the premultiplied alpha do the temporal hand-off.
+ */
+const silhouetteFor = (sdfA, sdfB, pixelA, pixelB, t) => {
+  const alphaA = pixelA[3] / 255;
+  const alphaB = pixelB[3] / 255;
+  const oneSidedField = alphaA <= 0.02 && alphaB > 0.02
+    ? sdfB
+    : alphaB <= 0.02 && alphaA > 0.02
+      ? sdfA
+      : sdfA * (1 - t) + sdfB * t;
+  return smoothstep(-1.25, 1.25, oneSidedField);
+};
 const blend = (
   a,
   b,
@@ -319,8 +354,6 @@ const blend = (
   const deltaY = anchorB.y - anchorA.y;
   const propDeltaX = propAnchorB.x - propAnchorA.x;
   const propDeltaY = propAnchorB.y - propAnchorA.y;
-  const primaryIsA = t < 0.5;
-  const pose = primaryIsA ? a : b;
   // When a key pose travels a long distance (for example the jump-rope hop),
   // a distance-field blend can have two valid zero contours at once. That is
   // mathematically correct but visually reads as a translucent duplicate pet.
@@ -330,17 +363,51 @@ const blend = (
   // trades a single pose switch at the midpoint for a much safer visual result
   // than showing two semi-overlapping bodies during a hop.
   if (transformOnly) {
-    const xShift = deltaX * (primaryIsA ? t : t - 1);
-    const yShift = deltaY * (primaryIsA ? t : t - 1);
+    // Large translations (the hop/rope beats) used to switch from the
+    // translated A pose to the translated B pose at exactly t=.5. That kept
+    // the silhouette single, but the midpoint cut was visible as a low-FPS
+    // tear. Move each contour toward the shared midpoint and continuously
+    // blend the two shifted rasters instead. The SDF envelope keeps one
+    // connected silhouette while the premultiplied colour ramp gives the
+    // prop and body pixels a real temporal hand-off.
     for (let index = 0, pixel = 0; index < a.length; index += 4, pixel += 1) {
       const x = pixel % cellWidth;
       const y = Math.floor(pixel / cellWidth);
-      const sampled = samplePixel(pose, x - xShift, y - yShift);
-      if (sampled[3] <= 0) continue;
-      result[index] = sampled[0];
-      result[index + 1] = sampled[1];
-      result[index + 2] = sampled[2];
-      result[index + 3] = sampled[3];
+      const isBodyCore = bodyMaskA[pixel] || bodyMaskB[pixel];
+      const isProp = propMaskA[pixel] || propMaskB[pixel];
+      if (!isBodyCore && !isProp) continue;
+      const moveX = isBodyCore ? deltaX : propDeltaX;
+      const moveY = isBodyCore ? deltaY : propDeltaY;
+      const xShiftA = moveX * t;
+      const yShiftA = moveY * t;
+      const xShiftB = moveX * (t - 1);
+      const yShiftB = moveY * (t - 1);
+      const sdfA = isBodyCore
+        ? sampleField(bodySdfA, x - xShiftA, y - yShiftA)
+        : sampleField(propSdfA, x - xShiftA, y - yShiftA);
+      const sdfB = isBodyCore
+        ? sampleField(bodySdfB, x - xShiftB, y - yShiftB)
+        : sampleField(propSdfB, x - xShiftB, y - yShiftB);
+      const pixelA = samplePixel(a, x - xShiftA, y - yShiftA);
+      const pixelB = samplePixel(b, x - xShiftB, y - yShiftB);
+      const alphaA = pixelA[3] / 255;
+      const alphaB = pixelB[3] / 255;
+      // Detached effects (shadow, rope, sparkles) are intentionally treated
+      // as raster layers here. Their fields can be disconnected between key
+      // poses, and averaging those fields creates holes or a late pop. A
+      // premultiplied alpha cross-fade keeps the entire prop visible while it
+      // moves; only the body contour needs the SDF envelope.
+      const propOnly = isProp && !isBodyCore;
+      const silhouette = propOnly ? 1 : silhouetteFor(sdfA, sdfB, pixelA, pixelB, t);
+      const weightA = alphaA * (1 - t);
+      const weightB = alphaB * t;
+      const weight = weightA + weightB;
+      const outAlpha = Math.min(1, weight) * silhouette;
+      result[index + 3] = Math.round(outAlpha * 255);
+      if (weight <= 0.0001 || outAlpha <= 0.0001) continue;
+      result[index] = Math.round((pixelA[0] * weightA + pixelB[0] * weightB) / weight);
+      result[index + 1] = Math.round((pixelA[1] * weightA + pixelB[1] * weightB) / weight);
+      result[index + 2] = Math.round((pixelA[2] * weightA + pixelB[2] * weightB) / weight);
     }
     return result;
   }
@@ -375,13 +442,12 @@ const blend = (
     // preventing a transparent gap between consecutive poses. Body and each
     // detached prop use their own distance field, so a rope or sparkle cannot
     // pull the pet silhouette into a second ghost shape.
-    const silhouette = smoothstep(-1.25, 1.25, sdfA * (1 - t) + sdfB * t);
-    // Props are sampled in their moving frame and stay on one winning raster.
-    // For the stable body core, however, keep both colours at the same canvas
-    // coordinate and cross-fade them. A complete-pose winner makes an entering
-    // hand appear in a single frame at t=.5; a shared-coordinate blend gives
-    // that hand a real temporal ramp without ever drawing two translated
-    // bodies on top of each other.
+    // Props are sampled in their moving frame and blended as one premultiplied
+    // layer. For the stable body core, however, keep both colours at the same
+    // canvas coordinate and cross-fade them. A complete-pose winner makes an
+    // entering hand appear in a single frame at t=.5; a shared-coordinate
+    // blend gives that hand a real temporal ramp without drawing two
+    // translated bodies on top of each other.
     const propBlend = isProp && !isBodyCore;
     const pixelA = propBlend
       ? samplePixel(a, x - xShift, y - yShift)
@@ -391,11 +457,9 @@ const blend = (
       : samplePixel(b, x, y);
     const alphaA = pixelA[3] / 255;
     const alphaB = pixelB[3] / 255;
+    const silhouette = propBlend ? 1 : silhouetteFor(sdfA, sdfB, pixelA, pixelB, t);
     const weightA = alphaA * (1 - t);
     const weightB = alphaB * t;
-    const sourceWeight = Math.max(weightA, weightB);
-    const source = weightA >= weightB ? pixelA : pixelB;
-    const primary = t < 0.5 ? pixelA : pixelB;
     // Body pixels that exist in only one key pose need an alpha hand-off (for
     // example the patting hand first touches the head). Pixels present in both
     // poses use a premultiplied colour blend at the shared coordinate. The
@@ -406,17 +470,17 @@ const blend = (
     const bodyBlendWeightB = alphaB * t;
     const bodyBlendWeight = bodyBlendWeightA + bodyBlendWeightB;
     const sourceAlpha = propBlend
-      ? Math.min(1, sourceWeight)
+      ? Math.min(1, bodyBlendWeight)
       : oneSidedBody
         ? alphaA > alphaB ? alphaA * (1 - t) : alphaB * t
         : Math.min(1, bodyBlendWeight);
     const outAlpha = sourceAlpha * silhouette;
     result[index + 3] = Math.round(outAlpha * 255);
     if (outAlpha <= 0.0001) continue;
-    if (propBlend && sourceWeight > 0.0001) {
-      result[index] = source[0];
-      result[index + 1] = source[1];
-      result[index + 2] = source[2];
+    if (propBlend && bodyBlendWeight > 0.0001) {
+      result[index] = Math.round((pixelA[0] * bodyBlendWeightA + pixelB[0] * bodyBlendWeightB) / bodyBlendWeight);
+      result[index + 1] = Math.round((pixelA[1] * bodyBlendWeightA + pixelB[1] * bodyBlendWeightB) / bodyBlendWeight);
+      result[index + 2] = Math.round((pixelA[2] * bodyBlendWeightA + pixelB[2] * bodyBlendWeightB) / bodyBlendWeight);
     } else if (oneSidedBody && alphaA <= 0.02 && alphaB > 0.02) {
       result[index] = pixelB[0];
       result[index + 1] = pixelB[1];
@@ -501,26 +565,12 @@ for (let row = 0; row < rows; row += 1) {
         row,
       );
     }
-    // Render the endpoint with the exact same contour path used by the
-    // in-betweens. This avoids a hard raster cut at the authored key pose.
-    endpoint = blend(
-      fromCell,
-      toCell,
-      1,
-      bodySdfA,
-      bodySdfB,
-      propSdfA,
-      propSdfB,
-      bodyMaskA,
-      bodyMaskB,
-      propMaskA,
-      propMaskB,
-      anchorA,
-      anchorB,
-      propAnchorA,
-      propAnchorB,
-      Math.hypot(anchorB.x - anchorA.x, anchorB.y - anchorA.y) > 44,
-    );
+    // Keep the authored endpoint byte-for-byte intact. At t=1 an SDF field
+    // still has a feathered contour, and one-sided props can otherwise be
+    // one compositor beat away from the source pose. The final in-between
+    // now approaches this exact key pose with `silhouetteFor`, so the handoff
+    // is continuous while the key itself is never rewritten.
+    endpoint = Buffer.from(toCell);
     putCell(endpoint, outputColumn++, row);
     fromCell = endpoint;
   }

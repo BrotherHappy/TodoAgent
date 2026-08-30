@@ -27,10 +27,10 @@ describe("Todo Pet generated action atlas", () => {
 
   it("keeps runtime grid metadata aligned with the PNG dimensions", () => {
     const motionPages = Array.from({ length: TODO_PET_MOTION_PAGE_COUNT }, (_, page) =>
-      pngSize(`todo-pet-motion-atlas-v22-${String(page).padStart(2, "0")}.png`),
+      pngSize(`todo-pet-motion-atlas-v23-${String(page).padStart(2, "0")}.png`),
     );
     const interactionPages = Array.from({ length: TODO_PET_INTERACTION_PAGE_COUNT }, (_, page) =>
-      pngSize(`todo-pet-interaction-atlas-v20-${String(page).padStart(2, "0")}.png`),
+      pngSize(`todo-pet-interaction-atlas-v21-${String(page).padStart(2, "0")}.png`),
     );
     for (const page of motionPages) {
       expect(page.width).toBe(TODO_PET_MOTION_COLUMNS * 128);
