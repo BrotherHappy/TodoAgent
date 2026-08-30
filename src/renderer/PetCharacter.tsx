@@ -358,6 +358,11 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     // presenting a 2-cell flipbook.
     let sequencePosition = 0;
     let sequenceStarted = false;
+    // The first two refresh callbacks can straddle image decode and a window
+    // resize. Do not let that cold-start interval fast-forward the playhead;
+    // an otherwise smooth atlas would visibly jump several poses as soon as
+    // the pet appears.
+    let warmupPaints = 0;
     const cellWidth = image.naturalWidth / Math.max(1, animation.columns);
     const cellHeight = image.naturalHeight / Math.max(1, animation.rows);
     let previousTimestamp: number | undefined;
@@ -425,10 +430,11 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
 
     const paint = (now: number): void => {
       // Do not fast-forward across a long main-thread/compositor pause. Keep
-      // at most two refresh intervals of time and at most four adjacent atlas
+      // at most two refresh intervals of time and at most two adjacent atlas
       // cells per paint. The fractional playhead below turns the remainder
       // into a cross-faded pose, so a 60Hz display never looks like it is
-      // dropping every other generated cell.
+      // dropping every other generated cell. The small warm-up gate prevents
+      // the first post-decode callback from inheriting a stale timestamp.
       if (previousTimestamp === undefined) previousTimestamp = now;
       const delta = Math.max(0, now - previousTimestamp);
       previousTimestamp = now;
@@ -440,7 +446,9 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
           Math.max(refreshQuantum * 2, 1),
           Math.max(0, delta),
         );
-        const positionAdvance = Math.min(4, cappedDelta / authoredFrameDuration);
+        const positionAdvance = warmupPaints < 2
+          ? 0
+          : Math.min(2, cappedDelta / authoredFrameDuration);
         if (shouldLoop) {
           sequencePosition = (sequencePosition + positionAdvance) % travelCount;
         } else {
@@ -523,6 +531,7 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
         lastStep = step;
         onStep(step);
       }
+      warmupPaints += 1;
 
       if (!shouldLoop && sequencePosition >= travelCount - 1) {
         frameRequest = 0;

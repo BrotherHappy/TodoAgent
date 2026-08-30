@@ -73,26 +73,44 @@ export function usePetBehavior(
   );
   // Agent hooks and sync events can arrive in quick succession (thinking →
   // tool call → done). Rendering every raw event makes the pet appear to
-  // teleport between unrelated poses. Keep a short, display-friendly settle
-  // window for ordinary states; permission/error states still cut through
-  // immediately so the user never misses an important cue.
+  // teleport between unrelated poses. Keep a short settle window *and* a
+  // minimum dwell for ordinary states. The dwell is important: a 120ms
+  // debounce still lets a busy agent swap three poses inside one second,
+  // which reads as a flipbook even when every atlas frame is smooth. Error
+  // and approval states still cut through immediately so the user never
+  // misses an important cue.
   const [systemAction, setSystemAction] = useState<PetAction>(candidateSystemAction);
   const systemActionRef = useRef(systemAction);
+  const systemActionChangedAtRef = useRef(Date.now());
+  const systemActionTimerRef = useRef<number | undefined>(undefined);
+  const SYSTEM_ACTION_SETTLE_MS = 120;
+  const SYSTEM_ACTION_MIN_DWELL_MS = 560;
   useEffect(() => {
+    if (systemActionTimerRef.current !== undefined) {
+      window.clearTimeout(systemActionTimerRef.current);
+      systemActionTimerRef.current = undefined;
+    }
     if (candidateSystemAction === systemActionRef.current) return undefined;
     const immediate = candidateSystemAction === "approve" ||
       candidateSystemAction === "agent-error" ||
       candidateSystemAction === "sync-error";
-    if (immediate) {
+    const elapsed = Date.now() - systemActionChangedAtRef.current;
+    const dwellRemaining = Math.max(0, SYSTEM_ACTION_MIN_DWELL_MS - elapsed);
+    const delay = immediate
+      ? 0
+      : Math.max(SYSTEM_ACTION_SETTLE_MS, dwellRemaining);
+    systemActionTimerRef.current = window.setTimeout(() => {
       systemActionRef.current = candidateSystemAction;
+      systemActionChangedAtRef.current = Date.now();
       setSystemAction(candidateSystemAction);
-      return undefined;
-    }
-    const timer = window.setTimeout(() => {
-      systemActionRef.current = candidateSystemAction;
-      setSystemAction(candidateSystemAction);
-    }, 120);
-    return () => window.clearTimeout(timer);
+      systemActionTimerRef.current = undefined;
+    }, delay);
+    return () => {
+      if (systemActionTimerRef.current !== undefined) {
+        window.clearTimeout(systemActionTimerRef.current);
+        systemActionTimerRef.current = undefined;
+      }
+    };
   }, [candidateSystemAction]);
 
   const clearTransient = useCallback(() => {
@@ -170,6 +188,9 @@ export function usePetBehavior(
       }
       if (idleTimerRef.current !== undefined) {
         window.clearTimeout(idleTimerRef.current);
+      }
+      if (systemActionTimerRef.current !== undefined) {
+        window.clearTimeout(systemActionTimerRef.current);
       }
     },
     [],

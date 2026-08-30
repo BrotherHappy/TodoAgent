@@ -6,11 +6,13 @@
  * The source sheets are hand/generated poses. Signed-distance contour
  * interpolation is deliberately kept offline: the renderer only has to swap
  * one complete cell at a time, so it never exposes a partially painted frame.
- * Body and detached props use their own moving contour fields. The body keeps
- * the nearer complete raster (with one-sided alpha hand-off for appearing
- * limbs), while detached props use a premultiplied blend. This prevents two
- * translated bodies from showing through one another while hands, ropes and
- * sparkles can still enter and leave continuously.
+ * Body and detached props use their own moving contour fields. Each pixel is
+ * sourced from the nearer weighted pose instead of colour-blending two
+ * translated rasters. A normal alpha cross-fade is deceptively smooth at the
+ * file level but creates two eyes/ears whenever the source artists moved the
+ * whole character between keys. Picking one complete source pixel keeps the
+ * silhouette single; a distance-field envelope and one-sided alpha hand-off
+ * still make hands, ropes and sparkles enter/leave without a hard cut.
  */
 import fs from "node:fs";
 import zlib from "node:zlib";
@@ -374,42 +376,42 @@ const blend = (
     // detached prop use their own distance field, so a rope or sparkle cannot
     // pull the pet silhouette into a second ghost shape.
     const silhouette = smoothstep(-1.25, 1.25, sdfA * (1 - t) + sdfB * t);
-    // Keep the body interior on the nearer complete pose. Blending two
-    // translated body rasters creates a faint second ear/arm even though the
-    // contour is single. Detached props are the exception: their independent
-    // alpha transition is what makes a hand or rope arrive naturally rather
-    // than popping in at the temporal midpoint.
+    // Keep each region on one complete pose. Blending two translated rasters
+    // creates a faint second ear/eye/arm even though the contour is single.
+    // The weighted winner changes at the temporal midpoint while the
+    // distance-field contour and alpha envelope make the silhouette itself
+    // travel smoothly. This is the same visual rule used by polished desktop
+    // pets: never expose two complete bodies at once.
     const pixelA = samplePixel(a, x - xShift, y - yShift);
     const pixelB = samplePixel(b, x - xShiftB, y - yShiftB);
     const alphaA = pixelA[3] / 255;
     const alphaB = pixelB[3] / 255;
     const propBlend = isProp && !isBodyCore;
+    const weightA = alphaA * (1 - t);
+    const weightB = alphaB * t;
+    const sourceWeight = Math.max(weightA, weightB);
+    const source = weightA >= weightB ? pixelA : pixelB;
     const primary = t < 0.5 ? pixelA : pixelB;
-    const weightA = propBlend ? alphaA * (1 - t) : 0;
-    const weightB = propBlend ? alphaB * t : 0;
-    const sourceWeight = weightA + weightB;
     // Body pixels that exist in only one key pose need an alpha hand-off (for
     // example the patting hand first touches the head). Pixels present in both
-    // poses use a premultiplied colour blend inside the single interpolated
-    // contour. The earlier nearer-pose switch removed ghosting, but it also
-    // introduced a hard colour/alpha cut at exactly t=0.5; that cut was the
-    // remaining visible tear in otherwise dense sequences.
+    // poses keep their nearest complete raster. The contour and alpha are
+    // still interpolated, so an entering hand can fade in and a moving body
+    // can travel without exposing a second colour-blended silhouette.
     const oneSidedBody = !propBlend && (alphaA <= 0.02 || alphaB <= 0.02);
     const bodyBlendWeightA = alphaA * (1 - t);
     const bodyBlendWeightB = alphaB * t;
-    const bodyBlendWeight = bodyBlendWeightA + bodyBlendWeightB;
     const sourceAlpha = propBlend
       ? Math.min(1, sourceWeight)
       : oneSidedBody
         ? alphaA > alphaB ? alphaA * (1 - t) : alphaB * t
-        : Math.min(1, bodyBlendWeight);
+        : Math.max(bodyBlendWeightA, bodyBlendWeightB);
     const outAlpha = sourceAlpha * silhouette;
     result[index + 3] = Math.round(outAlpha * 255);
     if (outAlpha <= 0.0001) continue;
     if (propBlend && sourceWeight > 0.0001) {
-      result[index] = Math.round((pixelA[0] * weightA + pixelB[0] * weightB) / sourceWeight);
-      result[index + 1] = Math.round((pixelA[1] * weightA + pixelB[1] * weightB) / sourceWeight);
-      result[index + 2] = Math.round((pixelA[2] * weightA + pixelB[2] * weightB) / sourceWeight);
+      result[index] = source[0];
+      result[index + 1] = source[1];
+      result[index + 2] = source[2];
     } else if (oneSidedBody && alphaA <= 0.02 && alphaB > 0.02) {
       result[index] = pixelB[0];
       result[index + 1] = pixelB[1];
@@ -418,10 +420,10 @@ const blend = (
       result[index] = pixelA[0];
       result[index + 1] = pixelA[1];
       result[index + 2] = pixelA[2];
-    } else if (bodyBlendWeight > 0.0001) {
-      result[index] = Math.round((pixelA[0] * bodyBlendWeightA + pixelB[0] * bodyBlendWeightB) / bodyBlendWeight);
-      result[index + 1] = Math.round((pixelA[1] * bodyBlendWeightA + pixelB[1] * bodyBlendWeightB) / bodyBlendWeight);
-      result[index + 2] = Math.round((pixelA[2] * bodyBlendWeightA + pixelB[2] * bodyBlendWeightB) / bodyBlendWeight);
+    } else if (Math.max(bodyBlendWeightA, bodyBlendWeightB) > 0.0001) {
+      result[index] = source[0];
+      result[index + 1] = source[1];
+      result[index + 2] = source[2];
     } else {
       result[index] = primary[0];
       result[index + 1] = primary[1];

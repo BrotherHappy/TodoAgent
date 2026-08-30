@@ -35,14 +35,16 @@ describe("usePetBehavior direct-action priority", () => {
       context: { ...baseContext, agentSending: true, agentRunState: "执行工具" },
     });
     expect(result.current.action).toBe("think");
-    act(() => vi.advanceTimersByTime(119));
+    act(() => vi.advanceTimersByTime(559));
     expect(result.current.action).toBe("think");
     act(() => vi.advanceTimersByTime(1));
     expect(result.current.action).toBe("work");
 
     rerender({ context: baseContext });
     expect(result.current.action).toBe("work");
-    act(() => vi.advanceTimersByTime(120));
+    act(() => vi.advanceTimersByTime(559));
+    expect(result.current.action).toBe("work");
+    act(() => vi.advanceTimersByTime(1));
     expect(result.current.action).toBe("idle");
   });
 
