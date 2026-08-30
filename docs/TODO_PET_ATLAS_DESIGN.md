@@ -34,7 +34,7 @@ Todo Pet 采用原创透明动作图集作为默认桌面角色视觉层，解�
 
 生成素材：
 
-- `src/assets/todo-pet-motion-atlas-v21.png` 与 `src/assets/todo-pet-interaction-atlas-v19.png`：当前运行时图集；每段使用 63 个亚像素双线性插帧，分别为 577 / 769 格，16 列分页纵向堆叠为 2048×18944 / 2048×25088；身体颜色在共享坐标连续化、独立道具单姿态取样，消除中点切换撕裂。
+- `src/assets/todo-pet-motion-atlas-v21.png` 与 `src/assets/todo-pet-interaction-atlas-v19.png`：历史生成源快照，不直接加载；它们的单张纹理高度超过 WebKit 常见上限，运行时已拆分为下方的 v22/v20 页面。
 
 - `src/assets/todo-pet-motion-atlas-v14.png`：待机、招手、专注/工作、庆祝四组 217 帧播放序列的分页运行时素材（16 列/页、14 页纵向堆叠，单格 128px）。
 - `src/assets/todo-pet-motion-atlas-v22-00.png` … `-09.png` 与 `src/assets/todo-pet-interaction-atlas-v20-00.png` … `-12.png`：当前运行时页面；每段使用 63 个亚像素双线性插帧，分别为 577 / 769 格，16×16 cell、每页 2048×2048；身体颜色在共享坐标连续化、独立道具单姿态取样，且播放时不会让 WebKit 处理超高纹理。
@@ -42,7 +42,7 @@ Todo Pet 采用原创透明动作图集作为默认桌面角色视觉层，解�
 - `src/assets/todo-pet-motion-atlas-v5.png` 与 `src/assets/todo-pet-interaction-atlas-v3.png`：GPT Image 原始高帧条带；通过 `scripts/pack-pet-atlas.mjs` 按测量的中心线和垂直窗口规整，再由 `scripts/interpolate-pet-atlas.mjs` 生成轮廓插帧后才进入运行时。
 - `src/assets/todo-pet-action-atlas-v2.png`：保留为细分状态和异常状态的降级图集。
 
-- 运行时主图集均为每格 128 × 128 的透明网格：逻辑动作帧为 217 / 289，实际纹理使用 16 列分页并纵向堆叠（动作 16 × 56、互动 16 × 76；最后一页空格保持透明）。原始条带仍是 10 × 4 / 13 × 4 姿态源，打包脚本先按每帧中心裁切，再对下半身锚点与脚底基线做小范围校正，插帧脚本扩展到 23 个中间格，最后由分页脚本限制单张纹理宽度，避免相邻帧串格、角色左右漂移或垂直跳动。
+- 运行时主图集均为每格 128 × 128 的透明网格：逻辑动作帧为 577 / 769，页面固定为 16 × 16 格（每页 2048 × 2048，最后一页空格保持透明）。原始条带仍是 10 × 4 / 13 × 4 姿态源，打包脚本先按每帧中心裁切，再对下半身锚点与脚底基线做小范围校正，插帧脚本扩展到 63 个中间格，最后由分页脚本拆分为独立 GPU 页面，避免相邻帧串格、角色左右漂移或垂直跳动。
 - 角色为 Todo Agent 原创的紫色小猫型伙伴，不复制 Clawd、Calico 或其他第三方角色。
 - 图集只包含角色和与状态绑定的道具；不带 UI、文字、水印或网络资源。
 - `src/renderer/pet-atlas.ts` 负责把所有 `PetAction` 映射到稳定的高帧序列、图集、网格尺寸和播放速度。
