@@ -331,12 +331,11 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     const travelCount = shouldLoop && frameCount > 1
       ? frameCount * 2 - 2
       : frameCount;
-    // Quantize each pose to the native display refresh quantum. A hard-coded
-    // 60Hz floor makes a ProMotion/120Hz Mac present every atlas cell twice,
-    // which feels like the pet has only half as many frames. Start at 60Hz for
-    // deterministic cold-start timing, then converge on the observed rAF
-    // cadence (60/90/120/144Hz) without ever allowing a busy callback to skip
-    // more than one authored cell.
+    // Observe the compositor cadence so long background pauses can be capped
+    // without making the playhead jump. The atlas frame duration remains the
+    // source of truth: dense 8ms sequences must advance two logical cells on
+    // a 60Hz display, otherwise hundreds of offline in-betweens turn into a
+    // visibly slow flipbook.
     let refreshQuantum = 1000 / 60;
     const refreshSamples: number[] = [];
     const observeRefresh = (delta: number): void => {
@@ -352,23 +351,12 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
       refreshQuantum = Math.max(1000 / 240, Math.min(1000 / 30, middle));
     };
     const authoredFrameDuration = Math.max(1, animation.frameDurationMs);
-    const ticksForRefresh = (): number => Math.max(
-      1,
-      Math.round(authoredFrameDuration / refreshQuantum),
-    );
-    // Drive the atlas with display ticks rather than a wall-clock playhead.
-    // rAF intervals on a transparent always-on-top window are not perfectly
-    // uniform (for example 6.5ms → 10.4ms on a 120Hz panel). Accumulating
-    // those fractions and flooring a time-based index makes one callback hold
-    // a cell and the next callback skip to a later cell, which reads as a
-    // low-FPS tear even when the logical step is technically adjacent. A
-    // fixed refresh-tick cadence presents one adjacent cell per refresh for
-    // fast actions, while slower actions intentionally hold a pose for an
-    // integer number of refreshes. A long compositor pause therefore slows
-    // the animation for that interval instead of fast-forwarding it.
-    let ticksPerFrame = ticksForRefresh();
-    let ticksIntoFrame = 0;
-    let sequenceIndex = 0;
+    // Keep a fractional playhead instead of rounding to a cell at every
+    // refresh. At 60Hz an 8ms atlas advances about two cells, but the hidden
+    // buffer also blends the fractional remainder into the next cell. That
+    // gives the compositor a genuinely new pose on every refresh instead of
+    // presenting a 2-cell flipbook.
+    let sequencePosition = 0;
     let sequenceStarted = false;
     const cellWidth = image.naturalWidth / Math.max(1, animation.columns);
     const cellHeight = image.naturalHeight / Math.max(1, animation.rows);
@@ -376,7 +364,12 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     let lastStep = -1;
     let frameRequest = 0;
 
-    const drawFrame = (context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, frameIndex: number): void => {
+    const drawFrame = (
+      context: CanvasRenderingContext2D,
+      canvas: HTMLCanvasElement,
+      frameIndex: number,
+      alpha = 1,
+    ): void => {
       const safeFrame = Math.max(0, Math.min(animation.columns * animation.rows - 1, frameIndex));
       const sourceX = (safeFrame % animation.columns) * cellWidth;
       const sourceY = Math.floor(safeFrame / animation.columns) * cellHeight;
@@ -389,7 +382,7 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
       const sourceInset = Math.min(1, cellWidth / 8, cellHeight / 8);
       const sourceWidth = Math.max(1, cellWidth - sourceInset * 2);
       const sourceHeight = Math.max(1, cellHeight - sourceInset * 2);
-      context.globalAlpha = 1;
+      context.globalAlpha = Math.max(0, Math.min(1, alpha));
       context.drawImage(
         image,
         sourceX + sourceInset,
@@ -431,63 +424,63 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     stack.dataset.handoff = handoffFrom ? "true" : "false";
 
     const paint = (now: number): void => {
-      // Do not fast-forward across a long main-thread/compositor pause. Using
-      // wall-clock elapsed time here can skip several high-density cells at
-      // once (a visible “teleport”) after a notification, resize, or GC. Cap
-      // each playhead advance to roughly one display beat: the animation may
-      // slow for that single busy interval, but it never presents a large
-      // discontinuous pose jump. A resumed window also continues from the
-      // last coherent pose instead of jumping to a stale time position.
+      // Do not fast-forward across a long main-thread/compositor pause. Keep
+      // at most two refresh intervals of time and at most four adjacent atlas
+      // cells per paint. The fractional playhead below turns the remainder
+      // into a cross-faded pose, so a 60Hz display never looks like it is
+      // dropping every other generated cell.
       if (previousTimestamp === undefined) previousTimestamp = now;
       const delta = Math.max(0, now - previousTimestamp);
       previousTimestamp = now;
       observeRefresh(delta);
-      const nextTicksPerFrame = ticksForRefresh();
-      if (nextTicksPerFrame !== ticksPerFrame) {
-        // Preserve the fraction of the current frame when the observed
-        // refresh rate settles from the 60Hz bootstrap to 90/120/144Hz.
-        const progress = ticksPerFrame > 0
-          ? ticksIntoFrame / ticksPerFrame
-          : 0;
-        ticksPerFrame = nextTicksPerFrame;
-        ticksIntoFrame = Math.min(
-          Math.max(0, ticksPerFrame - 1),
-          Math.floor(progress * ticksPerFrame),
-        );
-      }
       if (!sequenceStarted) {
         sequenceStarted = true;
-        ticksIntoFrame = 0;
-        sequenceIndex = 0;
-      } else if (ticksIntoFrame + 1 >= ticksPerFrame) {
-        ticksIntoFrame = 0;
-        if (shouldLoop) {
-          sequenceIndex = (sequenceIndex + 1) % travelCount;
-        } else {
-          sequenceIndex = Math.min(travelCount - 1, sequenceIndex + 1);
-        }
       } else {
-        ticksIntoFrame += 1;
+        const cappedDelta = Math.min(
+          Math.max(refreshQuantum * 2, 1),
+          Math.max(0, delta),
+        );
+        const positionAdvance = Math.min(4, cappedDelta / authoredFrameDuration);
+        if (shouldLoop) {
+          sequencePosition = (sequencePosition + positionAdvance) % travelCount;
+        } else {
+          sequencePosition = Math.min(travelCount - 1, sequencePosition + positionAdvance);
+        }
       }
-      const desiredStep = animation.loop && sequenceIndex >= frameCount
-        ? travelCount - sequenceIndex
-        : sequenceIndex;
-      // The fixed tick sequence already advances at most one logical cell.
-      // Keep the guard as a final safety net for a future animation data
-      // change or an accidental non-adjacent sequence; it is deliberately
-      // applied after ping-pong mapping so the loop boundary stays coherent.
-      const step = lastStep >= 0 && Math.abs(desiredStep - lastStep) > 1
-        ? lastStep + Math.sign(desiredStep - lastStep)
-        : desiredStep;
-      const current = animation.frames[step] ?? animation.frames[0] ?? 0;
+      const currentPosition = Math.max(0, Math.min(travelCount - 1, sequencePosition));
+      const currentIndex = Math.floor(currentPosition);
+      const fractionalProgress = shouldLoop || currentIndex < travelCount - 1
+        ? currentPosition - currentIndex
+        : 0;
+      const frameAt = (position: number): number => {
+        const wrapped = shouldLoop
+          ? ((position % travelCount) + travelCount) % travelCount
+          : Math.max(0, Math.min(travelCount - 1, position));
+        const step = animation.loop && wrapped >= frameCount
+          ? travelCount - wrapped
+          : wrapped;
+        return animation.frames[Math.floor(step)] ?? animation.frames[0] ?? 0;
+      };
+      const current = frameAt(currentIndex);
+      const next = frameAt(currentIndex + 1);
+      const step = currentIndex;
 
       resize();
       const nextBuffer = activeBuffer === 0 ? 1 : 0;
       const nextCanvas = canvases[nextBuffer];
       const nextContext = contexts[nextBuffer];
       if (!nextCanvas || !nextContext) return;
+      // Draw the complete fractional pose into the hidden surface before the
+      // one-attribute buffer flip. Adjacent offline cells are already contour
+      // neighbours, so this short premultiplied canvas cross-fade removes the
+      // remaining 60Hz stepping without creating a second visible pet.
       nextContext.globalCompositeOperation = "copy";
-      drawFrame(nextContext, nextCanvas, current);
+      nextContext.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+      drawFrame(nextContext, nextCanvas, current, 1 - fractionalProgress);
+      if (fractionalProgress > 0.0001 && next !== current) {
+        nextContext.globalCompositeOperation = "source-over";
+        drawFrame(nextContext, nextCanvas, next, fractionalProgress);
+      }
       nextContext.globalCompositeOperation = "source-over";
       nextContext.globalAlpha = 1;
       if (handoffFrom && handoffFrame < handoffFrameCount) {
@@ -531,7 +524,7 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
         onStep(step);
       }
 
-      if (!shouldLoop && sequenceIndex >= travelCount - 1) {
+      if (!shouldLoop && sequencePosition >= travelCount - 1) {
         frameRequest = 0;
         return;
       }

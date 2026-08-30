@@ -6,9 +6,11 @@
  * The source sheets are hand/generated poses. Signed-distance contour
  * interpolation is deliberately kept offline: the renderer only has to swap
  * one complete cell at a time, so it never exposes a partially painted frame.
- * Body and detached props use their own moving contour fields, then share a
- * premultiplied colour blend. That removes the old midpoint colour cut which
- * caused a one-frame tear in hands, ropes and sparkles.
+ * Body and detached props use their own moving contour fields. The body keeps
+ * the nearer complete raster (with one-sided alpha hand-off for appearing
+ * limbs), while detached props use a premultiplied blend. This prevents two
+ * translated bodies from showing through one another while hands, ropes and
+ * sparkles can still enter and leave continuously.
  */
 import fs from "node:fs";
 import zlib from "node:zlib";
@@ -171,9 +173,14 @@ const bodyMask = (cell) => {
   const touchesBodyCore = (index) => {
     const x = index % cellWidth;
     const y = Math.floor(index / cellWidth);
+    // The body core begins below the face/props. A hand entering from above
+    // can overlap the old 20% threshold and would then be morphed as part of
+    // the whole silhouette, making it pop at the midpoint. Starting in the
+    // lower 38% keeps the torso/feet as the stable component while leaving
+    // hands, rope arcs and sparkles in the detached-prop pass.
     return x >= cellWidth * 0.18
       && x <= cellWidth * 0.82
-      && y >= cellHeight * 0.2;
+      && y >= cellHeight * 0.38;
   };
   for (let start = 0; start < size; start += 1) {
     if (visited[start] || !isOpaque(start)) continue;
@@ -240,11 +247,48 @@ const sampleField = (field, x, y) => {
     + bottomLeft * (1 - tx) * ty
     + bottomRight * tx * ty;
 };
+/**
+ * Bilinear RGBA sampling in premultiplied-alpha space.  Nearest-neighbour
+ * sampling looks harmless at the source resolution, but a translated pose
+ * crosses a half-pixel boundary every few interpolation steps and the whole
+ * silhouette then jumps one pixel.  Keeping colour premultiplied while the
+ * four neighbours are blended preserves a clean transparent edge; the result
+ * is converted back to the straight-alpha representation used by the PNG
+ * writer.  This is the key difference between a dense atlas that still reads
+ * like a flipbook and one that has genuinely continuous motion.
+ */
 const samplePixel = (cell, x, y) => {
-  const px = Math.max(0, Math.min(cellWidth - 1, Math.round(x)));
-  const py = Math.max(0, Math.min(cellHeight - 1, Math.round(y)));
-  const offset = (py * cellWidth + px) * 4;
-  return [cell[offset], cell[offset + 1], cell[offset + 2], cell[offset + 3]];
+  const safeX = Math.max(0, Math.min(cellWidth - 1, x));
+  const safeY = Math.max(0, Math.min(cellHeight - 1, y));
+  const x0 = Math.floor(safeX);
+  const y0 = Math.floor(safeY);
+  const x1 = Math.min(cellWidth - 1, x0 + 1);
+  const y1 = Math.min(cellHeight - 1, y0 + 1);
+  const tx = safeX - x0;
+  const ty = safeY - y0;
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let alpha = 0;
+  const accumulate = (px, py, weight) => {
+    const offset = (py * cellWidth + px) * 4;
+    const a = (cell[offset + 3] ?? 0) / 255;
+    red += (cell[offset] ?? 0) * a * weight;
+    green += (cell[offset + 1] ?? 0) * a * weight;
+    blue += (cell[offset + 2] ?? 0) * a * weight;
+    alpha += a * weight;
+  };
+  accumulate(x0, y0, (1 - tx) * (1 - ty));
+  accumulate(x1, y0, tx * (1 - ty));
+  accumulate(x0, y1, (1 - tx) * ty);
+  accumulate(x1, y1, tx * ty);
+  if (alpha <= 0.0001) return [0, 0, 0, 0];
+  return [
+    Math.round(red / alpha),
+    Math.round(green / alpha),
+    Math.round(blue / alpha),
+    Math.round(alpha * 255),
+  ];
 };
 const smoothstep = (edge0, edge1, value) => {
   const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
@@ -306,8 +350,7 @@ const blend = (
     const y = Math.floor(pixel / cellWidth);
     // Keep the body and detached effects in separate contour fields. A rope
     // or sparkle must never pull the main silhouette into a second shape.
-    const isBodyCore = bodyMaskA[pixel] || bodyMaskB[pixel]
-      || (x >= cellWidth * 0.2 && x <= cellWidth * 0.8 && y >= cellHeight * 0.24);
+    const isBodyCore = bodyMaskA[pixel] || bodyMaskB[pixel];
     const isProp = propMaskA[pixel] || propMaskB[pixel];
     if (!isBodyCore && !isProp) continue;
     // Detached props (the hand, rope, sparkles and task card) get their own
@@ -331,32 +374,59 @@ const blend = (
     // detached prop use their own distance field, so a rope or sparkle cannot
     // pull the pet silhouette into a second ghost shape.
     const silhouette = smoothstep(-1.25, 1.25, sdfA * (1 - t) + sdfB * t);
-    // The old implementation switched all interior colours from A to B at
-    // exactly t=0.5. That one-cell colour cut was the remaining source of the
-    // visible "tear": the contour moved smoothly, but eyes, paws and props
-    // jumped to the other pose in a single frame. Both samples are already
-    // translated into the intermediate body/prop coordinate, so a
-    // premultiplied colour blend is safe here and keeps the silhouette single.
+    // Keep the body interior on the nearer complete pose. Blending two
+    // translated body rasters creates a faint second ear/arm even though the
+    // contour is single. Detached props are the exception: their independent
+    // alpha transition is what makes a hand or rope arrive naturally rather
+    // than popping in at the temporal midpoint.
     const pixelA = samplePixel(a, x - xShift, y - yShift);
     const pixelB = samplePixel(b, x - xShiftB, y - yShiftB);
     const alphaA = pixelA[3] / 255;
     const alphaB = pixelB[3] / 255;
-    const weightA = alphaA * (1 - t);
-    const weightB = alphaB * t;
+    const propBlend = isProp && !isBodyCore;
+    const primary = t < 0.5 ? pixelA : pixelB;
+    const weightA = propBlend ? alphaA * (1 - t) : 0;
+    const weightB = propBlend ? alphaB * t : 0;
     const sourceWeight = weightA + weightB;
-    const sourceAlpha = Math.min(1, sourceWeight);
+    // Body pixels that exist in only one key pose need an alpha hand-off (for
+    // example the patting hand first touches the head). Pixels present in both
+    // poses use a premultiplied colour blend inside the single interpolated
+    // contour. The earlier nearer-pose switch removed ghosting, but it also
+    // introduced a hard colour/alpha cut at exactly t=0.5; that cut was the
+    // remaining visible tear in otherwise dense sequences.
+    const oneSidedBody = !propBlend && (alphaA <= 0.02 || alphaB <= 0.02);
+    const bodyBlendWeightA = alphaA * (1 - t);
+    const bodyBlendWeightB = alphaB * t;
+    const bodyBlendWeight = bodyBlendWeightA + bodyBlendWeightB;
+    const sourceAlpha = propBlend
+      ? Math.min(1, sourceWeight)
+      : oneSidedBody
+        ? alphaA > alphaB ? alphaA * (1 - t) : alphaB * t
+        : Math.min(1, bodyBlendWeight);
     const outAlpha = sourceAlpha * silhouette;
     result[index + 3] = Math.round(outAlpha * 255);
     if (outAlpha <= 0.0001) continue;
-    result[index] = Math.round(
-      (pixelA[0] * weightA + pixelB[0] * weightB) / sourceWeight,
-    );
-    result[index + 1] = Math.round(
-      (pixelA[1] * weightA + pixelB[1] * weightB) / sourceWeight,
-    );
-    result[index + 2] = Math.round(
-      (pixelA[2] * weightA + pixelB[2] * weightB) / sourceWeight,
-    );
+    if (propBlend && sourceWeight > 0.0001) {
+      result[index] = Math.round((pixelA[0] * weightA + pixelB[0] * weightB) / sourceWeight);
+      result[index + 1] = Math.round((pixelA[1] * weightA + pixelB[1] * weightB) / sourceWeight);
+      result[index + 2] = Math.round((pixelA[2] * weightA + pixelB[2] * weightB) / sourceWeight);
+    } else if (oneSidedBody && alphaA <= 0.02 && alphaB > 0.02) {
+      result[index] = pixelB[0];
+      result[index + 1] = pixelB[1];
+      result[index + 2] = pixelB[2];
+    } else if (oneSidedBody && alphaB <= 0.02 && alphaA > 0.02) {
+      result[index] = pixelA[0];
+      result[index + 1] = pixelA[1];
+      result[index + 2] = pixelA[2];
+    } else if (bodyBlendWeight > 0.0001) {
+      result[index] = Math.round((pixelA[0] * bodyBlendWeightA + pixelB[0] * bodyBlendWeightB) / bodyBlendWeight);
+      result[index + 1] = Math.round((pixelA[1] * bodyBlendWeightA + pixelB[1] * bodyBlendWeightB) / bodyBlendWeight);
+      result[index + 2] = Math.round((pixelA[2] * bodyBlendWeightA + pixelB[2] * bodyBlendWeightB) / bodyBlendWeight);
+    } else {
+      result[index] = primary[0];
+      result[index + 1] = primary[1];
+      result[index + 2] = primary[2];
+    }
   }
   return result;
 };

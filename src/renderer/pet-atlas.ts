@@ -1,15 +1,15 @@
 import type { PetAction } from "./pet-behavior";
 import atlasUrl from "../assets/todo-pet-action-atlas-v2.png";
-import motionAtlasUrl from "../assets/todo-pet-motion-atlas-v17.png";
-import interactionAtlasUrl from "../assets/todo-pet-interaction-atlas-v15.png";
+import motionAtlasUrl from "../assets/todo-pet-motion-atlas-v19.png";
+import interactionAtlasUrl from "../assets/todo-pet-interaction-atlas-v17.png";
 
 /**
  * The generated atlases are deterministic visual layers. The legacy sheet
  * remains a 4×4 grid for one-off fallback poses. The high-density motion and
- * interaction sheets keep their 433/577 logical frames, but are paged into a
+ * interaction sheets keep their 577/769 logical frames, but are paged into a
  * 16-column grid and stacked vertically. Cells are authored at 128px and
  * rendered into the device-pixel canvas, keeping each decoded texture at
- * 2048px wide while leaving 47 complete poses between every authored key
+ * 2048px wide while leaving 63 complete poses between every authored key
  * pose. All cells share a stable body baseline, and the page mapping is kept
  * here instead of in CSS so the Canvas renderer cannot clip a neighboring
  * cell.
@@ -19,9 +19,9 @@ export const TODO_PET_MOTION_ATLAS_URL = motionAtlasUrl;
 export const TODO_PET_INTERACTION_ATLAS_URL = interactionAtlasUrl;
 export const TODO_PET_ATLAS_COLUMNS = 4;
 export const TODO_PET_ATLAS_ROWS = 4;
-export const TODO_PET_MOTION_SOURCE_COLUMNS = 433;
+export const TODO_PET_MOTION_SOURCE_COLUMNS = 577;
 export const TODO_PET_MOTION_SOURCE_ROWS = 4;
-export const TODO_PET_INTERACTION_SOURCE_COLUMNS = 577;
+export const TODO_PET_INTERACTION_SOURCE_COLUMNS = 769;
 export const TODO_PET_INTERACTION_SOURCE_ROWS = 4;
 export const TODO_PET_ATLAS_PAGE_COLUMNS = 16;
 export const TODO_PET_MOTION_PAGE_COUNT = Math.ceil(
@@ -37,7 +37,7 @@ export const TODO_PET_MOTION_ROWS = TODO_PET_MOTION_SOURCE_ROWS * TODO_PET_MOTIO
 export const TODO_PET_INTERACTION_COLUMNS = TODO_PET_ATLAS_PAGE_COLUMNS;
 export const TODO_PET_INTERACTION_ROWS = TODO_PET_INTERACTION_SOURCE_ROWS * TODO_PET_INTERACTION_PAGE_COUNT;
 /** Number of offline in-between cells inserted between authored poses. */
-export const TODO_PET_INTERPOLATION_STEPS = 47;
+export const TODO_PET_INTERPOLATION_STEPS = 63;
 
 export type PetAtlasSheet = "legacy" | "motion" | "interaction";
 
@@ -148,7 +148,7 @@ const singleFrameAnimation = (
 });
 
 /**
- * The v17/v15 sheets are packed from the high-frame source strips and include
+ * The v19/v17 sheets are packed from the high-frame source strips and include
  * offline in-between cells. Keeping the mapping in data (rather than CSS
  * selectors) means every PetCharacter gets the same timing and a state change
  * always restarts at the entrance frame.
@@ -282,8 +282,8 @@ const sequence = (
   name,
 });
 
-// The source sheets contain complete poses rather than separated limbs. Forty-
-// seven offline contour in-betweens per authored source cell turn even the
+// The source sheets contain complete poses rather than separated limbs. Sixty-
+// three offline contour in-betweens per authored source cell turn even the
 // larger hop/rope displacement into small, coherent steps. Fast loops use an
 // 8ms target: the renderer adapts that to the observed 60/90/120Hz display
 // cadence, so a high-refresh Mac does not present a stale cell twice.

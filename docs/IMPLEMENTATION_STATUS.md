@@ -310,6 +310,10 @@ v2.75 高密度动作与跨帧保护：针对安装版仍反馈“帧数少、�
 
 v2.76 动画帧密度与撕裂修复（2026-08-30）：重新生成 v17/v15 运行时图集，每个原始姿势之间加入 47 个轮廓插帧；Canvas 播放仍按设备刷新节拍逐格推进并保留双缓冲。修复插帧器在 t=0.5 突然切换内部颜色造成的单帧跳变，身体和道具现在以独立轮廓、预乘颜色连续化；摸头动作改为 0→6 的连续手部区间，避免手在同一循环中重复出现/消失。动作切换新增上一帧到目标入口的 5 拍完整像素 handoff，跨 motion/interaction 图集不再硬切。全量 Vitest **169 个文件、999/999 通过**，类型检查、生产构建和安装版 Electron 冒烟均通过；安装版已替换为 `/Users/hx/Applications/Todo Agent.app`，旧版安全保留在 `/Users/hx/Applications/Todo Agent.app.backup-20260830-124811-v276`。安装版 `app.asar` SHA-256 为 `919bcd8f27eb27c070491b6df9df3071551e5f965d5c986c827a31b0738f3929`，DMG 为 `8d075e7ce2a4174ffea148e36b69dabc2d15bf410914875c9940b974f5a02382`，ZIP 为 `54fede0f8904203028652ef9cf01441154c8e2e6fc229d8e756b85992aa209ee`。
 
+v2.77 播放时钟与身体撕裂修复（2026-08-30）：图集更新为 v18/v16；插帧器让身体保持较近的完整姿态，只对单侧出现/消失的肢体做透明交接，独立手、绳和星光才做预乘混合，避免双重身体轮廓。Canvas 播放头改为按 `frameDurationMs` 累计逻辑时间，60Hz 会消化多个连续 8ms 插帧、120Hz 通常逐格播放，单次最多前进 4 格，长卡顿只保留两次刷新时长；悬浮 BrowserWindow 关闭后台渲染降频，失焦时仍按显示时钟绘制。类型检查、全量 Vitest（169 个文件、999/999）和项目 Electron 互动回归已通过，待重新打包安装版后再做一次真实失焦采样。
+
+> v2.78 亚像素高帧插帧（2026-08-30）：重新生成 `todo-pet-motion-atlas-v19.png` 与 `todo-pet-interaction-atlas-v17.png`，每段由 47 增加到 63 个离线插帧，主动作达到 577 格、互动动作达到 769 格。插帧器改为预乘透明度双线性采样，消除亚像素移动被四舍五入为整像素跳变的问题；身体内部颜色随同一条 SDF 轮廓连续混合，单侧肢体仍采用透明交接，不再在中点切换。播放器保留分数播放头，在隐藏缓冲中合成相邻插帧再提交，避免 60Hz 屏幕隔帧跳动。类型检查、全量测试、生产构建和安装版失焦采样已完成。当前安装版为 `/Users/hx/Applications/Todo Agent.app`，`app.asar` SHA-256 为 `ce5f00ebb1204c7d80c532df7ed80e35caf0fdcfaa635554c9f8068eefb66902`；DMG SHA-256 为 `e2e22eef05aa5a232fee8fcc59c94483ad1d266065a92d275a46f2a08b14d575`，ZIP SHA-256 为 `ef16b2c31112b080b6b3b41d2086d9e252b301f37e4b7e08323f5cc4b34e381c`。旧版保留在 `/Users/hx/Applications/Todo Agent.app.backup-20260830-1442-v278-fractional`。
+
 ```bash
 npm run typecheck
 npm test

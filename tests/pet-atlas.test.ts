@@ -24,8 +24,8 @@ describe("Todo Pet generated action atlas", () => {
   };
 
   it("keeps runtime grid metadata aligned with the PNG dimensions", () => {
-    const motion = pngSize("todo-pet-motion-atlas-v17.png");
-    const interaction = pngSize("todo-pet-interaction-atlas-v15.png");
+    const motion = pngSize("todo-pet-motion-atlas-v19.png");
+    const interaction = pngSize("todo-pet-interaction-atlas-v17.png");
     expect(motion.width).toBe(TODO_PET_MOTION_COLUMNS * 128);
     expect(motion.height).toBe(TODO_PET_MOTION_ROWS * 128);
     expect(interaction.width).toBe(TODO_PET_INTERACTION_COLUMNS * 128);
@@ -36,8 +36,8 @@ describe("Todo Pet generated action atlas", () => {
     expect(TODO_PET_INTERACTION_COLUMNS).toBe(TODO_PET_ATLAS_PAGE_COLUMNS);
     expect(TODO_PET_MOTION_ROWS).toBe(4 * TODO_PET_MOTION_PAGE_COUNT);
     expect(TODO_PET_INTERACTION_ROWS).toBe(4 * TODO_PET_INTERACTION_PAGE_COUNT);
-    expect(TODO_PET_MOTION_SOURCE_COLUMNS).toBe(433);
-    expect(TODO_PET_INTERACTION_SOURCE_COLUMNS).toBe(577);
+    expect(TODO_PET_MOTION_SOURCE_COLUMNS).toBe(577);
+    expect(TODO_PET_INTERACTION_SOURCE_COLUMNS).toBe(769);
   });
 
   it("provides a valid 4x4 frame for every supported action", () => {
@@ -64,14 +64,14 @@ describe("Todo Pet generated action atlas", () => {
 
   it("provides high-frame loops for the main companion states", () => {
     const expectedAnimations = [
-      ["idle", "motion", 433],
-      ["wave", "motion", 433],
-      ["focus", "motion", 433],
-      ["celebrate", "motion", 241],
-      ["pet", "interaction", 289],
-      ["jump-rope", "interaction", 241],
-      ["task-carry", "interaction", 577],
-      ["nap", "interaction", 241],
+      ["idle", "motion", 577],
+      ["wave", "motion", 577],
+      ["focus", "motion", 577],
+      ["celebrate", "motion", 321],
+      ["pet", "interaction", 385],
+      ["jump-rope", "interaction", 321],
+      ["task-carry", "interaction", 769],
+      ["nap", "interaction", 321],
     ] as const;
     for (const [action, sheet, frameCount] of expectedAnimations) {
       const animation = petAtlasAnimationForAction(action);

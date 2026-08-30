@@ -335,7 +335,16 @@ export class WindowManager {
       alwaysOnTop: true,
       hasShadow: false,
       ...floatingWindowInteractionOptions(),
-      webPreferences: this.#webPreferences(),
+      // Todo Pet is an always-on-top, non-focused surface. Chromium otherwise
+      // treats it as a background renderer and throttles requestAnimationFrame
+      // to a sparse cadence while you work in another app. That is exactly the
+      // environment where the atlas looked like a low-FPS flipbook. Keep the
+      // floating renderer on the display clock; main/quick windows retain the
+      // normal throttling policy.
+      webPreferences: {
+        ...this.#webPreferences(),
+        backgroundThrottling: false,
+      },
     });
     this.#applyFloatingMousePassthrough(this.#floating, settings.mousePassthrough);
     this.#keepFloatingOnTop(this.#floating);
