@@ -14730,80 +14730,6 @@ button.dependency-graph-node:focus-visible {
   .pet-visual-atlas .pet-atlas-sprite {
     animation: pet-atlas-enter 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
-  .pet-visual-atlas .pet-atlas-motion {
-    animation: pet-atlas-breathe 3.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-  }
-  .pet-visual-atlas.pet-action-wave .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-high-five .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-dance .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-tail-wag .pet-atlas-motion {
-    animation: pet-atlas-wave 1.45s ease-in-out 2;
-  }
-  .pet-visual-atlas.pet-action-head-tilt .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-look-left .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-look-right .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-ear-twitch .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-play .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-poke .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-tickle .pet-atlas-motion {
-    animation: pet-atlas-curious 1.2s ease-in-out 2;
-  }
-  .pet-visual-atlas.pet-action-think .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-search .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-inspect .pet-atlas-motion {
-    animation: pet-atlas-think 1.8s ease-in-out infinite;
-  }
-  .pet-visual-atlas.pet-action-type .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-work .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-focus .pet-atlas-motion {
-    animation: pet-atlas-work 1.15s ease-in-out infinite;
-  }
-  .pet-visual-atlas.pet-action-tidy .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-task-plan .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-sync .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-task-carry .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-task-drop .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-drag .pet-atlas-motion {
-    animation: pet-atlas-carry 720ms ease-in-out infinite;
-  }
-  .pet-visual-atlas.pet-action-juggle .pet-atlas-motion {
-    animation: pet-atlas-juggle 1.15s ease-in-out infinite;
-  }
-  .pet-visual-atlas.pet-action-alert .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-approve .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-focus-paused .pet-atlas-motion {
-    animation: pet-atlas-attention 1.35s ease-in-out infinite;
-  }
-  .pet-visual-atlas.pet-action-celebrate .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-task-complete .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-task-clear .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-sync-success .pet-atlas-motion {
-    animation: pet-atlas-celebrate 760ms cubic-bezier(0.34, 1.56, 0.64, 1) 3;
-  }
-  .pet-visual-atlas.pet-action-agent-error .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-sync-error .pet-atlas-motion {
-    animation: pet-atlas-error 520ms ease-in-out 4;
-  }
-  .pet-visual-atlas.pet-action-nap .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-yawn .pet-atlas-motion {
-    animation: pet-atlas-sleep 4.4s ease-in-out infinite;
-  }
-  .pet-visual-atlas.pet-action-stretch .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-jump-rope-ready .pet-atlas-motion {
-    animation: pet-atlas-wake 1.5s ease-in-out 2;
-  }
-  .pet-visual-atlas.pet-action-jump-rope .pet-atlas-motion {
-    animation: pet-atlas-jump-rope 820ms cubic-bezier(0.25, 0.8, 0.25, 1) 2;
-  }
-  .pet-visual-atlas.pet-action-pet .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-snack .pet-atlas-motion,
-  .pet-visual-atlas.pet-action-drink .pet-atlas-motion {
-    animation: pet-atlas-soft-interaction 1.4s ease-in-out 2;
-  }
-  .pet-motion-gentle .pet-visual-atlas .pet-atlas-motion {
-    animation-duration: 4.8s !important;
-    animation-timing-function: ease-in-out !important;
-  }
   .pet-body-rig {
     animation: pet-chest-breathe 3.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   }
@@ -15046,70 +14972,6 @@ button.dependency-graph-node:focus-visible {
   @keyframes pet-atlas-enter {
     from { opacity: 0; transform: translateY(5px) scale(0.9); }
     to { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  @keyframes pet-atlas-breathe {
-    0%, 100% { transform: translateY(0) scale(1, 1); }
-    50% { transform: translateY(-1px) scale(1.014, 1.022); }
-  }
-  @keyframes pet-atlas-wave {
-    0%, 100% { transform: translateY(0) rotate(0deg); }
-    30% { transform: translateY(-3px) rotate(-3deg); }
-    62% { transform: translateY(-1px) rotate(3deg); }
-  }
-  @keyframes pet-atlas-curious {
-    0%, 100% { transform: translateY(0) rotate(0deg); }
-    35% { transform: translateY(-2px) rotate(-4deg); }
-    68% { transform: translateY(0) rotate(4deg); }
-  }
-  @keyframes pet-atlas-think {
-    0%, 100% { transform: translateY(0) rotate(-1deg); }
-    50% { transform: translateY(-2px) rotate(3deg); }
-  }
-  @keyframes pet-atlas-work {
-    0%, 100% { transform: translateY(0) scale(1); }
-    50% { transform: translateY(-2px) scale(0.985, 1.02); }
-  }
-  @keyframes pet-atlas-carry {
-    0%, 100% { transform: translateY(0) rotate(-1deg); }
-    50% { transform: translateY(-4px) rotate(1deg); }
-  }
-  @keyframes pet-atlas-juggle {
-    0%, 100% { transform: translateY(1px) rotate(-2deg); }
-    50% { transform: translateY(-4px) rotate(2deg); }
-  }
-  @keyframes pet-atlas-attention {
-    0%, 100% { transform: scale(1); }
-    48% { transform: scale(1.035); }
-  }
-  @keyframes pet-atlas-celebrate {
-    0%, 100% { transform: translateY(0) scale(1); }
-    18% { transform: translateY(2px) scale(1.08, 0.93); }
-    52% { transform: translateY(-9px) scale(0.96, 1.06); }
-    80% { transform: translateY(-2px) scale(1.02, 0.98); }
-  }
-  @keyframes pet-atlas-error {
-    0%, 100% { transform: translateX(0) rotate(0deg); }
-    25% { transform: translateX(-3px) rotate(-2deg); }
-    75% { transform: translateX(3px) rotate(2deg); }
-  }
-  @keyframes pet-atlas-sleep {
-    0%, 100% { transform: translateY(2px) rotate(2deg) scale(1, 0.97); }
-    50% { transform: translateY(3px) rotate(2deg) scale(1.015, 0.95); }
-  }
-  @keyframes pet-atlas-wake {
-    0%, 100% { transform: translateY(0) scale(1, 1); }
-    38% { transform: translateY(-3px) scale(0.96, 1.08); }
-    72% { transform: translateY(0) scale(1.03, 0.97); }
-  }
-  @keyframes pet-atlas-jump-rope {
-    0%, 100% { transform: translateY(0) scale(1.02, 0.98); }
-    18%, 62% { transform: translateY(-11px) scale(0.98, 1.03); }
-    84% { transform: translateY(-2px) scale(1.01, 0.99); }
-  }
-  @keyframes pet-atlas-soft-interaction {
-    0%, 100% { transform: translateY(0) rotate(0deg); }
-    35% { transform: translateY(-2px) rotate(-2deg); }
-    68% { transform: translateY(1px) rotate(2deg); }
   }
   @keyframes pet-chest-breathe {
     0%, 100% { transform: scale(1, 1); }
@@ -15483,16 +15345,6 @@ button.dependency-graph-node:focus-visible {
   @keyframes pet-curious-hover {
     0%, 100% { transform: translateY(0) rotate(-2deg); }
     50% { transform: translateY(-2px) rotate(3deg); }
-  }
-  /* The atlas already contains the authored body motion. Applying the old
-   * whole-canvas CSS choreography on top of it makes the raster jump on a
-   * second, unrelated timeline (especially when an action class changes).
-   * Keep those expressive transforms for the SVG fallback only; the buffered
-   * atlas must stay in one coordinate system and move only with its playhead.
-   */
-  .pet-visual-atlas .pet-atlas-buffer-stack .pet-atlas-motion {
-    animation: none !important;
-    transform: none !important;
   }
 }
 
@@ -16236,50 +16088,14 @@ button.dependency-graph-node:focus-visible {
   }
 }
 
-/* The canvas owns the atlas pixels.  Generated frames already contain the
- * complete pose (including the hop, wave and carry), so a second transform on
- * the whole canvas makes limbs appear to jump independently of the body.  The
- * only retained secondary rhythm is a very small idle breath. */
+/* The canvas owns the atlas pixels. Generated frames already contain the
+ * complete pose (including idle breathing, hops, waves and carrying), so a
+ * second transform on the whole canvas would make limbs appear to jump
+ * independently of the body. Keep the atlas on its single rAF timeline. */
 @media (prefers-reduced-motion: no-preference) {
   .pet-visual-atlas .pet-atlas-motion {
     transform-origin: center bottom;
     animation: none !important;
+    transform: none !important;
   }
-  .pet-visual-atlas.pet-action-idle .pet-atlas-motion {
-    animation: pet-atlas-canvas-breathe 4.8s cubic-bezier(0.45, 0, 0.55, 1) infinite !important;
-  }
-}
-
-@keyframes pet-atlas-canvas-breathe {
-  0%, 100% { transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
-  50% { transform: translate3d(0, -1.4px, 0) scale3d(1.012, 1.018, 1); }
-}
-@keyframes pet-atlas-canvas-wave {
-  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
-  30% { transform: translate3d(0, -2.5px, 0) rotate(-1.8deg); }
-  62% { transform: translate3d(0, -0.8px, 0) rotate(1.8deg); }
-}
-@keyframes pet-atlas-canvas-work {
-  0%, 100% { transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
-  50% { transform: translate3d(0, -1.8px, 0) scale3d(0.988, 1.018, 1); }
-}
-@keyframes pet-atlas-canvas-carry {
-  0%, 100% { transform: translate3d(0, 0, 0) rotate(-0.8deg); }
-  50% { transform: translate3d(0, -3px, 0) rotate(0.8deg); }
-}
-@keyframes pet-atlas-canvas-celebrate {
-  0%, 100% { transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
-  18% { transform: translate3d(0, 1.5px, 0) scale3d(1.055, 0.95, 1); }
-  52% { transform: translate3d(0, -7px, 0) scale3d(0.97, 1.045, 1); }
-  80% { transform: translate3d(0, -1.5px, 0) scale3d(1.015, 0.99, 1); }
-}
-@keyframes pet-atlas-canvas-jump {
-  0%, 100% { transform: translate3d(0, 0, 0) scale3d(1.018, 0.982, 1); }
-  18%, 62% { transform: translate3d(0, -9px, 0) scale3d(0.985, 1.025, 1); }
-  84% { transform: translate3d(0, -1px, 0) scale3d(1.008, 0.992, 1); }
-}
-@keyframes pet-atlas-canvas-soft {
-  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
-  35% { transform: translate3d(0, -1.5px, 0) rotate(-1.2deg); }
-  68% { transform: translate3d(0, 0.8px, 0) rotate(1.2deg); }
 }
