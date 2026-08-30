@@ -1,28 +1,28 @@
 import type { PetAction } from "./pet-behavior";
 import atlasUrl from "../assets/todo-pet-action-atlas-v2.png";
-import motionAtlasPage00 from "../assets/todo-pet-motion-atlas-v23-00.png";
-import motionAtlasPage01 from "../assets/todo-pet-motion-atlas-v23-01.png";
-import motionAtlasPage02 from "../assets/todo-pet-motion-atlas-v23-02.png";
-import motionAtlasPage03 from "../assets/todo-pet-motion-atlas-v23-03.png";
-import motionAtlasPage04 from "../assets/todo-pet-motion-atlas-v23-04.png";
-import motionAtlasPage05 from "../assets/todo-pet-motion-atlas-v23-05.png";
-import motionAtlasPage06 from "../assets/todo-pet-motion-atlas-v23-06.png";
-import motionAtlasPage07 from "../assets/todo-pet-motion-atlas-v23-07.png";
-import motionAtlasPage08 from "../assets/todo-pet-motion-atlas-v23-08.png";
-import motionAtlasPage09 from "../assets/todo-pet-motion-atlas-v23-09.png";
-import interactionAtlasPage00 from "../assets/todo-pet-interaction-atlas-v21-00.png";
-import interactionAtlasPage01 from "../assets/todo-pet-interaction-atlas-v21-01.png";
-import interactionAtlasPage02 from "../assets/todo-pet-interaction-atlas-v21-02.png";
-import interactionAtlasPage03 from "../assets/todo-pet-interaction-atlas-v21-03.png";
-import interactionAtlasPage04 from "../assets/todo-pet-interaction-atlas-v21-04.png";
-import interactionAtlasPage05 from "../assets/todo-pet-interaction-atlas-v21-05.png";
-import interactionAtlasPage06 from "../assets/todo-pet-interaction-atlas-v21-06.png";
-import interactionAtlasPage07 from "../assets/todo-pet-interaction-atlas-v21-07.png";
-import interactionAtlasPage08 from "../assets/todo-pet-interaction-atlas-v21-08.png";
-import interactionAtlasPage09 from "../assets/todo-pet-interaction-atlas-v21-09.png";
-import interactionAtlasPage10 from "../assets/todo-pet-interaction-atlas-v21-10.png";
-import interactionAtlasPage11 from "../assets/todo-pet-interaction-atlas-v21-11.png";
-import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v21-12.png";
+import motionAtlasPage00 from "../assets/todo-pet-motion-atlas-v24-00.png";
+import motionAtlasPage01 from "../assets/todo-pet-motion-atlas-v24-01.png";
+import motionAtlasPage02 from "../assets/todo-pet-motion-atlas-v24-02.png";
+import motionAtlasPage03 from "../assets/todo-pet-motion-atlas-v24-03.png";
+import motionAtlasPage04 from "../assets/todo-pet-motion-atlas-v24-04.png";
+import motionAtlasPage05 from "../assets/todo-pet-motion-atlas-v24-05.png";
+import motionAtlasPage06 from "../assets/todo-pet-motion-atlas-v24-06.png";
+import motionAtlasPage07 from "../assets/todo-pet-motion-atlas-v24-07.png";
+import motionAtlasPage08 from "../assets/todo-pet-motion-atlas-v24-08.png";
+import motionAtlasPage09 from "../assets/todo-pet-motion-atlas-v24-09.png";
+import interactionAtlasPage00 from "../assets/todo-pet-interaction-atlas-v22-00.png";
+import interactionAtlasPage01 from "../assets/todo-pet-interaction-atlas-v22-01.png";
+import interactionAtlasPage02 from "../assets/todo-pet-interaction-atlas-v22-02.png";
+import interactionAtlasPage03 from "../assets/todo-pet-interaction-atlas-v22-03.png";
+import interactionAtlasPage04 from "../assets/todo-pet-interaction-atlas-v22-04.png";
+import interactionAtlasPage05 from "../assets/todo-pet-interaction-atlas-v22-05.png";
+import interactionAtlasPage06 from "../assets/todo-pet-interaction-atlas-v22-06.png";
+import interactionAtlasPage07 from "../assets/todo-pet-interaction-atlas-v22-07.png";
+import interactionAtlasPage08 from "../assets/todo-pet-interaction-atlas-v22-08.png";
+import interactionAtlasPage09 from "../assets/todo-pet-interaction-atlas-v22-09.png";
+import interactionAtlasPage10 from "../assets/todo-pet-interaction-atlas-v22-10.png";
+import interactionAtlasPage11 from "../assets/todo-pet-interaction-atlas-v22-11.png";
+import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v22-12.png";
 
 /**
  * The generated atlases are deterministic visual layers. The legacy sheet
@@ -31,12 +31,13 @@ import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v21-12.
  * square 16×16-cell GPU pages. The previous v21/v19 files were only 2,048px
  * wide; their 18,944/25,088px height still exceeded WebKit's common
  * 16,384px texture limit and could make the compositor tear while sampling a
- * new cell. Every v23/v21 page is 2,048×2,048px (the final page is padded
+ * new cell. Every v24/v22 page is 2,048×2,048px (the final page is padded
  * transparent), so no hidden driver tiling is needed. Cells are authored at
- * 128px and retain the authored high-density timing from the v23/v21 source
- * strips. Runtime pages are generated with a single-pose hand-off
- * interpolator: each dense cell contains one complete pet, never a coloured
- * edge or double silhouette from a raster cross-fade.
+ * 128px and retain the authored high-density timing from the v24/v22 source
+ * strips. Runtime pages use crisp, anchor-stabilised in-betweens for compact
+ * body poses and coherent single-source prop hand-offs. Each dense cell
+ * contains one complete pet, never a coloured edge or double silhouette from
+ * a raster cross-fade.
  */
 export const TODO_PET_ATLAS_URL = atlasUrl;
 export const TODO_PET_MOTION_ATLAS_URLS = [
@@ -202,7 +203,7 @@ const singleFrameAnimation = (
 });
 
 /**
- * The v23/v21 sheets are packed from the high-frame source strips and include
+ * The v24/v22 sheets are packed from the high-frame source strips and include
  * offline in-between cells. Keeping the mapping in data (rather than CSS
  * selectors) means every PetCharacter gets the same timing and a state change
  * always restarts at the entrance frame.

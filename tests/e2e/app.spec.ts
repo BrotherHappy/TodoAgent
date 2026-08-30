@@ -1120,6 +1120,28 @@ test.describe("Todo Agent desktop shell", () => {
     await expect
       .poll(async () => Number(await pattedPet.getAttribute("data-pet-atlas-step")))
       .not.toBe(patStep);
+    const patStepSamples = await floating.evaluate(async () => {
+      const root = document.querySelector<HTMLElement>('.pet-character[data-pet-action="pet"]');
+      if (!root) return [];
+      const samples: number[] = [];
+      const started = performance.now();
+      await new Promise<void>((resolve) => {
+        const sample = (now: number): void => {
+          samples.push(Number(root.getAttribute("data-pet-atlas-step") ?? -1));
+          if (now - started >= 240) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      return samples;
+    });
+    const patStepDeltas = patStepSamples
+      .slice(1)
+      .map((step, index) => Math.abs(step - (patStepSamples[index] ?? step)));
+    expect(Math.max(...patStepDeltas, 0)).toBeLessThanOrEqual(1);
     expect(
       await pattedPet.locator(".pet-pat-hand").evaluate((element) =>
         getComputedStyle(element).animationName,

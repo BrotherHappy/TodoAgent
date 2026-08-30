@@ -28,6 +28,20 @@ if (![columns, rows, steps].every(Number.isInteger) || columns < 1 || rows < 1 |
   throw new Error("columns, rows and steps must be positive integers");
 }
 
+// The body-aligned morph is safe for compact pose changes (breathing, wave,
+// work and head-pat), but a rope/carry prop can be a genuinely different
+// connected component. Keep row selection explicit so a future regeneration
+// cannot accidentally turn a detached prop into a translucent duplicate.
+const alignedMorphRows = process.env.TODO_PET_ALIGNED_MORPH_ROWS
+  ? new Set(
+    process.env.TODO_PET_ALIGNED_MORPH_ROWS
+      .split(",")
+      .map((value) => Number.parseInt(value.trim(), 10))
+      .filter((value) => Number.isInteger(value) && value >= 0),
+  )
+  : undefined;
+const transformOnly = process.env.TODO_PET_TRANSFORM_ONLY !== "0";
+
 const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const source = fs.readFileSync(inputPath);
 if (!source.subarray(0, 8).equals(signature)) throw new Error("Input is not a PNG");
@@ -251,6 +265,28 @@ const maskAnchor = (cell, mask) => {
     ? { x: sumX / count, y: sumY / count }
     : { x: cellWidth / 2, y: cellHeight / 2 };
 };
+// The full connected mask can include an arm, hand or a raised ear. Using its
+// centroid as the translation anchor makes the *whole* pet drift when that
+// limb moves, which then causes colour samples to overlap and read as a
+// double image. Anchor the body from the quiet lower torso/feet region first;
+// fall back to the full mask only for a pose that has no stable lower core.
+const bodyAnchor = (cell, mask) => {
+  let count = 0;
+  let sumX = 0;
+  let sumY = 0;
+  for (let pixel = 0; pixel < mask.length; pixel += 1) {
+    if (!mask[pixel]) continue;
+    const x = pixel % cellWidth;
+    const y = Math.floor(pixel / cellWidth);
+    if (x < cellWidth * 0.22 || x > cellWidth * 0.78 || y < cellHeight * 0.52) continue;
+    count += 1;
+    sumX += x;
+    sumY += y;
+  }
+  return count > 0
+    ? { x: sumX / count, y: sumY / count }
+    : maskAnchor(cell, mask);
+};
 const sampleField = (field, x, y) => {
   if (x < 0 || y < 0 || x >= cellWidth - 1 || y >= cellHeight - 1) return -1e4;
   const x0 = Math.floor(x);
@@ -348,12 +384,191 @@ const blend = (
   propAnchorA,
   propAnchorB,
   transformOnly,
+  morphAllowed = true,
 ) => {
   const result = Buffer.alloc(a.length);
   const deltaX = anchorB.x - anchorA.x;
   const deltaY = anchorB.y - anchorA.y;
   const propDeltaX = propAnchorB.x - propAnchorA.x;
   const propDeltaY = propAnchorB.y - propAnchorA.y;
+  const alignedMorph = process.env.TODO_PET_ALIGNED_MORPH === "1" && morphAllowed;
+  if (alignedMorph) {
+    // Morph the connected pet body in an anchor-aligned coordinate space,
+    // then move that single contour along the anchor path.  The old
+    // transform-only hand-off kept the outgoing raster until t=.5 and
+    // switched the entire body to the incoming raster in one cell.  That
+    // avoided ghosts, but the pose change was still visible as a one-frame
+    // snap when the source keys had different arm/leg positions.  Aligning
+    // both bodies at their centroid before interpolating their signed
+    // distance fields keeps one contour while the pose changes continuously;
+    // detached props keep the conservative single-source path below.
+    const pathX = anchorA.x + deltaX * t;
+    const pathY = anchorA.y + deltaY * t;
+    const propProgress = t < 0.5 ? t : t - 1;
+    let propAreaA = 0;
+    let propAreaB = 0;
+    let propOverlap = 0;
+    for (let propPixel = 0; propPixel < propMaskA.length; propPixel += 1) {
+      if (propMaskA[propPixel]) propAreaA += 1;
+      if (propMaskB[propPixel]) propAreaB += 1;
+      if (propMaskA[propPixel] && propMaskB[propPixel]) propOverlap += 1;
+    }
+    const propAreaMin = Math.min(propAreaA, propAreaB);
+    const propAreaMax = Math.max(propAreaA, propAreaB);
+    // Thin props can be morphed safely when both poses contain roughly the
+    // same stroke. If a task card/hand appears or disappears completely, keep
+    // the coherent single-source hand-off instead of inventing a bridge
+    // between unrelated objects.
+    const propMorph = propAreaMin > 36
+      && propAreaMax / Math.max(1, propAreaMin) < 2.4
+      && propOverlap / Math.max(1, propAreaMin) > 0.08
+      && Math.hypot(propDeltaX, propDeltaY) < 72;
+    const crispMorph = process.env.TODO_PET_ALIGNED_CRISP === "1";
+    const maskAt = (mask, x, y) => {
+      const px = Math.max(0, Math.min(cellWidth - 1, Math.round(x)));
+      const py = Math.max(0, Math.min(cellHeight - 1, Math.round(y)));
+      return mask[py * cellWidth + px] === 1;
+    };
+    const writePixel = (index, pixel, sampleA, sampleB, sdfA, sdfB) => {
+      const alphaA = sampleA[3] / 255;
+      const alphaB = sampleB[3] / 255;
+      if (Math.max(alphaA, alphaB) <= 0.0001) return;
+      if (crispMorph) {
+        // A signed-distance colour cross-fade can make two nearby eyes or
+        // whiskers visible at once. For dense desktop-pet frames prefer a
+        // crisp per-pixel handoff: pixels with similar colours are blended,
+        // while genuinely moving details use a contour-weighted spatial
+        // winner around the midpoint. The contour therefore changes over
+        // several cells without ever drawing a translucent duplicate feature.
+        const colourDelta = Math.abs(sampleA[0] - sampleB[0])
+          + Math.abs(sampleA[1] - sampleB[1])
+          + Math.abs(sampleA[2] - sampleB[2]);
+        const bothVisible = alphaA > 0.02 && alphaB > 0.02;
+        const stableColour = bothVisible && colourDelta < 42;
+        // Pick the source whose aligned contour is deepest at this pixel. A
+        // spatial winner is a single coherent silhouette; unlike an ordered
+        // dither it never sprinkles one-pixel holes across the face.
+        const scoreA = sdfA + Math.log(Math.max(0.02, 1 - t));
+        const scoreB = sdfB + Math.log(Math.max(0.02, t));
+        const chooseB = bothVisible && !stableColour && scoreB > scoreA;
+        const alpha = stableColour
+          ? Math.max(alphaA, alphaB)
+          : bothVisible
+            ? (chooseB ? alphaB : alphaA)
+            : alphaA > 0.02
+              ? alphaA * (1 - t)
+              : alphaB * t;
+        if (alpha <= 0.0001) return;
+        // Do not preserve barely-visible RGB from an antialiased transparent
+        // source pixel. On a transparent always-on-top window those few
+        // bytes can become a bright coloured fringe when the canvas is
+        // enlarged; the authored atlas already treats sub-7% coverage as
+        // transparent.
+        if (alpha * 255 < 18) return;
+        const chosen = chooseB || (!bothVisible && alphaA <= 0.02) ? sampleB : sampleA;
+        result[index] = stableColour
+          ? Math.round((sampleA[0] * alphaA * (1 - t) + sampleB[0] * alphaB * t) / Math.max(0.0001, alphaA * (1 - t) + alphaB * t))
+          : chosen[0];
+        result[index + 1] = stableColour
+          ? Math.round((sampleA[1] * alphaA * (1 - t) + sampleB[1] * alphaB * t) / Math.max(0.0001, alphaA * (1 - t) + alphaB * t))
+          : chosen[1];
+        result[index + 2] = stableColour
+          ? Math.round((sampleA[2] * alphaA * (1 - t) + sampleB[2] * alphaB * t) / Math.max(0.0001, alphaA * (1 - t) + alphaB * t))
+          : chosen[2];
+        result[index + 3] = Math.round(alpha * 255);
+        return;
+      }
+      const oneSided = alphaA <= 0.02 || alphaB <= 0.02;
+      const weightA = alphaA * (1 - t);
+      const weightB = alphaB * t;
+      const weight = weightA + weightB;
+      if (weight <= 0.0001) return;
+      const field = oneSided
+        ? (alphaA > alphaB ? sdfA : sdfB)
+        : sdfA * (1 - t) + sdfB * t;
+      const silhouette = smoothstep(-1.25, 1.25, field);
+      const outAlpha = (oneSided
+        ? (alphaA > alphaB ? alphaA * (1 - t) : alphaB * t)
+        : Math.min(1, weight)) * silhouette;
+      if (outAlpha <= 0.0001) return;
+      result[index + 3] = Math.round(outAlpha * 255);
+      if (oneSided && alphaA <= 0.02 && alphaB > 0.02) {
+        result[index] = sampleB[0];
+        result[index + 1] = sampleB[1];
+        result[index + 2] = sampleB[2];
+        return;
+      }
+      if (oneSided && alphaB <= 0.02 && alphaA > 0.02) {
+        result[index] = sampleA[0];
+        result[index + 1] = sampleA[1];
+        result[index + 2] = sampleA[2];
+        return;
+      }
+      result[index] = Math.round((sampleA[0] * weightA + sampleB[0] * weightB) / weight);
+      result[index + 1] = Math.round((sampleA[1] * weightA + sampleB[1] * weightB) / weight);
+      result[index + 2] = Math.round((sampleA[2] * weightA + sampleB[2] * weightB) / weight);
+    };
+    const result = Buffer.alloc(a.length);
+    for (let index = 0, pixel = 0; index < a.length; index += 4, pixel += 1) {
+      const x = pixel % cellWidth;
+      const y = Math.floor(pixel / cellWidth);
+      const localAX = x - pathX + anchorA.x;
+      const localAY = y - pathY + anchorA.y;
+      const localBX = x - pathX + anchorB.x;
+      const localBY = y - pathY + anchorB.y;
+      const bodyA = maskAt(bodyMaskA, localAX, localAY);
+      const bodyB = maskAt(bodyMaskB, localBX, localBY);
+      if (bodyA || bodyB) {
+        writePixel(
+          index,
+          pixel,
+          samplePixel(a, localAX, localAY),
+          samplePixel(b, localBX, localBY),
+          sampleField(bodySdfA, localAX, localAY),
+          sampleField(bodySdfB, localBX, localBY),
+        );
+        continue;
+      }
+      if (propMorph) {
+        const propPathX = propAnchorA.x + propDeltaX * t;
+        const propPathY = propAnchorA.y + propDeltaY * t;
+        const propAX = x - propPathX + propAnchorA.x;
+        const propAY = y - propPathY + propAnchorA.y;
+        const propBX = x - propPathX + propAnchorB.x;
+        const propBY = y - propPathY + propAnchorB.y;
+        const propA = maskAt(propMaskA, propAX, propAY);
+        const propB = maskAt(propMaskB, propBX, propBY);
+        if (propA || propB) {
+          writePixel(
+            index,
+            pixel,
+            samplePixel(a, propAX, propAY),
+            samplePixel(b, propBX, propBY),
+            sampleField(propSdfA, propAX, propAY),
+            sampleField(propSdfB, propBX, propBY),
+          );
+          continue;
+        }
+      }
+      // Detached effects are intentionally kept as one complete source
+      // raster. A rope, sparkle or floor shadow may have no meaningful body
+      // contour to morph; switching it as a coherent prop is less
+      // distracting than making two thin strokes overlap.
+      const source = t < 0.5 ? a : b;
+      const sourcePropMask = t < 0.5 ? propMaskA : propMaskB;
+      const moveX = propDeltaX;
+      const moveY = propDeltaY;
+      const localX = x - moveX * propProgress;
+      const localY = y - moveY * propProgress;
+      if (!maskAt(sourcePropMask, localX, localY)) continue;
+      const sampled = samplePixel(source, localX, localY);
+      result[index] = sampled[0];
+      result[index + 1] = sampled[1];
+      result[index + 2] = sampled[2];
+      result[index + 3] = sampled[3];
+    }
+    return result;
+  }
   // When a key pose travels a long distance (for example the jump-rope hop),
   // a distance-field blend can have two valid zero contours at once. That is
   // mathematically correct but visually reads as a translucent duplicate pet.
@@ -374,21 +589,90 @@ const blend = (
     const source = t < 0.5 ? a : b;
     const sourceBodyMask = t < 0.5 ? bodyMaskA : bodyMaskB;
     const sourcePropMask = t < 0.5 ? propMaskA : propMaskB;
+    const maskAt = (mask, x, y) => {
+      const px = Math.max(0, Math.min(cellWidth - 1, Math.round(x)));
+      const py = Math.max(0, Math.min(cellHeight - 1, Math.round(y)));
+      return mask[py * cellWidth + px] === 1;
+    };
+    // Props are independent of the body silhouette. When a prop exists in
+    // only one key pose (rope entering, a task card appearing, sparkle burst),
+    // fade that prop in/out over the transition instead of popping at t=.5.
+    // When both props are present, only blend if their masks overlap enough to
+    // describe the same object; unrelated props remain a single-source winner
+    // so two ropes/cards are never visible at once.
+    let propAreaA = 0;
+    let propAreaB = 0;
+    let propOverlap = 0;
+    for (let propPixel = 0; propPixel < propMaskA.length; propPixel += 1) {
+      if (propMaskA[propPixel]) propAreaA += 1;
+      if (propMaskB[propPixel]) propAreaB += 1;
+      if (propMaskA[propPixel] && propMaskB[propPixel]) propOverlap += 1;
+    }
+    const propAreaMin = Math.min(propAreaA, propAreaB);
+    const propAreaMax = Math.max(propAreaA, propAreaB);
+    const propMorph = propAreaMin > 36
+      && propAreaMax / Math.max(1, propAreaMin) < 2.4
+      && propOverlap / Math.max(1, propAreaMin) > 0.08
+      && Math.hypot(propDeltaX, propDeltaY) < 72;
     // A starts at anchor A and moves +delta; B starts at anchor B and moves
     // back -delta. Both therefore meet at the same midpoint before the pose
     // hand-off instead of B overshooting past its target.
     const translationProgress = t < 0.5 ? t : t - 1;
+    const propPathX = propAnchorA.x + propDeltaX * t;
+    const propPathY = propAnchorA.y + propDeltaY * t;
     for (let index = 0, pixel = 0; index < source.length; index += 4, pixel += 1) {
-      const isBodyCore = sourceBodyMask[pixel];
-      const isProp = sourcePropMask[pixel];
-      if (!isBodyCore && !isProp) continue;
-      const moveX = isBodyCore ? deltaX : propDeltaX;
-      const moveY = isBodyCore ? deltaY : propDeltaY;
-      const sampled = samplePixel(source, (pixel % cellWidth) - moveX * translationProgress, Math.floor(pixel / cellWidth) - moveY * translationProgress);
-      result[index] = sampled[0];
-      result[index + 1] = sampled[1];
-      result[index + 2] = sampled[2];
-      result[index + 3] = sampled[3];
+      const x = pixel % cellWidth;
+      const y = Math.floor(pixel / cellWidth);
+      const bodyMoveX = deltaX * translationProgress;
+      const bodyMoveY = deltaY * translationProgress;
+      const bodyX = x - bodyMoveX;
+      const bodyY = y - bodyMoveY;
+      const sourceBody = maskAt(sourceBodyMask, bodyX, bodyY);
+      if (sourceBody) {
+        const sampled = samplePixel(source, bodyX, bodyY);
+        result[index] = sampled[0];
+        result[index + 1] = sampled[1];
+        result[index + 2] = sampled[2];
+        result[index + 3] = sampled[3];
+        continue;
+      }
+
+      const propAX = x - propPathX + propAnchorA.x;
+      const propAY = y - propPathY + propAnchorA.y;
+      const propBX = x - propPathX + propAnchorB.x;
+      const propBY = y - propPathY + propAnchorB.y;
+      const hasPropA = maskAt(propMaskA, propAX, propAY);
+      const hasPropB = maskAt(propMaskB, propBX, propBY);
+      if (!hasPropA && !hasPropB) continue;
+      const sampleA = hasPropA ? samplePixel(a, propAX, propAY) : [0, 0, 0, 0];
+      const sampleB = hasPropB ? samplePixel(b, propBX, propBY) : [0, 0, 0, 0];
+      if (hasPropA && hasPropB && propMorph) {
+        const weightA = (sampleA[3] / 255) * (1 - t);
+        const weightB = (sampleB[3] / 255) * t;
+        const weight = weightA + weightB;
+        if (weight > 0.0001) {
+          result[index] = Math.round((sampleA[0] * weightA + sampleB[0] * weightB) / weight);
+          result[index + 1] = Math.round((sampleA[1] * weightA + sampleB[1] * weightB) / weight);
+          result[index + 2] = Math.round((sampleA[2] * weightA + sampleB[2] * weightB) / weight);
+          result[index + 3] = Math.round(Math.min(1, weight) * 255);
+        }
+      } else if (hasPropA && !hasPropB) {
+        result[index] = sampleA[0];
+        result[index + 1] = sampleA[1];
+        result[index + 2] = sampleA[2];
+        result[index + 3] = Math.round(sampleA[3] * (1 - t));
+      } else if (hasPropB && !hasPropA) {
+        result[index] = sampleB[0];
+        result[index + 1] = sampleB[1];
+        result[index + 2] = sampleB[2];
+        result[index + 3] = Math.round(sampleB[3] * t);
+      } else {
+        const sampled = t < 0.5 ? sampleA : sampleB;
+        result[index] = sampled[0];
+        result[index + 1] = sampled[1];
+        result[index + 2] = sampled[2];
+        result[index + 3] = sampled[3];
+      }
     }
     return result;
   }
@@ -478,14 +762,16 @@ const blend = (
       result[index + 1] = Math.round(green);
       result[index + 2] = Math.round(blue);
     } else {
-      result[index] = primary[0];
-      result[index + 1] = primary[1];
-      result[index + 2] = primary[2];
+      const fallback = t < 0.5 ? pixelA : pixelB;
+      result[index] = fallback[0];
+      result[index + 1] = fallback[1];
+      result[index + 2] = fallback[2];
     }
   }
   return result;
 };
 for (let row = 0; row < rows; row += 1) {
+  const morphAllowed = alignedMorphRows === undefined || alignedMorphRows.has(row);
   const cells = Array.from({ length: columns }, (_, column) => readCell(column, row));
   let outputColumn = 0;
   // Feed the rendered endpoint of one transition into the next transition.
@@ -510,8 +796,8 @@ for (let row = 0; row < rows; row += 1) {
     const bodySdfB = distanceField(toCell, bodyMaskB);
     const propSdfA = distanceField(fromCell, propMaskA);
     const propSdfB = distanceField(toCell, propMaskB);
-    const anchorA = maskAnchor(fromCell, bodyMaskA);
-    const anchorB = maskAnchor(toCell, bodyMaskB);
+    const anchorA = bodyAnchor(fromCell, bodyMaskA);
+    const anchorB = bodyAnchor(toCell, bodyMaskB);
     const propAnchorA = maskAnchor(fromCell, propMaskA);
     const propAnchorB = maskAnchor(toCell, propMaskB);
     let endpoint = fromCell;
@@ -540,10 +826,11 @@ for (let row = 0; row < rows; row += 1) {
           // ear/eye/leg change leaves two silhouettes visible for a few
           // milliseconds.  Keep every in-between as one complete pose moving
           // along the anchor path, then hand off to the incoming pose at the
-          // midpoint.  At the 8ms runtime cadence that hand-off is one
-          // display beat, while the remaining 62 cells provide the smooth
+          // midpoint. At the display-quantised runtime cadence that hand-off
+          // is one display beat, while the remaining 62 cells provide the smooth
           // motion; most importantly there is no translucent double pet.
-          true,
+          transformOnly,
+          morphAllowed,
         ),
         outputColumn++,
         row,

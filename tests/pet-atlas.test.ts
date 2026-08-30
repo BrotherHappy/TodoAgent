@@ -27,10 +27,10 @@ describe("Todo Pet generated action atlas", () => {
 
   it("keeps runtime grid metadata aligned with the PNG dimensions", () => {
     const motionPages = Array.from({ length: TODO_PET_MOTION_PAGE_COUNT }, (_, page) =>
-      pngSize(`todo-pet-motion-atlas-v23-${String(page).padStart(2, "0")}.png`),
+      pngSize(`todo-pet-motion-atlas-v24-${String(page).padStart(2, "0")}.png`),
     );
     const interactionPages = Array.from({ length: TODO_PET_INTERACTION_PAGE_COUNT }, (_, page) =>
-      pngSize(`todo-pet-interaction-atlas-v21-${String(page).padStart(2, "0")}.png`),
+      pngSize(`todo-pet-interaction-atlas-v22-${String(page).padStart(2, "0")}.png`),
     );
     for (const page of motionPages) {
       expect(page.width).toBe(TODO_PET_MOTION_COLUMNS * 128);
@@ -97,10 +97,9 @@ describe("Todo Pet generated action atlas", () => {
       expect(animation.columns).toBe(TODO_PET_ATLAS_PAGE_COLUMNS);
       expect(animation.rows).toBe(TODO_PET_ATLAS_PAGE_ROWS);
       expect(animation.loop).toBe(true);
-      // Fast loops target 8ms so 120Hz panels can present a fresh dense cell
-      // on every refresh. The renderer advances by the elapsed authored time
-      // (up to three neighbouring cells per paint), so 60Hz displays keep
-      // the intended action duration without a large catch-up jump.
+      // Fast loops author an 8ms dense timeline. The renderer quantises
+      // presentation to the display cadence so a 60Hz panel shows each
+      // neighbouring cell for a complete refresh instead of skipping cells.
       expect(animation.frameDurationMs).toBeGreaterThanOrEqual(8);
     }
   });

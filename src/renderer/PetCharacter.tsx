@@ -317,12 +317,11 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
     };
     const authoredFrameDuration = Math.max(1, animation.frameDurationMs);
     // Keep a fractional playhead instead of tying motion to integer wall-clock
-    // ticks. The authored 8ms cadence is time-accurate: a 60Hz panel consumes
-    // roughly two dense source cells per refresh, while a 120Hz panel usually
-    // consumes one. Dense source cells are intentionally much closer than a
-    // traditional keyframe, so this preserves the intended action duration
-    // without introducing a second translucent silhouette. The presentation
-    // step below still chooses one complete cell at a time.
+    // ticks. The atlas contains dense 8ms source cells, but presentation is
+    // quantised to the observed display cadence below so a 60Hz panel does
+    // not skip two cells in one compositor commit. Dense source cells remain
+    // useful on high-refresh panels and during fractional cadence changes;
+    // every visible paint still chooses one complete cell at a time.
     let sequencePosition = 0;
     let sequenceStarted = false;
     // The first two refresh callbacks can straddle image decode and a window
@@ -415,9 +414,12 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
     stack.dataset.handoff = handoffPending ? "true" : "false";
 
     const paint = (now: number): void => {
-      // Do not fast-forward across a long main-thread/compositor pause. Keep
-      // at most three dense source cells per paint; this is enough to catch up
-      // from a single missed refresh while preventing a visible teleport. The
+      // Do not fast-forward across a long main-thread/compositor pause. The
+      // atlas is deliberately dense, so skipping two or three cells in one
+      // display beat makes the pet look like a low-FPS flipbook even though
+      // the source sheet contains hundreds of frames. Present at most one
+      // neighbouring cell per refresh; after a long pause the companion may
+      // briefly slow down, but it never teleports across an arm/ear pose. The
       // small warm-up gate prevents the first post-decode callback from
       // inheriting a stale timestamp.
       if (previousTimestamp === undefined) previousTimestamp = now;
@@ -436,9 +438,17 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
           Math.max(refreshQuantum * 2, 1),
           Math.max(0, delta),
         );
+        // A display refresh is the upper bound for visible pose changes. On a
+        // 60Hz panel this keeps every raster cell on screen for one complete
+        // vsync; on 120Hz+ panels the authored 8ms cadence still allows the
+        // denser sequence to breathe without crossing two cells in a single
+        // compositor commit. Using the observed refresh quantum as the
+        // effective duration also prevents a noisy rAF sample from causing a
+        // one-frame skip at 59/60Hz.
+        const effectiveFrameDuration = Math.max(authoredFrameDuration, refreshQuantum);
         const positionAdvance = warmupPaints < 2
           ? 0
-          : Math.min(3, cappedDelta / authoredFrameDuration);
+          : Math.min(1, cappedDelta / effectiveFrameDuration);
         if (shouldLoop) {
           sequencePosition = (sequencePosition + positionAdvance) % travelCount;
         } else {
@@ -466,7 +476,7 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
       const currentImage = imageForFrame(current);
       const nextImage = imageForFrame(next);
       const currentPage = pageForFrame(current);
-      // Decode one extra page ahead of the look-ahead frame. At the 8ms
+      // Decode one extra page ahead of the look-ahead frame. At the dense
       // cadence this gives a 0.45–1.1s warm window before a page boundary;
       // two pages are requested so a high-refresh display never waits on a
       // texture decode during an active gesture.
