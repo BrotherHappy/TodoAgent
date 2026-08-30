@@ -318,6 +318,8 @@ v2.77 播放时钟与身体撕裂修复（2026-08-30）：图集更新为 v18/v1
 
 > v2.80 身体连续化与中点撕裂修复（2026-08-30）：重新生成 `todo-pet-motion-atlas-v21.png` 与 `todo-pet-interaction-atlas-v19.png`。v2.79 的“单一胜出姿态”虽然消除了双重身体，却会在 `t=0.5` 把整只摸头的手从无到有硬切；本轮将稳定身体的颜色改为共享画布坐标的预乘连续混合，仍让绳子、星光、任务卡等独立道具保持单一姿态，单侧出现/消失的肢体按透明度渐入渐出。这样不会叠出两只宠物，也不会在中点突然更换整张姿态。离线相邻帧 RMS 回归不再出现中点尖峰，安装版采样与截图回归在重新打包后执行。
 
+> v2.81 单一动画时钟修复（2026-08-30）：发现图集 Canvas 仍被旧版 `pet-atlas-breathe`、`pet-atlas-wave`、`pet-atlas-jump-rope` 等整宠物 CSS 动画再次平移/旋转；这会让图集播放头与 CSS 时间轴互相叠加，造成“动作跳来跳去”。本轮仅对 Atlas 缓冲 Canvas 关闭这些整宠物 CSS choreography，SVG 后备层的交互特效不变；角色位移、呼吸和道具动作统一由同一图集时间轴驱动，并新增 E2E 断言确保 Canvas 的 `animationName` 与 `transform` 均为 `none`。
+
 ```bash
 npm run typecheck
 npm test

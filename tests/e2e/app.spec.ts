@@ -1109,6 +1109,13 @@ test.describe("Todo Agent desktop shell", () => {
     const pattedPet = floating.locator('.pet-character[data-pet-action="pet"]');
     await expect(pattedPet).toBeVisible();
     await expect(pattedPet).toHaveAttribute("data-pet-atlas-animation", "head-pat");
+    await expect(pattedPet).toHaveAttribute("data-pet-atlas-ready", "true");
+    expect(
+      await pattedPet.locator(".pet-atlas-buffer-stack .pet-atlas-motion").first().evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { animationName: style.animationName, transform: style.transform };
+      }),
+    ).toEqual({ animationName: "none", transform: "none" });
     const patStep = Number(await pattedPet.getAttribute("data-pet-atlas-step"));
     await expect
       .poll(async () => Number(await pattedPet.getAttribute("data-pet-atlas-step")))

@@ -15484,6 +15484,16 @@ button.dependency-graph-node:focus-visible {
     0%, 100% { transform: translateY(0) rotate(-2deg); }
     50% { transform: translateY(-2px) rotate(3deg); }
   }
+  /* The atlas already contains the authored body motion. Applying the old
+   * whole-canvas CSS choreography on top of it makes the raster jump on a
+   * second, unrelated timeline (especially when an action class changes).
+   * Keep those expressive transforms for the SVG fallback only; the buffered
+   * atlas must stay in one coordinate system and move only with its playhead.
+   */
+  .pet-visual-atlas .pet-atlas-buffer-stack .pet-atlas-motion {
+    animation: none !important;
+    transform: none !important;
+  }
 }
 
 /* A 980px desktop window still needs a full-height task list. Keep details
