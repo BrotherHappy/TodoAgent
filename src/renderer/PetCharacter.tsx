@@ -16,10 +16,11 @@ import {
   type PetEmotion,
 } from "./pet-behavior";
 import {
+  TODO_PET_ATLAS_PAGE_SIZE,
   petAtlasAnimationForAction,
   petAtlasFrameFromIndex,
   petAtlasFrameForAction,
-  petAtlasUrlForSheet,
+  petAtlasUrlsForSheet,
 } from "./pet-atlas";
 
 export type PetMood = "idle" | "focus" | "syncing" | "alert" | "happy";
@@ -87,16 +88,16 @@ function clampGaze(value: number): number {
 }
 
 interface PetAtlasCanvasProps {
-  src: string;
+  /** Bounded GPU pages for the selected generated sheet. */
+  sources: readonly string[];
   animation: ReturnType<typeof petAtlasAnimationForAction>;
   onStep: (step: number) => void;
   onReady?: (ready: boolean) => void;
 }
 
-// There are only two runtime sheets. Keep their decoded Image objects alive
-// for the lifetime of the renderer so switching from idle → focus → pet can
-// restart the timeline without showing an empty canvas while the same PNG is
-// decoded again.
+// Keep decoded page Image objects alive for the lifetime of the renderer so
+// switching from idle → focus → pet can restart the timeline without showing
+// an empty canvas while a multi-megabyte page is decoded again.
 const petAtlasImageCache = new Map<string, HTMLImageElement>();
 const petAtlasImageLoads = new Map<string, Promise<HTMLImageElement>>();
 let petAtlasWarmupTimer: number | undefined;
@@ -137,52 +138,16 @@ function schedulePetAtlasWarmup(): void {
   if (typeof window === "undefined" || petAtlasWarmupTimer !== undefined) return;
   petAtlasWarmupTimer = window.setTimeout(() => {
     petAtlasWarmupTimer = undefined;
-    // Decode both local sheets shortly after the first pet mounts. Waiting a
-    // full idle window made a fast first click race the interaction
-    // texture, so the pet could finish its short head-pat before the atlas
-    // ever produced a frame. A short defer still lets the motion canvas paint
-    // its first fallback frame while making the first interaction warm.
-    void loadPetAtlasImage(petAtlasUrlForSheet("motion")).catch(() => undefined);
-    void loadPetAtlasImage(petAtlasUrlForSheet("interaction")).catch(() => undefined);
+    // Decode the first two pages of both local sheets shortly after the first
+    // pet mounts. This keeps the first interaction warm without eagerly
+    // decoding 23 full textures at launch. The page renderer requests later
+    // pages ahead of the playhead when it approaches a page boundary.
+    for (const sheet of ["motion", "interaction"] as const) {
+      for (const src of petAtlasUrlsForSheet(sheet).slice(0, 2)) {
+        void loadPetAtlasImage(src).catch(() => undefined);
+      }
+    }
   }, 100);
-}
-
-/**
- * Blend two complete canvas frames in premultiplied-alpha space. Keeping the
- * alpha envelope to the larger of the two contributions prevents a brief
- * translucent "double pet" when an interaction sheet replaces a motion
- * sheet, while still giving the eye a few display beats to follow the pose.
- */
-function blendPetAtlasFrames(
-  from: ImageData,
-  to: ImageData,
-  progress: number,
-): ImageData {
-  const t = Math.max(0, Math.min(1, progress));
-  const output = new ImageData(from.width, from.height);
-  const source = from.data;
-  const target = to.data;
-  const result = output.data;
-  for (let index = 0; index < result.length; index += 4) {
-    const fromAlpha = source[index + 3] / 255;
-    const toAlpha = target[index + 3] / 255;
-    const fromWeight = fromAlpha * (1 - t);
-    const toWeight = toAlpha * t;
-    const weight = fromWeight + toWeight;
-    if (weight <= 0.0001) continue;
-    const envelope = Math.max(fromWeight, toWeight);
-    result[index + 3] = Math.round(envelope * 255);
-    result[index] = Math.round(
-      (source[index] * fromWeight + target[index] * toWeight) / weight,
-    );
-    result[index + 1] = Math.round(
-      (source[index + 1] * fromWeight + target[index + 1] * toWeight) / weight,
-    );
-    result[index + 2] = Math.round(
-      (source[index + 2] * fromWeight + target[index + 2] * toWeight) / weight,
-    );
-  }
-  return output;
 }
 
 /**
@@ -193,20 +158,20 @@ function blendPetAtlasFrames(
  * cross-fading complete silhouettes: two overlapping transparent pets read as
  * a tearing tail/ear, especially during carrying and rope actions.
  */
-function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps) {
+function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasProps) {
   const stackRef = useRef<HTMLSpanElement>(null);
-  const imageRef = useRef<HTMLImageElement | undefined>(undefined);
-  const animationKey = `${src}:${animation.name}:${animation.frames.length}:${animation.frames[0] ?? 0}`;
+  const imageMapRef = useRef(new Map<string, HTMLImageElement>());
+  const animationKey = `${sources.join(",")}:${animation.name}:${animation.frames.length}:${animation.frames[0] ?? 0}`;
   const previousAnimationKeyRef = useRef(animationKey);
   // A state change (idle → pet, work → celebrate, etc.) used to reveal the
   // first frame of the new sheet in one compositor tick. Even with a double
-  // buffer that is a complete frame, but it is still a visible teleport when
-  // the two authored poses have different props. Capture the last presented
-  // pixels before React swaps the animation and let the next paint perform a
-  // very short, pixel-complete handoff. The bridge is intentionally only a
-  // few display beats; it removes the hard cut without leaving two full pets
-  // on screen long enough to read as a duplicate.
-  const handoffRef = useRef<ImageData | undefined>(undefined);
+  // buffer that is a complete frame, it is still a visible teleport when the
+  // two authored poses have different props. The old implementation copied
+  // the active canvas into ImageData here. That
+  // synchronous GPU readback could stall a refresh and was itself visible as
+  // a dropped frame. Keep only a boolean; the paint loop copies the already
+  // presented canvas directly into the hidden buffer instead.
+  const handoffRef = useRef(false);
   // Once one complete canvas frame has reached the screen, keep that frame
   // visible while a different sheet is decoding. Falling back to the SVG on
   // every motion → interaction switch briefly rendered two different pets
@@ -216,30 +181,22 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
   // Action changes keep the same canvas mounted. When an atlas has already
   // been decoded, start the new timeline immediately instead of painting a
   // one-frame empty canvas while the `ready` state catches up.
-  const [ready, setReady] = useState(() => petAtlasImageCache.has(src));
+  const initialPage = Math.max(
+    0,
+    Math.min(
+      sources.length - 1,
+      Math.floor((animation.frames[0] ?? 0) / TODO_PET_ATLAS_PAGE_SIZE),
+    ),
+  );
+  const initialSrc = sources[initialPage] ?? sources[0];
+  const [ready, setReady] = useState(() => Boolean(initialSrc && petAtlasImageCache.has(initialSrc)));
 
   useLayoutEffect(() => {
     if (previousAnimationKeyRef.current === animationKey) return;
-    const stack = stackRef.current;
-    const activeBuffer = stack?.dataset.activeBuffer === "1" ? 1 : 0;
-    const activeCanvas = stack?.querySelector<HTMLCanvasElement>(
-      `.pet-atlas-buffer-${activeBuffer}`,
-    );
-    const context = activeCanvas?.getContext("2d");
-    if (activeCanvas && context && activeCanvas.width > 0 && activeCanvas.height > 0 && presentedFrameRef.current) {
-      try {
-        handoffRef.current = context.getImageData(
-          0,
-          0,
-          activeCanvas.width,
-          activeCanvas.height,
-        );
-      } catch {
-        // Security restrictions or an unavailable canvas should not prevent
-        // the atlas from playing; the new animation still starts atomically.
-        handoffRef.current = undefined;
-      }
-    }
+    // The currently visible canvas remains mounted across an action change.
+    // Mark a short bridge and let the next rAF copy that surface without a
+    // CPU readback. On a true cold start there is no previous frame to bridge.
+    handoffRef.current = presentedFrameRef.current;
     previousAnimationKeyRef.current = animationKey;
   }, [animationKey]);
 
@@ -250,19 +207,31 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     // removes a cold-start race when the user opens the interaction wheel
     // immediately after launching the floating pet.
     schedulePetAtlasWarmup();
-    const cached = petAtlasImageCache.get(src);
+    const cached = initialSrc ? petAtlasImageCache.get(initialSrc) : undefined;
     if (cached) {
-      imageRef.current = cached;
+      imageMapRef.current.set(initialSrc, cached);
       setReady(true);
-      schedulePetAtlasWarmup();
+      // Start decoding the next page in the background so the first page
+      // boundary is not a visible pause. Remaining pages are requested lazily
+      // by the playhead and remain cached once decoded.
+      const nextSrc = sources[initialPage + 1];
+      if (nextSrc) void loadPetAtlasImage(nextSrc).then((image) => imageMapRef.current.set(nextSrc, image)).catch(() => undefined);
     } else {
       if (!presentedFrameRef.current) onReady?.(false);
-      loadPetAtlasImage(src)
+      if (!initialSrc) {
+        setReady(false);
+        return () => {
+          cancelled = true;
+          if (!presentedFrameRef.current) onReady?.(false);
+        };
+      }
+      loadPetAtlasImage(initialSrc)
         .then((image) => {
           if (cancelled) return;
-          imageRef.current = image;
+          imageMapRef.current.set(initialSrc, image);
           setReady(true);
-          schedulePetAtlasWarmup();
+          const nextSrc = sources[initialPage + 1];
+          if (nextSrc) void loadPetAtlasImage(nextSrc).then((nextImage) => imageMapRef.current.set(nextSrc, nextImage)).catch(() => undefined);
         })
         .catch(() => {
           if (!cancelled) {
@@ -277,14 +246,13 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     }
     return () => {
       cancelled = true;
-      imageRef.current = undefined;
       setReady(false);
       // Do not demote a visible canvas to the SVG fallback during an action
       // switch. The new sheet will paint into the hidden buffer first and
       // then flip it into view as one complete frame.
       if (!presentedFrameRef.current) onReady?.(false);
     };
-  }, [onReady, src]);
+  }, [initialPage, initialSrc, onReady, sources]);
 
   useEffect(() => {
     if (!ready) return undefined;
@@ -292,8 +260,7 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     const canvases = stack
       ? Array.from(stack.querySelectorAll("canvas"))
       : [];
-    const image = imageRef.current;
-    if (!stack || canvases.length < 2 || !image) return undefined;
+    if (!stack || canvases.length < 2) return undefined;
     const contexts = canvases
       .map((canvas) => canvas.getContext("2d", { alpha: true }));
     if (contexts.some((context) => !context)) return undefined;
@@ -332,10 +299,10 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
       ? frameCount * 2 - 2
       : frameCount;
     // Observe the compositor cadence so long background pauses can be capped
-    // without making the playhead jump. The atlas frame duration remains the
-    // source of truth: dense 8ms sequences must advance two logical cells on
-    // a 60Hz display, otherwise hundreds of offline in-betweens turn into a
-    // visibly slow flipbook.
+    // without making the playhead jump. Keep the playhead fractional: a clock
+    // that advances more than one cell at a time silently drops the
+    // in-betweens that make the pet feel alive. The cap below deliberately
+    // trades catch-up speed for a continuous pose path.
     let refreshQuantum = 1000 / 60;
     const refreshSamples: number[] = [];
     const observeRefresh = (delta: number): void => {
@@ -352,10 +319,10 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     };
     const authoredFrameDuration = Math.max(1, animation.frameDurationMs);
     // Keep a fractional playhead instead of rounding to a cell at every
-    // refresh. At 60Hz an 8ms atlas advances about two cells, but the hidden
-    // buffer also blends the fractional remainder into the next cell. That
-    // gives the compositor a genuinely new pose on every refresh instead of
-    // presenting a 2-cell flipbook.
+    // refresh. At 60Hz the 18ms target advances just under one generated cell;
+    // the hidden buffer blends the fractional remainder into the next cell,
+    // so every compositor refresh presents a genuinely new pose without
+    // skipping an authored in-between.
     let sequencePosition = 0;
     let sequenceStarted = false;
     // The first two refresh callbacks can straddle image decode and a window
@@ -363,8 +330,31 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     // an otherwise smooth atlas would visibly jump several poses as soon as
     // the pet appears.
     let warmupPaints = 0;
-    const cellWidth = image.naturalWidth / Math.max(1, animation.columns);
-    const cellHeight = image.naturalHeight / Math.max(1, animation.rows);
+    const pageSize = Math.max(1, animation.columns * animation.rows);
+    const pageForFrame = (frameIndex: number): number => Math.max(
+      0,
+      Math.min(sources.length - 1, Math.floor(Math.max(0, frameIndex) / pageSize)),
+    );
+    const requestPage = (page: number): HTMLImageElement | undefined => {
+      const safePage = Math.max(0, Math.min(sources.length - 1, page));
+      const src = sources[safePage];
+      if (!src) return undefined;
+      const cached = imageMapRef.current.get(src) ?? petAtlasImageCache.get(src);
+      if (cached) {
+        imageMapRef.current.set(src, cached);
+        return cached;
+      }
+      // Request a page as soon as the playhead approaches it. The promise is
+      // de-duplicated globally, so a second pet never starts another decode
+      // for the same texture.
+      void loadPetAtlasImage(src)
+        .then((loaded) => imageMapRef.current.set(src, loaded))
+        .catch(() => undefined);
+      return undefined;
+    };
+    const imageForFrame = (frameIndex: number): HTMLImageElement | undefined => {
+      return requestPage(pageForFrame(frameIndex));
+    };
     let previousTimestamp: number | undefined;
     let lastStep = -1;
     let frameRequest = 0;
@@ -372,12 +362,16 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     const drawFrame = (
       context: CanvasRenderingContext2D,
       canvas: HTMLCanvasElement,
+      image: HTMLImageElement,
       frameIndex: number,
       alpha = 1,
     ): void => {
-      const safeFrame = Math.max(0, Math.min(animation.columns * animation.rows - 1, frameIndex));
-      const sourceX = (safeFrame % animation.columns) * cellWidth;
-      const sourceY = Math.floor(safeFrame / animation.columns) * cellHeight;
+      const safeFrame = Math.max(0, frameIndex);
+      const localFrame = safeFrame % pageSize;
+      const cellWidth = image.naturalWidth / Math.max(1, animation.columns);
+      const cellHeight = image.naturalHeight / Math.max(1, animation.rows);
+      const sourceX = (localFrame % animation.columns) * cellWidth;
+      const sourceY = Math.floor(localFrame / animation.columns) * cellHeight;
       // Atlas cells are packed without a gutter. Sampling exactly on a cell
       // boundary lets a filtered texture fetch one pixel from the neighbour,
       // which shows up as a one-frame tail/ear seam on scaled pets. Inset the
@@ -414,27 +408,21 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
     // Keep the bridge short enough that it reads as a soft handoff rather
     // than a ghosting effect. Five display beats are ~42ms at 120Hz and
     // ~83ms at 60Hz, long enough to remove a hard cut while keeping the new
-    // action immediate.
-    let handoffFrom = handoffRef.current;
-    handoffRef.current = undefined;
-    let handoffFrame = handoffFrom ? 0 : 5;
+    // action immediate. The previous visible canvas is copied directly into
+    // the hidden buffer; no ImageData allocation or GPU readback happens in
+    // the frame loop.
+    let handoffPending = handoffRef.current;
+    handoffRef.current = false;
+    let handoffFrame = handoffPending ? 0 : 5;
     const handoffFrameCount = 5;
-    if (
-      handoffFrom &&
-      (handoffFrom.width !== canvases[0].width || handoffFrom.height !== canvases[0].height)
-    ) {
-      handoffFrom = undefined;
-      handoffFrame = handoffFrameCount;
-    }
-    stack.dataset.handoff = handoffFrom ? "true" : "false";
+    stack.dataset.handoff = handoffPending ? "true" : "false";
 
     const paint = (now: number): void => {
       // Do not fast-forward across a long main-thread/compositor pause. Keep
-      // at most two refresh intervals of time and at most two adjacent atlas
-      // cells per paint. The fractional playhead below turns the remainder
-      // into a cross-faded pose, so a 60Hz display never looks like it is
-      // dropping every other generated cell. The small warm-up gate prevents
-      // the first post-decode callback from inheriting a stale timestamp.
+      // at most one generated cell per paint. The fractional playhead below
+      // turns the remainder into a cross-faded pose, so a 60Hz display never
+      // skips over a whole in-between. The small warm-up gate prevents the
+      // first post-decode callback from inheriting a stale timestamp.
       if (previousTimestamp === undefined) previousTimestamp = now;
       const delta = Math.max(0, now - previousTimestamp);
       previousTimestamp = now;
@@ -448,7 +436,7 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
         );
         const positionAdvance = warmupPaints < 2
           ? 0
-          : Math.min(2, cappedDelta / authoredFrameDuration);
+          : Math.min(1, cappedDelta / authoredFrameDuration);
         if (shouldLoop) {
           sequencePosition = (sequencePosition + positionAdvance) % travelCount;
         } else {
@@ -473,6 +461,22 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
       const next = frameAt(currentIndex + 1);
       const step = currentIndex;
 
+      const currentImage = imageForFrame(current);
+      const nextImage = imageForFrame(next);
+      const currentPage = pageForFrame(current);
+      // Decode one extra page ahead of the look-ahead frame. At the 18ms
+      // cadence this gives a 0.9–2.2s warm window before a page boundary,
+      // even if the user is on a high-refresh display.
+      requestPage(currentPage + 1);
+      requestPage(currentPage + 2);
+      // A page boundary should never expose a blank or partially decoded
+      // canvas. Keep the last complete pose on screen for one refresh while
+      // the bounded page finishes decoding, then resume at the same playhead.
+      if (!currentImage) {
+        frameRequest = window.requestAnimationFrame(paint);
+        return;
+      }
+
       resize();
       const nextBuffer = activeBuffer === 0 ? 1 : 0;
       const nextCanvas = canvases[nextBuffer];
@@ -482,38 +486,48 @@ function PetAtlasCanvas({ src, animation, onStep, onReady }: PetAtlasCanvasProps
       // one-attribute buffer flip. Adjacent offline cells are already contour
       // neighbours, so this short premultiplied canvas cross-fade removes the
       // remaining 60Hz stepping without creating a second visible pet.
+      const activeCanvas = canvases[activeBuffer];
+      const canBridge = handoffPending
+        && Boolean(activeCanvas)
+        && activeCanvas.width === nextCanvas.width
+        && activeCanvas.height === nextCanvas.height;
+      const handoffProgress = canBridge
+        ? Math.max(0, Math.min(1, (handoffFrame + 1) / handoffFrameCount))
+        : 1;
       nextContext.globalCompositeOperation = "copy";
-      nextContext.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
-      drawFrame(nextContext, nextCanvas, current, 1 - fractionalProgress);
-      if (fractionalProgress > 0.0001 && next !== current) {
-        nextContext.globalCompositeOperation = "source-over";
-        drawFrame(nextContext, nextCanvas, next, fractionalProgress);
+      if (canBridge && activeCanvas) {
+        // Copy the last fully presented frame as the bridge base. This is a
+        // GPU-to-GPU copy and does not block the renderer like getImageData().
+        nextContext.globalAlpha = 1 - handoffProgress;
+        nextContext.drawImage(activeCanvas, 0, 0, nextCanvas.width, nextCanvas.height);
+      } else {
+        nextContext.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
       }
       nextContext.globalCompositeOperation = "source-over";
       nextContext.globalAlpha = 1;
-      if (handoffFrom && handoffFrame < handoffFrameCount) {
-        try {
-          const targetFrame = nextContext.getImageData(
-            0,
-            0,
-            nextCanvas.width,
-            nextCanvas.height,
-          );
-          const progress = (handoffFrame + 1) / handoffFrameCount;
-          const blended = blendPetAtlasFrames(handoffFrom, targetFrame, progress);
-          nextContext.putImageData(blended, 0, 0);
-          handoffFrame += 1;
-          if (handoffFrame >= handoffFrameCount) {
-            handoffFrom = undefined;
-            stack.dataset.handoff = "false";
-          }
-        } catch {
-          // If readback is unavailable, keep the already complete target
-          // frame. The double buffer still guarantees an atomic presentation.
-          handoffFrom = undefined;
-          handoffFrame = handoffFrameCount;
+      const targetOpacity = canBridge ? handoffProgress : 1;
+      drawFrame(
+        nextContext,
+        nextCanvas,
+        currentImage,
+        current,
+        (1 - fractionalProgress) * targetOpacity,
+      );
+      if (fractionalProgress > 0.0001 && next !== current && nextImage) {
+        nextContext.globalCompositeOperation = "source-over";
+        drawFrame(nextContext, nextCanvas, nextImage, next, fractionalProgress * targetOpacity);
+      }
+      nextContext.globalCompositeOperation = "source-over";
+      nextContext.globalAlpha = 1;
+      if (canBridge) {
+        handoffFrame += 1;
+        if (handoffFrame >= handoffFrameCount) {
+          handoffPending = false;
           stack.dataset.handoff = "false";
         }
+      } else if (handoffPending) {
+        handoffPending = false;
+        stack.dataset.handoff = "false";
       }
       // The hidden buffer is fully painted before this one-attribute flip.
       // CSS only changes opacity; no intermediate pixels are exposed.
@@ -604,7 +618,8 @@ export function PetCharacter({
     atlasAnimation.columns,
     atlasAnimation.rows,
   );
-  const atlasUrl = petAtlasUrlForSheet(atlasAnimation.sheet);
+  const atlasSources = petAtlasUrlsForSheet(atlasAnimation.sheet);
+  const atlasUrl = atlasSources[0];
   const [atlasReady, setAtlasReady] = useState(
     () => visualStyle !== "atlas" || petAtlasImageCache.has(atlasUrl),
   );
@@ -665,7 +680,7 @@ export function PetCharacter({
       <span className="pet-atlas-sprite" aria-hidden="true">
         {visualStyle === "atlas" && (
           <PetAtlasCanvas
-            src={atlasUrl}
+            sources={atlasSources}
             animation={atlasAnimation}
             onStep={handleAtlasStep}
             onReady={handleAtlasReady}

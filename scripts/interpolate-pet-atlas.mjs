@@ -443,33 +443,41 @@ const blend = (
 for (let row = 0; row < rows; row += 1) {
   const cells = Array.from({ length: columns }, (_, column) => readCell(column, row));
   let outputColumn = 0;
-  for (let column = 0; column < columns; column += 1) {
-    putCell(cells[column], outputColumn++, row);
-    if (column === columns - 1) continue;
-    const bodyMaskA = bodyMask(cells[column]);
-    const bodyMaskB = bodyMask(cells[column + 1]);
+  // Feed the rendered endpoint of one transition into the next transition.
+  // The SDF edge intentionally has a small antialias envelope; if the next
+  // segment started from the untouched source raster, the last generated
+  // frame and the next key pose could still differ by an edge-sized jump.
+  // Chaining the endpoint keeps the temporal path C0-continuous while
+  // retaining the authored pose as the target of each segment.
+  let fromCell = cells[0];
+  putCell(fromCell, outputColumn++, row);
+  for (let column = 0; column < columns - 1; column += 1) {
+    const toCell = cells[column + 1];
+    const bodyMaskA = bodyMask(fromCell);
+    const bodyMaskB = bodyMask(toCell);
     const propMaskA = new Uint8Array(sourceCell.length / 4);
     const propMaskB = new Uint8Array(sourceCell.length / 4);
     for (let pixel = 0; pixel < propMaskA.length; pixel += 1) {
-      if (cells[column][pixel * 4 + 3] > 20 && !bodyMaskA[pixel]) propMaskA[pixel] = 1;
-      if (cells[column + 1][pixel * 4 + 3] > 20 && !bodyMaskB[pixel]) propMaskB[pixel] = 1;
+      if (fromCell[pixel * 4 + 3] > 20 && !bodyMaskA[pixel]) propMaskA[pixel] = 1;
+      if (toCell[pixel * 4 + 3] > 20 && !bodyMaskB[pixel]) propMaskB[pixel] = 1;
     }
-    const bodySdfA = distanceField(cells[column], bodyMaskA);
-    const bodySdfB = distanceField(cells[column + 1], bodyMaskB);
-    const propSdfA = distanceField(cells[column], propMaskA);
-    const propSdfB = distanceField(cells[column + 1], propMaskB);
-    const anchorA = maskAnchor(cells[column], bodyMaskA);
-    const anchorB = maskAnchor(cells[column + 1], bodyMaskB);
-    const propAnchorA = maskAnchor(cells[column], propMaskA);
-    const propAnchorB = maskAnchor(cells[column + 1], propMaskB);
+    const bodySdfA = distanceField(fromCell, bodyMaskA);
+    const bodySdfB = distanceField(toCell, bodyMaskB);
+    const propSdfA = distanceField(fromCell, propMaskA);
+    const propSdfB = distanceField(toCell, propMaskB);
+    const anchorA = maskAnchor(fromCell, bodyMaskA);
+    const anchorB = maskAnchor(toCell, bodyMaskB);
+    const propAnchorA = maskAnchor(fromCell, propMaskA);
+    const propAnchorB = maskAnchor(toCell, propMaskB);
+    let endpoint = fromCell;
     for (let step = 1; step <= steps; step += 1) {
       // Smoothstep avoids a linear “double exposure” peak at the centre.
       const linear = step / (steps + 1);
       const t = linear * linear * (3 - 2 * linear);
       putCell(
         blend(
-          cells[column],
-          cells[column + 1],
+          fromCell,
+          toCell,
           t,
           bodySdfA,
           bodySdfB,
@@ -493,6 +501,28 @@ for (let row = 0; row < rows; row += 1) {
         row,
       );
     }
+    // Render the endpoint with the exact same contour path used by the
+    // in-betweens. This avoids a hard raster cut at the authored key pose.
+    endpoint = blend(
+      fromCell,
+      toCell,
+      1,
+      bodySdfA,
+      bodySdfB,
+      propSdfA,
+      propSdfB,
+      bodyMaskA,
+      bodyMaskB,
+      propMaskA,
+      propMaskB,
+      anchorA,
+      anchorB,
+      propAnchorA,
+      propAnchorB,
+      Math.hypot(anchorB.x - anchorA.x, anchorB.y - anchorA.y) > 44,
+    );
+    putCell(endpoint, outputColumn++, row);
+    fromCell = endpoint;
   }
 }
 

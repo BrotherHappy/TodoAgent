@@ -1,25 +1,71 @@
 import type { PetAction } from "./pet-behavior";
 import atlasUrl from "../assets/todo-pet-action-atlas-v2.png";
-import motionAtlasUrl from "../assets/todo-pet-motion-atlas-v21.png";
-import interactionAtlasUrl from "../assets/todo-pet-interaction-atlas-v19.png";
+import motionAtlasPage00 from "../assets/todo-pet-motion-atlas-v22-00.png";
+import motionAtlasPage01 from "../assets/todo-pet-motion-atlas-v22-01.png";
+import motionAtlasPage02 from "../assets/todo-pet-motion-atlas-v22-02.png";
+import motionAtlasPage03 from "../assets/todo-pet-motion-atlas-v22-03.png";
+import motionAtlasPage04 from "../assets/todo-pet-motion-atlas-v22-04.png";
+import motionAtlasPage05 from "../assets/todo-pet-motion-atlas-v22-05.png";
+import motionAtlasPage06 from "../assets/todo-pet-motion-atlas-v22-06.png";
+import motionAtlasPage07 from "../assets/todo-pet-motion-atlas-v22-07.png";
+import motionAtlasPage08 from "../assets/todo-pet-motion-atlas-v22-08.png";
+import motionAtlasPage09 from "../assets/todo-pet-motion-atlas-v22-09.png";
+import interactionAtlasPage00 from "../assets/todo-pet-interaction-atlas-v20-00.png";
+import interactionAtlasPage01 from "../assets/todo-pet-interaction-atlas-v20-01.png";
+import interactionAtlasPage02 from "../assets/todo-pet-interaction-atlas-v20-02.png";
+import interactionAtlasPage03 from "../assets/todo-pet-interaction-atlas-v20-03.png";
+import interactionAtlasPage04 from "../assets/todo-pet-interaction-atlas-v20-04.png";
+import interactionAtlasPage05 from "../assets/todo-pet-interaction-atlas-v20-05.png";
+import interactionAtlasPage06 from "../assets/todo-pet-interaction-atlas-v20-06.png";
+import interactionAtlasPage07 from "../assets/todo-pet-interaction-atlas-v20-07.png";
+import interactionAtlasPage08 from "../assets/todo-pet-interaction-atlas-v20-08.png";
+import interactionAtlasPage09 from "../assets/todo-pet-interaction-atlas-v20-09.png";
+import interactionAtlasPage10 from "../assets/todo-pet-interaction-atlas-v20-10.png";
+import interactionAtlasPage11 from "../assets/todo-pet-interaction-atlas-v20-11.png";
+import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v20-12.png";
 
 /**
  * The generated atlases are deterministic visual layers. The legacy sheet
  * remains a 4×4 grid for one-off fallback poses. The high-density motion and
- * interaction sheets keep their 577/769 logical frames, but are paged into a
- * 16-column grid and stacked vertically. Cells are authored at 128px and
- * rendered into the device-pixel canvas, keeping each decoded texture at
- * 2048px wide while leaving 63 complete poses between every authored key
- * pose. The v21/v19 interpolation pass cross-fades the stable body colour at
- * one shared coordinate while keeping detached props on a single source
- * raster; this avoids a hard midpoint hand/face switch that can read as
- * tearing on a 60Hz desktop. All cells share a stable body baseline, and the
- * page mapping is kept here instead of in CSS so the Canvas renderer cannot
- * clip a neighboring cell.
+ * interaction sheets keep their 577/769 logical frames, but are split into
+ * square 16×16-cell GPU pages. The previous v21/v19 files were only 2,048px
+ * wide; their 18,944/25,088px height still exceeded WebKit's common
+ * 16,384px texture limit and could make the compositor tear while sampling a
+ * new cell. Every v22/v20 page is 2,048×2,048px (the final page is padded
+ * transparent), so no hidden driver tiling is needed. Cells are authored at
+ * 128px and retain the v21/v19 body/prop interpolation pass.
  */
 export const TODO_PET_ATLAS_URL = atlasUrl;
-export const TODO_PET_MOTION_ATLAS_URL = motionAtlasUrl;
-export const TODO_PET_INTERACTION_ATLAS_URL = interactionAtlasUrl;
+export const TODO_PET_MOTION_ATLAS_URLS = [
+  motionAtlasPage00,
+  motionAtlasPage01,
+  motionAtlasPage02,
+  motionAtlasPage03,
+  motionAtlasPage04,
+  motionAtlasPage05,
+  motionAtlasPage06,
+  motionAtlasPage07,
+  motionAtlasPage08,
+  motionAtlasPage09,
+] as const;
+export const TODO_PET_INTERACTION_ATLAS_URLS = [
+  interactionAtlasPage00,
+  interactionAtlasPage01,
+  interactionAtlasPage02,
+  interactionAtlasPage03,
+  interactionAtlasPage04,
+  interactionAtlasPage05,
+  interactionAtlasPage06,
+  interactionAtlasPage07,
+  interactionAtlasPage08,
+  interactionAtlasPage09,
+  interactionAtlasPage10,
+  interactionAtlasPage11,
+  interactionAtlasPage12,
+] as const;
+/** Backwards-compatible first-page aliases for diagnostics and integrations. */
+export const TODO_PET_MOTION_ATLAS_URL = TODO_PET_MOTION_ATLAS_URLS[0];
+export const TODO_PET_INTERACTION_ATLAS_URL = TODO_PET_INTERACTION_ATLAS_URLS[0];
 export const TODO_PET_ATLAS_COLUMNS = 4;
 export const TODO_PET_ATLAS_ROWS = 4;
 export const TODO_PET_MOTION_SOURCE_COLUMNS = 577;
@@ -27,18 +73,20 @@ export const TODO_PET_MOTION_SOURCE_ROWS = 4;
 export const TODO_PET_INTERACTION_SOURCE_COLUMNS = 769;
 export const TODO_PET_INTERACTION_SOURCE_ROWS = 4;
 export const TODO_PET_ATLAS_PAGE_COLUMNS = 16;
+/** Runtime page geometry. Each image stays safely below GPU texture limits. */
+export const TODO_PET_ATLAS_PAGE_ROWS = 16;
+export const TODO_PET_ATLAS_PAGE_SIZE = TODO_PET_ATLAS_PAGE_COLUMNS * TODO_PET_ATLAS_PAGE_ROWS;
 export const TODO_PET_MOTION_PAGE_COUNT = Math.ceil(
-  TODO_PET_MOTION_SOURCE_COLUMNS / TODO_PET_ATLAS_PAGE_COLUMNS,
+  TODO_PET_MOTION_SOURCE_COLUMNS * TODO_PET_MOTION_SOURCE_ROWS / TODO_PET_ATLAS_PAGE_SIZE,
 );
 export const TODO_PET_INTERACTION_PAGE_COUNT = Math.ceil(
-  TODO_PET_INTERACTION_SOURCE_COLUMNS / TODO_PET_ATLAS_PAGE_COLUMNS,
+  TODO_PET_INTERACTION_SOURCE_COLUMNS * TODO_PET_INTERACTION_SOURCE_ROWS / TODO_PET_ATLAS_PAGE_SIZE,
 );
-/** Runtime columns/rows of the vertically paged motion sheet. */
+/** Runtime columns/rows inside each bounded page image. */
 export const TODO_PET_MOTION_COLUMNS = TODO_PET_ATLAS_PAGE_COLUMNS;
-export const TODO_PET_MOTION_ROWS = TODO_PET_MOTION_SOURCE_ROWS * TODO_PET_MOTION_PAGE_COUNT;
-/** Runtime columns/rows of the vertically paged interaction sheet. */
+export const TODO_PET_MOTION_ROWS = TODO_PET_ATLAS_PAGE_ROWS;
 export const TODO_PET_INTERACTION_COLUMNS = TODO_PET_ATLAS_PAGE_COLUMNS;
-export const TODO_PET_INTERACTION_ROWS = TODO_PET_INTERACTION_SOURCE_ROWS * TODO_PET_INTERACTION_PAGE_COUNT;
+export const TODO_PET_INTERACTION_ROWS = TODO_PET_ATLAS_PAGE_ROWS;
 /** Number of offline in-between cells inserted between authored poses. */
 export const TODO_PET_INTERPOLATION_STEPS = 63;
 
@@ -288,9 +336,10 @@ const sequence = (
 // The source sheets contain complete poses rather than separated limbs. Sixty-
 // three offline contour in-betweens per authored source cell turn even the
 // larger hop/rope displacement into small, coherent steps. Fast loops use an
-// 8ms target: the renderer adapts that to the observed 60/90/120Hz display
-// cadence, so a high-refresh Mac does not present a stale cell twice.
-const fastFrameMs = 8;
+// 18ms target: a 60Hz display advances at most one generated cell per refresh
+// while the renderer keeps a fractional playhead. The previous 12ms target
+// could advance 1.4 cells and made a busy compositor read like a flipbook.
+const fastFrameMs = 18;
 const idleLoop = motion("idle-breathe-blink", 0, fastFrameMs);
 const waveLoop = motion("wave", 1, fastFrameMs);
 const workLoop = motion("focus-work", 2, fastFrameMs);
@@ -392,9 +441,16 @@ export function petAtlasAnimationForAction(action: PetAction): PetAtlasAnimation
 }
 
 export function petAtlasUrlForSheet(sheet: PetAtlasSheet): string {
-  if (sheet === "motion") return TODO_PET_MOTION_ATLAS_URL;
-  if (sheet === "interaction") return TODO_PET_INTERACTION_ATLAS_URL;
+  if (sheet === "motion") return TODO_PET_MOTION_ATLAS_URLS[0];
+  if (sheet === "interaction") return TODO_PET_INTERACTION_ATLAS_URLS[0];
   return TODO_PET_ATLAS_URL;
+}
+
+/** Return the bounded runtime pages for a generated sheet. */
+export function petAtlasUrlsForSheet(sheet: PetAtlasSheet): readonly string[] {
+  if (sheet === "motion") return TODO_PET_MOTION_ATLAS_URLS;
+  if (sheet === "interaction") return TODO_PET_INTERACTION_ATLAS_URLS;
+  return [TODO_PET_ATLAS_URL];
 }
 
 export function petAtlasFrameFromIndex(

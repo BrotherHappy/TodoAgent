@@ -320,6 +320,10 @@ v2.77 播放时钟与身体撕裂修复（2026-08-30）：图集更新为 v18/v1
 
 > v2.81 单一动画时钟修复（2026-08-30）：发现图集 Canvas 仍被旧版 `pet-atlas-breathe`、`pet-atlas-wave`、`pet-atlas-jump-rope` 等整宠物 CSS 动画再次平移/旋转；这会让图集播放头与 CSS 时间轴互相叠加，造成“动作跳来跳去”。本轮仅对 Atlas 缓冲 Canvas 关闭这些整宠物 CSS choreography，SVG 后备层的交互特效不变；角色位移、呼吸和道具动作统一由同一图集时间轴驱动，并新增 E2E 断言确保 Canvas 的 `animationName` 与 `transform` 均为 `none`。
 
+> v2.82 GPU 页面与分数节拍修复（2026-08-30）：v21/v19 虽然把纹理宽度限制在 2048px，但高度仍超过 WebKit 常见的 16,384px `MAX_TEXTURE_SIZE`，在部分 macOS 上会被驱动隐式切片而出现撕裂。新增 `scripts/split-pet-atlas-pages.mjs`，将运行时图集拆为 23 个 2048×2048 页面；`PetAtlasCanvas` 按全局帧索引选择页面，并提前预加载后续两页。快动作目标节拍调整为 12ms，分数播放头在 60Hz 上保留中间帧，不再整格跳过。页面尺寸、页数与交互 E2E 回归通过。
+
+> v2.83 刷新节拍与动作交接修复（2026-08-30）：快动作目标节拍收敛到 18ms，每次 rAF 最多推进 1 个插帧，小数播放头继续用于相邻姿态合成；动作切换不再同步执行 `getImageData`/`putImageData`，而是将上一张已显示画布直接 GPU 复制到隐藏缓冲并做五个显示节拍的交接。这样忙碌时不会追帧跨格，切换也不会因 GPU 读回阻塞而出现低帧撕裂。源码和安装版连续采样均为 `maxStepDelta=1`，安装冒烟与宠物互动 E2E 通过。
+
 ```bash
 npm run typecheck
 npm test

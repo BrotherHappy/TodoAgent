@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   TODO_PET_ATLAS_PAGE_COLUMNS,
+  TODO_PET_ATLAS_PAGE_ROWS,
+  TODO_PET_ATLAS_PAGE_SIZE,
   TODO_PET_INTERACTION_COLUMNS,
   TODO_PET_INTERACTION_PAGE_COUNT,
   TODO_PET_INTERACTION_ROWS,
@@ -24,18 +26,33 @@ describe("Todo Pet generated action atlas", () => {
   };
 
   it("keeps runtime grid metadata aligned with the PNG dimensions", () => {
-    const motion = pngSize("todo-pet-motion-atlas-v21.png");
-    const interaction = pngSize("todo-pet-interaction-atlas-v19.png");
-    expect(motion.width).toBe(TODO_PET_MOTION_COLUMNS * 128);
-    expect(motion.height).toBe(TODO_PET_MOTION_ROWS * 128);
-    expect(interaction.width).toBe(TODO_PET_INTERACTION_COLUMNS * 128);
-    expect(interaction.height).toBe(TODO_PET_INTERACTION_ROWS * 128);
-    expect(motion.width).toBeLessThanOrEqual(4096);
-    expect(interaction.width).toBeLessThanOrEqual(4096);
+    const motionPages = Array.from({ length: TODO_PET_MOTION_PAGE_COUNT }, (_, page) =>
+      pngSize(`todo-pet-motion-atlas-v22-${String(page).padStart(2, "0")}.png`),
+    );
+    const interactionPages = Array.from({ length: TODO_PET_INTERACTION_PAGE_COUNT }, (_, page) =>
+      pngSize(`todo-pet-interaction-atlas-v20-${String(page).padStart(2, "0")}.png`),
+    );
+    for (const page of motionPages) {
+      expect(page.width).toBe(TODO_PET_MOTION_COLUMNS * 128);
+      expect(page.height).toBe(TODO_PET_MOTION_ROWS * 128);
+      expect(page.width).toBeLessThanOrEqual(4096);
+      expect(page.height).toBeLessThanOrEqual(4096);
+    }
+    for (const page of interactionPages) {
+      expect(page.width).toBe(TODO_PET_INTERACTION_COLUMNS * 128);
+      expect(page.height).toBe(TODO_PET_INTERACTION_ROWS * 128);
+      expect(page.width).toBeLessThanOrEqual(4096);
+      expect(page.height).toBeLessThanOrEqual(4096);
+    }
     expect(TODO_PET_MOTION_COLUMNS).toBe(TODO_PET_ATLAS_PAGE_COLUMNS);
     expect(TODO_PET_INTERACTION_COLUMNS).toBe(TODO_PET_ATLAS_PAGE_COLUMNS);
-    expect(TODO_PET_MOTION_ROWS).toBe(4 * TODO_PET_MOTION_PAGE_COUNT);
-    expect(TODO_PET_INTERACTION_ROWS).toBe(4 * TODO_PET_INTERACTION_PAGE_COUNT);
+    expect(TODO_PET_MOTION_ROWS).toBe(TODO_PET_ATLAS_PAGE_ROWS);
+    expect(TODO_PET_INTERACTION_ROWS).toBe(TODO_PET_ATLAS_PAGE_ROWS);
+    expect(TODO_PET_ATLAS_PAGE_SIZE).toBe(
+      TODO_PET_ATLAS_PAGE_COLUMNS * TODO_PET_ATLAS_PAGE_ROWS,
+    );
+    expect(TODO_PET_MOTION_PAGE_COUNT).toBe(10);
+    expect(TODO_PET_INTERACTION_PAGE_COUNT).toBe(13);
     expect(TODO_PET_MOTION_SOURCE_COLUMNS).toBe(577);
     expect(TODO_PET_INTERACTION_SOURCE_COLUMNS).toBe(769);
   });
@@ -78,9 +95,12 @@ describe("Todo Pet generated action atlas", () => {
       expect(animation.sheet).toBe(sheet);
       expect(animation.frames).toHaveLength(frameCount);
       expect(animation.columns).toBe(TODO_PET_ATLAS_PAGE_COLUMNS);
-      expect(animation.rows).toBe(sheet === "motion" ? TODO_PET_MOTION_ROWS : TODO_PET_INTERACTION_ROWS);
+      expect(animation.rows).toBe(TODO_PET_ATLAS_PAGE_ROWS);
       expect(animation.loop).toBe(true);
-      expect(animation.frameDurationMs).toBeGreaterThanOrEqual(8);
+      // Keep the fast timeline at or above one display beat on a 60Hz panel.
+      // A shorter target makes the rAF playhead skip generated in-betweens and
+      // is perceptible as a low-frame-rate tear even with a dense atlas.
+      expect(animation.frameDurationMs).toBeGreaterThanOrEqual(16);
     }
   });
 
