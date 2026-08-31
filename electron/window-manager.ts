@@ -444,7 +444,12 @@ export class WindowManager {
       },
       display.workArea,
     );
-    window.setBounds(next, true);
+    // The renderer owns the bubble enter/exit transition. Animating the
+    // transparent native window as well moves the pet's screen coordinate
+    // during the same 200ms, which reads as a teleport and can expose two
+    // compositor snapshots on an always-on-top surface. Resize in one native
+    // commit; the pet remains anchored while the bubble animates in place.
+    window.setBounds(next, false);
     this.#keepFloatingOnTop(window);
   }
 
@@ -471,7 +476,10 @@ export class WindowManager {
       { ...size, x: current.x, y: current.y },
       display.workArea,
     );
-    window.setBounds(next, true);
+    // Keep the native frame stationary while the renderer collapses the task
+    // rail. A second native resize animation makes the pet drift underneath
+    // its own speech bubble and is the main source of the perceived jump.
+    window.setBounds(next, false);
     this.#keepFloatingOnTop(window);
   }
 
