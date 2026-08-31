@@ -17377,7 +17377,6 @@ function FloatingPetCoopGame({
   const [stageAction, setStageAction] = useState<PetAction>(
     game === "jump-rope" ? "jump-rope-ready" : "stretch",
   );
-  const [motionBeat, setMotionBeat] = useState(0);
   const [stageFeedback, setStageFeedback] = useState("看准绳子");
   onCompleteRef.current = onComplete;
   onActionRef.current = onAction;
@@ -17433,7 +17432,6 @@ function FloatingPetCoopGame({
     }
     setStageAction(action);
     setStageFeedback(feedback);
-    setMotionBeat((value) => value + 1);
     motionTimerRef.current = window.setTimeout(() => {
       setStageAction(game === "jump-rope" ? "jump-rope-ready" : "stretch");
       setStageFeedback(game === "jump-rope" ? "看准绳子" : "慢慢跟上就好");
@@ -17498,7 +17496,6 @@ function FloatingPetCoopGame({
     setIsJumpPaused(false);
     setStageAction("jump-rope-ready");
     setStageFeedback("看准绳子");
-    setMotionBeat((value) => value + 1);
   };
   const gameControls = (
     <div className="pet-game-header-actions">
@@ -17548,7 +17545,7 @@ function FloatingPetCoopGame({
           ))}
         </div>
         <div className="pet-stretch-mirror">
-          <div className="pet-game-character" key={`${motionBeat}-${stageAction}`}>
+          <div className="pet-game-character">
             <PetCharacter
               mood="idle"
               action={stageAction}
@@ -17657,7 +17654,7 @@ function FloatingPetCoopGame({
         {gameControls}
       </header>
       <div className={`pet-rope-stage ${ropeWindowOpen ? "is-jump-window" : ""}`}>
-        <div className="pet-game-character" key={`${motionBeat}-${stageAction}`}>
+        <div className="pet-game-character">
           <PetCharacter
             mood="idle"
             action={stageAction}

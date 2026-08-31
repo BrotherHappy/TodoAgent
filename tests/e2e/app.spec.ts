@@ -1141,7 +1141,47 @@ test.describe("Todo Agent desktop shell", () => {
     const patStepDeltas = patStepSamples
       .slice(1)
       .map((step, index) => Math.abs(step - (patStepSamples[index] ?? step)));
-    expect(Math.max(...patStepDeltas, 0)).toBeLessThanOrEqual(1);
+    // The atlas playhead is time-accurate: a 60Hz display advances about two
+    // authored 8ms cells per refresh and blends those adjacent cells. A
+    // single compositor commit may therefore move by up to three source
+    // indices, but it must never leap over an entire authored pose.
+    expect(Math.max(...patStepDeltas, 0)).toBeLessThanOrEqual(3);
+    const patCanvasHealth = await floating.evaluate(async () => {
+      const root = document.querySelector<HTMLElement>('.pet-character[data-pet-action="pet"]');
+      const stack = root?.querySelector<HTMLElement>(".pet-atlas-buffer-stack");
+      if (!stack) return { blankFrames: 1, samples: 0 };
+      const samples: number[] = [];
+      const started = performance.now();
+      await new Promise<void>((resolve) => {
+        const sample = (now: number): void => {
+          const active = stack.dataset.activeBuffer === "1" ? 1 : 0;
+          const canvas = stack.querySelector<HTMLCanvasElement>(`.pet-atlas-buffer-${active}`);
+          const context = canvas?.getContext("2d");
+          if (canvas && context && canvas.width > 0 && canvas.height > 0) {
+            const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+            let alphaPixels = 0;
+            for (let index = 3; index < pixels.length; index += 4) {
+              if ((pixels[index] ?? 0) > 8) alphaPixels += 1;
+            }
+            samples.push(alphaPixels);
+          } else {
+            samples.push(0);
+          }
+          if (now - started >= 240) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      return {
+        blankFrames: samples.filter((count) => count === 0).length,
+        samples: samples.length,
+      };
+    });
+    expect(patCanvasHealth.samples).toBeGreaterThan(4);
+    expect(patCanvasHealth.blankFrames).toBe(0);
     expect(
       await pattedPet.locator(".pet-pat-hand").evaluate((element) =>
         getComputedStyle(element).animationName,
@@ -1179,9 +1219,25 @@ test.describe("Todo Agent desktop shell", () => {
     await floating.getByRole("menuitem", { name: "开始镜像伸展" }).click();
     const stretch = floating.getByRole("region", { name: "镜像伸展小游戏" });
     await expect(stretch).toBeVisible();
-    await expect(stretch.locator(".pet-game-character .pet-character")).toBeVisible();
+    const stretchPet = stretch.locator(".pet-game-character .pet-character");
+    await expect(stretchPet).toBeVisible();
+    // Stage actions should hand off on the same mounted pet. A remount resets
+    // the atlas timeline and replays the entrance animation, which reads as a
+    // visible jump even when the source frames themselves are smooth.
+    await stretchPet.evaluate((element) => {
+      element.setAttribute("data-todo-pet-stable-node", "true");
+    });
     await floating.screenshot({ path: testInfo.outputPath("pet-stretch-mirror.png") });
     await stretch.getByRole("button", { name: "我跟上了" }).click();
+    await expect
+      .poll(async () =>
+        stretch.evaluate(() => {
+          return document.querySelector(
+            '.pet-game-character .pet-character[data-todo-pet-stable-node="true"]',
+          ) !== null;
+        }),
+      )
+      .toBe(true);
     await stretch.getByRole("button", { name: "我跟上了" }).click();
     await stretch.getByRole("button", { name: "我跟上了" }).click();
     await stretch.getByRole("button", { name: "一起完成" }).click();
