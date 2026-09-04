@@ -1,186 +1,303 @@
-# Todo Agent
+<h1 align="center">ToDoAgent</h1>
 
-Todo Pet 还提供可选的“休假模式”：保留宠物、任务、同步和手动互动，暂停主动陪伴、工作时回应与自动日记，不用靠连续签到维持关系。
+<p align="center">
+  <a href="https://todoagent-showcase.brotherhappy.chatgpt.site/">
+    <img src="./docs/readme/hero.png" width="100%" alt="ToDoAgent：让每个想法，都有下一步" />
+  </a>
+</p>
 
-快速录入成功后会在本机保留最多 12 条最近捕获，宠物右键菜单可直接打开并回用；历史可随时清空，未确认的上下文不会被保存。桌面任务列表在 Today、暂存和全部任务中还提供一行式快速捕获，回车即可创建本地任务，Today 会自动放入当天私人计划，成功后继续保持输入焦点；搜索、筛选、飞书来源或批量选择时会隐藏它，避免创建后不在当前投影中。快速录入和 Todo Pet 小窗中的剪贴板、当前窗口、选中文本和文本/链接拖入预览还可手动保存为“最近上下文”，同样只保留在本机，支持回用与清空。
+<p align="center">
+  <strong>它不是催你打勾的清单，而是把“我该做什么”翻译成“下一步现在就能做”的桌面伙伴。</strong>
+</p>
 
-Agent 能力在“设置 → 权限中心”分成五层：任务读写、飞书同步、网页研究、文件与终端、剪贴板与屏幕。每层都能独立关闭；关闭后对应工具不会出现在下一次模型运行中，飞书关闭时也不会降级为本地写入。主 Agent、晨间简报、当前任务气泡和专注气泡都支持手动“朗读/停止朗读”，完成的 Agent 回复还可以显式保存到“最近上下文”供快速捕获、主 Agent 和宠物回用，复制原始 Markdown，提取行动项后逐项确认创建本地任务；在任务页选中任务时，还可以把回复整理成可编辑的私人研究卡再保存到当前任务，展开后可按 Markdown 阅读标题、表格、代码和安全来源链接，研究卡行动项还可逐条显式创建带来源说明的本地任务。流式回复不会保存、复制、提取或保存研究卡，任务轮播或摘要刷新会停止旧文本，隐私模式不读任务标题，不自动播放、不上传、不保存音频。
+<p align="center">
+  本地优先的个人执行工作台，把任务、时间、飞书、可控 Agent 和一只有生命力的 Todo Pet 放进同一条工作流。<br />
+  <sub>Local-first execution workspace with planning, Feishu sync, a permissioned AI agent and a living desktop companion.</sub>
+</p>
 
-> 住在桌面上的本地优先任务伙伴，适用于 macOS 和 Windows。
+<p align="center">
+  <a href="https://github.com/BrotherHappy/TodoAgent/releases/tag/v0.0.1"><img alt="Preview v0.0.1" src="https://img.shields.io/badge/preview-v0.0.1-6C63FF?style=flat-square" /></a>
+  <img alt="macOS and Windows" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-171717?style=flat-square" />
+  <img alt="Local first" src="https://img.shields.io/badge/data-local--first-2F9E7D?style=flat-square" />
+  <img alt="Feishu Task sync" src="https://img.shields.io/badge/Feishu-Task%20sync-3370FF?style=flat-square" />
+  <img alt="Tests" src="https://img.shields.io/badge/tests-1%2C212%20passed-48BB78?style=flat-square" />
+</p>
 
-Todo Agent 用常驻桌面的 Todo Pet 替代传统悬浮球和胶囊：它轮播今天的任务，也能展开为任务面板、番茄钟、流式 Agent 对话和小窝。当前默认使用 DesktopBuddy 的五个原版 Live2D 伙伴：Wanko、Hiyori、Rice、Mark、Haru。模型连续播放呼吸、眼神和原版动作，触摸、任务与 Agent 状态切换不重建角色；拖动松手有惯性、重力弹跳和边缘弹簧吸附。原有 GPT Image 图集仅保留为历史/降级实现，不再以增加离散播放格数代替真实连续模型动画。没有账号、网络或模型时，本地任务、专注、提醒、成长与日记依然可用。
+<p align="center">
+  <a href="https://todoagent-showcase.brotherhappy.chatgpt.site/"><strong>在线体验</strong></a>
+  ·
+  <a href="https://todoagent-showcase.brotherhappy.chatgpt.site/#film"><strong>观看宣传片</strong></a>
+  ·
+  <a href="https://github.com/BrotherHappy/TodoAgent/releases/tag/v0.0.1"><strong>下载预览版</strong></a>
+  ·
+  <a href="./docs/PRODUCT_GUIDE.md"><strong>完整功能手册</strong></a>
+</p>
 
-参考 `rullerzhou-afk/clawd-on-desk` 的桌面 Agent 观察体验，Todo Pet 还提供可选的本机活动桥接：Claude Code、Codex CLI、Copilot、Gemini、Cursor、OpenClaw、Hermes、opencode、MiMo、Qoder、Qwen、TraeCode 等外部 Agent 可以把思考、工具执行、并行子任务、等待确认和错误状态投影到宠物及“动态”页。桥接只监听 `127.0.0.1`，使用 Token 和允许列表保护，不读取提示词、工具参数或文件内容；外部 Agent 的模型、订阅和权限仍由其自身负责。设置与接入示例见 [clawd-on-desk 能力融合说明](./docs/CLAWD_INTEGRATION.md)。
+> [!NOTE]
+> 没有账号、网络或模型，ToDoAgent 的本地任务、规划、专注、提醒、成长和日记仍然可用。飞书与模型都是可选增强，不是启动门槛。
 
-时间线的甘特路线支持 2 周、4 周和 12 周三档时间窗；切换后会在本机记住选择，长时间窗保持可横向滚动，不会改动任务日期、时间块或飞书字段。
+## 先看它怎样工作
 
-![DesktopBuddy 原版伙伴与连续动画设置](./docs/screenshots/desktopbuddy-gallery.png)
+<p align="center">
+  <a href="https://todoagent-showcase.brotherhappy.chatgpt.site/#film">
+    <img src="./docs/readme/video-cover.jpg" width="100%" alt="ToDoAgent 1080p 中文宣传片封面" />
+  </a>
+</p>
 
-## 为什么是 Todo Pet
+<p align="center">
+  <a href="https://todoagent-showcase.brotherhappy.chatgpt.site/#film">▶ 打开 1080p 中文宣传片：真实客户端画面、真实模型运行、默认中文字幕</a>
+</p>
 
-- **随时看见下一步**：宠物与任务气泡始终置顶，今日任务自动上下轮播，鼠标停留时暂停；天气开启后，紧凑桌面形态还会显示可点击的温度/状况/降水胶囊（隐私模式隐藏城市，严重或缓存天气会明确标记），完整小窝天气卡还会展示真实的今天/明天/后天预报，宠物本体也会用固定雨伞、雪花或雷云闪电表达已知天气；主动提醒会从真实任务中挑出一项可执行下一步，解释截止、Today、优先级或短任务原因，并提供“开始专注 / 查看任务”；小窝回顾可主动进入逐项处理会话，设置可调整四项本地权重。
-- **宠物真的活着**：默认使用五个原版 Live2D 伙伴，持续呼吸、眼神跟随和触摸反馈；各角色动作以专属互动入口为准，不把原版未提供的动作冒充新肢体动画；小窝可选择温柔、元气、冷静、活泼、轻微淘气或安静六种陪伴性格，动作节奏会随性格变化；还可邀请最多 3 个只存在于小窝的纸飞机、云团、苔苔或月蛾伙伴，分别调整节奏并随宠物档案迁移，点击伙伴会触发问候动作和本地短句；完成任务后，小窝会从真实完成事实投影“共同完成印章”，今天的印章突出显示，点击可回到原任务；小房间的云灯、植物和任务书架可以直接拖动或用方向键微调位置、用滑杆调整大小，旧宠物档案会自动使用平衡的默认布局；小窝还提供明亮日光、柔和灯光和月光夜色三种纯本地氛围，开启季节小事件后房间会出现春花、微风、落叶或雪花的轻量装饰，以及四颜色值和可选本地图片组成的安全主题包编辑器（图片限 512 KB 的 PNG/JPEG/WebP），主题可以导出为可读 JSON、从本地 JSON 导入并在安装前预览，不改变任务或提醒规则；动作包还可设置 8–60 秒冷却和每个动作 1–5 的出现频率，让陪伴节奏更安静或更活泼。
-- **不离开当前工作**：可只保留宠物本体；点击宠物旁箭头可收回或恢复“全部、今天、专注、聊聊、小窝”任务栏，悬停展开和离开收起仍可用，最后入口与仅宠物模式都会被记住；右键菜单还支持“边缘收纳”：宠物会像 mini mode 一样滑到屏幕边缘只露出一小截，鼠标移入自动探头，移开后再收回；外部 Agent 出错或等待确认时会短暂探头提示，普通工作不会打扰桌面；“全部”任务面板还可选择主窗口已保存的智能视图，快速查看某个项目、标签、情境或日期范围；右键菜单和托盘都提供可恢复的 Boss Mode，演示或会议时一键隐藏宠物并暂停宠物主动消息；主窗口支持 `⌘/Ctrl+K` 命令面板，把搜索、快速捕获、规划、Agent、同步和设置集中在一个键盘入口；按 `?` 或点击标题栏键盘按钮可打开可搜索的桌面快捷键说明，帮助发现 ↑↓ / J K、E、X、Shift 点击范围、⌘/Ctrl 点击不连续选择、`,` 和 Esc 等连续处理路径。
-- **温和推动执行**：支持 25/5、50/10、90/20、正计时、暂停恢复、休息与重启恢复；完成任务和专注会形成正向成长，不因逾期或中断惩罚；可选“专注守护”只读取前台应用名，匹配后温和提醒或暂停本次专注，不读取窗口内容、不关闭或阻挡其他应用；小窝的“今晚回顾”可在仍有待处理事项时一键打开“安排明天”，仍需确认后才写入私人计划；提醒设置支持按住 Cmd/Ctrl 多选项目，一次应用项目级提醒策略，未选项目不受影响。
-- **一起排今天**：无需配置模型，按截止风险、优先级、依赖关系和可用时间生成可解释建议；可设置可用起止时段、任务间缓冲和最小连续工作块，自动建议会避开无效窗口和过短任务但允许手动加入；Today 默认排序可用任务行六点拖放，也保留键盘上移/下移，拖放只更新私人顺序并可一次撤销；时间线可导入多个本地 `.ics` 来源，当天议程只读显示会议，来源可以分别显示/隐藏、稳定着色并手工调整颜色，也可以在确认后单独清除某个来源并撤销恢复；半小时日时间线会直接标出会议忙碌区，并在今天的工作时段显示“现在”指示线和一键回到当前位置，规划会扣除并避开这些时段，不写回外部日历；每张会议卡可打开预填的“会后跟进”本地任务编辑器，也可从会议备注提取“行动项 / 待办 / 下一步”并在批量创建前逐项勾选、改名和预览，用户确认后才保存为本地任务；确认前会显示只读时间块预览，保留已有时间块并标出冲突/放不下的任务；今天装不下时还会预览未来 5 个工作日的顺延候选，明确周末、截止日和无容量原因，不自动改期；晨间简报还提供“只剩 2 小时？”替代方案、对较早日期未完成的私人 Today 计划提供最多 3 项“安排今天”建议，以及可跳过的“三步开始今天”（选最多 3 项、设定容量、选择先专注或先看规划），确认后原子更新私人 Today 计划，可一次撤销，再直接开始第一项；侧栏时间线支持半小时日视图、周概览、工作周期与容量预测、项目看板、只读 14 日甘特路线、每周回顾和“预计 vs 实际”的估时复盘。甘特按项目展示任务跨度、进度与依赖阻塞，并从依赖最长链标出关键路线，同时提供可点击的“前置 → 中段 → 终点”链摘要；点击可回到任务，未安排日期的任务保留在托盘；任务拖动只写本地时间块。
-- **一处管理任务**：本地任务与可选飞书任务统一展示，保留清晰来源；支持按优先级、项目、来源、标签、手动情境、日期范围和排序方式保存筛选视图，筛选面板还支持一句话解析并先预览“将筛选”摘要；同一任务集合可切换低噪声列表或便于横向比较字段的表格视图，偏好只保存在本机；Today、暂存和全部任务的桌面列表提供一行式快速捕获，回车创建本地任务并在成功后继续聚焦，Today 自动使用当天私人计划，筛选/搜索/飞书来源/批量选择时隐藏；任务讨论、可折叠研究卡、子任务进度和任务列表批量选择也在同一工作台完成，批量动作先预览再原子执行并可一次撤销；父任务显示“已完成/总数”但不会因子任务完成而被隐式完成；任务详情的依赖链支持按需展开关系图，保留缺失/循环事实，节点可点击回到原任务；任务行解释“为什么值得先做”，并可直接点击“让 Agent 处理”把当前任务带入 Agent 草稿，批量选择工具栏也可将所选任务交给 Agent 先做只读方案；暂存支持逐项整理为今天、明天、稍后、完成或打开详情，并提供 1/2/S/C/O 快捷键；快速捕获确认后可选择保存为任务、真正的暂存任务或 Todo Pet 日记；菜单栏/系统托盘还提供最多 3 项今日待办的只读预览，隐私模式自动脱敏；飞书写入本地落盘后立即启动同步，手动同步完成后可查看全量/增量、上传/拉取/删除/冲突和待处理原因摘要。
-- **表格工作台**：在任务集合右上角切换“列表 / 表格”，表格用同一份任务事实对齐状态、日期、优先级、项目/清单和来源，仍支持完成、重点标记、批量选择、打开详情和 Agent；偏好只在本机记忆，Today 切到表格不会误触发拖动排序。
-- **统一本机查找**：按 `⌘/Ctrl+Shift+F`，或从 `⌘/Ctrl+K` 命令面板选择“全局查找”，即可跨任务标题/备注/私人备注/标签/情境/评论/研究卡/附件与链接元数据/自定义字段，以及项目、清单、本地日历事件和本机会话搜索；标题精确匹配优先，多个关键词需同时满足，结果显示来源、状态和可读片段。点击任务回到 All 并定位，点击日历事件回到对应日期的时间线，点击会话直达 Agent 历史，项目/清单进入对应工作区；打开结果后最近 8 条查询会保存在本机并可点击回用或清空，也可以把当前查询命名保存为最多 12 条本机快捷搜索，空查询页一键复用或删除；索引、查询历史和快捷项都不读取附件正文、不上传、不写任务或飞书。
-- **本地任务自动化**：设置 → 任务自动化提供最多 50 条“任务新建时 / 任务完成时 / 临近截止时 / 手动应用时 / 按计划自动执行”规则；图形化条件编辑器支持共同条件 AND 与最多 5 组可折叠的任一条件 OR，来源、项目、清单、分组、标签和情境会优先显示本地名称；定时规则支持每天或每周选定日期、本机时间、错过当日补执行和周期去重；临近截止规则支持 5 分钟至 7 天的本机提前窗口，重复检查在动作已满足时自动跳过，已完成、已过期和无截止时间的任务不触发。保存前可试运行预览当前匹配数量和前 5 项任务样例，预览只读，不写入任务、飞书或同步队列。规则可自动设置重点标记、私有组织字段、稍后日期、标签或情境。手动规则可从任务详情的更多操作中点选，也可在批量选择后预览并一次应用到符合条件的任务；后台规则只处理开放任务。规则是确定性的本机白名单动作，执行会留下普通可撤销历史，不执行脚本、不联网、不创建任务，也不会把字段写回飞书。
-- **工作流模板复用**：在任务详情中把现有任务保存为本机模板，可选带入最多 11 个子任务；再次使用时仍先预览，且只有本地模板会恢复父子关系。
-- **可选任务 Agent**：支持 OpenAI-compatible、Codex 订阅与 Ollama 原生本地模型、主副模型切换、流式 Markdown（兼容没有工具调用时返回 `tool_calls: null` 的网关）、自然语言单条或批量增删改查、从任务行一键带入上下文、把大任务拆成 2–7 个可执行本地子任务，以及经确认的网页、文件和本机工具能力；设置 → 权限中心提供任务读写、飞书同步、网页研究、文件与终端、剪贴板与屏幕五个独立开关，工具列表和每次执行都会重新校验，关闭飞书不会把远端操作降级为本地写入；Agent 对话会显示可信的“执行过程”卡，逐项呈现工具、风险、等待确认、执行中和最终结果，并可展开影响预览；活动仅保留在当前运行中，不进入短期会话或模型上下文；Agent 页面会在本机恢复最近 100 条短期对话，并可设置发送最近 4–50 轮历史，最多保留 8 个本机历史会话，支持切换、按标题/正文搜索、重命名、置顶、删除、新对话、清除当前会话、Markdown 导出和基于当前任务的快捷回答建议，恢复历史只有在打开“聊天历史”数据范围时才发送给模型；可分别填写主/备用模型输入输出单价，按本地 token 用量核算费用并设置每日硬上限，缺少可计费用量时不会继续运行；输入新的 API Key 后点击“测试连接”会先通过系统安全存储替换凭据，网关还会自动清理 Endpoint、模型名和 Key 的首尾空白，避免粘贴换行导致误测旧 Key 或 401；设置可选择让 Agent 跟随桌面伙伴的温柔、轻吐槽、安静或效率四种人格，切换后下一轮对话和晨间简报采用对应语气，也可以关闭联动让 Agent 保持独立风格；可选开启外部 Agent 活动桥接，让 Claude Code、Codex CLI、OpenClaw、Hermes、opencode 等工作状态以思考、执行、并行、等待确认和错误动作实时投影到 Todo Pet，桥接只监听本机回环并使用 Token 保护。
-- **用户保持控制**：天气只需手工城市；长期记忆只保存用户明确批准的内容；敏感操作经过权限预览、确认与审计。
-
-## 功能一览
-
-桌面交互补充：宽屏任务详情支持一键收起与恢复，收起后保留当前任务上下文并让列表获得完整工作区；切换到另一项任务时详情会自动恢复，紧凑桌面布局继续使用原有覆盖式详情。任务列表点选后可用 ↑↓ 或 J/K 连续浏览，按 E 完成/恢复并自动把焦点交给相邻任务，按 X 选择/取消选择并在批量模式中继续浏览，按住 Shift 点击可连续选择范围，批量模式按 `,` 可把焦点移到批量工具栏，按 Esc 分层退出筛选、批量操作或详情并恢复焦点，回车打开详情，输入框、筛选器和批量操作确认不会抢键盘。Agent 欢迎语会先显示任务快照读取状态，加载完成后同步当前视图数量，并兼容迁移旧版本的本机欢迎语。
-
-桌面撤销补充：主窗口可按 `⌘/Ctrl+Z` 撤销最新未撤销的本地任务变更，也可以按 `⌘/Ctrl+Shift+Z` 重做刚才撤销的变更；两者都可从快速命令或快捷键说明执行。重做按实际撤销顺序回放，新任务变更会让旧重做分支失效；输入框和弹窗保持原生撤销。
-
-| 模块 | 已包含能力 |
-| --- | --- |
-| Todo Pet | 20 种待机动作、8 种情绪、六种陪伴性格（温柔/元气/冷静/活泼/轻微淘气/安静）、最多 3 个小窝伙伴（纸飞机/云团/苔苔/月蛾）、阅读/写作/开发/调研/沟通/运动/整理主题姿态、身体分区点击、九项径向互动、任务卡拖放（专注/完成/稍后目标区）、始终置顶、自由拖动、多显示器位置记忆、缩放、仅宠物模式、任务栏收回/恢复、悬停展开、边缘收纳探头（移入自动展开、移出自动收回）、双击主应用、右键快捷菜单、可恢复 Boss Mode、默认关闭的鼠标穿透（可从设置或系统托盘恢复点击）、默认关闭的工作时回应（仅按系统空闲时间触发敲键盘/阅读姿态，不读输入内容）、隐私与免打扰；小窝提供共同收藏图鉴、共同完成印章和共同旅程章节，按真实库存与任务事实显示解锁物品、完成数量、最近印章和下一步；点击印章可回到原任务，未完成奖励对账时会明确显示同步中；房间摆件支持直接拖动、本地位置微调与大小调整，旧档案自动套用默认布局；小窝可切换明亮日光、柔和灯光或月光夜色，氛围只影响房间视觉；支持安全的声明式 JSON 动作包安装/启用/卸载，并在设置提供可视化动作包编辑器（加载、组合内置待机动作、安装并启用、调整冷却与出现频率）；小窝设置还支持四个十六进制颜色和一张 512 KB 以内 PNG/JPEG/WebP 本地背景组成的安全主题包（最多 12 个，可应用/移除、导出为可读 JSON、从本地 JSON 导入预览，拒绝 SVG、脚本、路径和网络）；有伙伴时还可以让小队按固定角色准备一项真实任务、选择一位临时领队、展开领队优先的协作简报，并从最多 3 项小队路线候选切换当前目标后开始专注；成长首页还会显示基于真实事实的一次性“今日明信片”，可回到 Today；主窗口 `⌘/Ctrl+K` 命令面板支持键盘筛选与执行；晨间简报提供可跳过的三步启动卡 |
-| 任务 | 暂存、Today、稍后安排、即将到来、全部、项目总览、项目与清单实体（新建/重命名/归档/恢复/删除）、日/周时间线、工作周期与容量预测、项目三列看板、只读 14 日甘特路线（项目筛选、任务跨度、进度、依赖阻塞、未安排托盘、点击回任务）、每周回顾、估时复盘（预计/实际偏差与任务回看）、会议备注和 Agent 回复行动项提取（逐项编辑/勾选后批量创建本地任务）、项目健康（阻塞/逾期/容量解释）、已完成、回收站、项目、清单、标签、手动情境、优先级、重点标记、分组标题（轻量聚合、数量、可折叠且按视图记忆）、预计时长、子任务与完成进度、前置依赖编辑与循环防护、依赖链解释卡（前置/当前/后续节点、缺失/循环提示）、命名上下文链接、自定义字段（文本/数字/日期/链接/勾选）、任务本地讨论（添加/编辑/删除/撤销）、可折叠研究卡（来源/摘要/行动项，Agent 可添加，Markdown 摘要可读渲染，行动项可逐条创建本地任务并保留来源说明）、任务详情批量操作与预览确认（完成/恢复/安排到今天/回收站，单次撤销）、批量编辑重点标记/优先级/项目/清单/标签（替换/追加/移除，预览确认、原子执行、单次撤销）、重复任务“跳过本次”（同一任务平移到下一次，日期/时间块/提醒一起移动，可撤销，不复制任务）、任务详情可把现有任务保存为受限本地工作流模板（可选带入最多 11 个子任务，使用本地模板时恢复父子关系，后续使用仍先预览）、任务行“让 Agent 处理”草稿入口、批量“让 Agent 处理所选”草稿入口（都不自动发送/写入）、一句话筛选预览（重点标记/日期/优先级/来源/项目/标签/情境/排序，未知或冲突条件拒绝套用）、保存视图重点标记/标签/情境/日期范围/排序条件（逾期、今天、未来 7 天、无日期、优先级、截止、标题、创建时间）、附件/链接/自定义字段元数据搜索、本地文件附件（选择/复制/受限预览/打开/移除）、外部附件引用、任务详情脱敏历史时间线、循环与快速录入语法、开始/截止时间、提醒、快速录入（支持预计 45 分钟 / 30m、每天 / 每周一 / 每月15日），快速捕获与 Todo Pet 输入共用自然语言解析（日期/标签/情境/时长/循环/P1–P4），可在预览后选择任务 / 暂存 / 日记、语音/剪贴板/当前窗口/选中文本安全预览、会议/研究/发布工作流模板、保守/平衡/冲刺每日规划与可解释建议、Todo Pet 下一步四项权重 |
-| 分组检索 | 分组标题可在筛选面板和保存视图中精确筛选，Filter Assist 支持 `分组：标题` 并对未知标题拒绝套用；Todo Pet 与 Agent `task_list` 复用相同本地条件，不把标题当作飞书 section GUID |
-| 日历与排程 | 时间线可导入多个本地 `.ics` 来源，日视图显示只读议程、来源可分别显示/隐藏、稳定着色、手工调整颜色或单独清除（清除可撤销），半小时时间格直接标出会议忙碌区，周视图按日期显示会议数量与占用时长；会议卡可打开预填的会后跟进任务，或从 `DESCRIPTION` 中提取明确的行动项/待办/下一步，在本地预览中逐项编辑、勾选后批量创建；保存前仍由用户确认，且只创建本地任务；今日规划会扣除会议占用并避开忙碌区，支持全天/跨午夜事件、清空与撤销；来源偏好只影响时间线展示，不删除事件且不会写回外部日历或飞书 |
-| 晨间摘要 | Today 早报在有本地日历事件时显示当天议程、占用时长和时间线入口；对较早日期的未完成私人 Today 计划最多给出 3 项“安排今天”建议；无候选时不增加空白卡片，不进入 AI 或外部写入 |
-| 陪伴 | 小窝成长、等级与亲密度、可配置弹性习惯（默认喝水/伸展/收尾，最多 12 项，可编辑、暂停、完成、稍后或移除）、最多 3 项可选本周同行目标（完成任务 / 专注分钟 / 习惯照顾，进度来自真实事实）、今日进展/今晚回顾、每周 Check-in（能量与节奏）、宠物回顾与逐项处理会话（逾期/阻塞/待排时间）、天气、可关闭的季节装饰事件、日记（可点击回看关联任务）、记忆、小游戏、装扮/摆件、每日冒险、专注联动、环境音与外部内容拖入预览；设置提供温和陪伴 / 自然平衡 / 深度专注 / 活泼互动策略模板 |
-| 专注 | 番茄钟预设、自定义节奏、正计时、任务绑定、暂停/恢复、休息轮次、重启恢复、可选本地环境音、专注守护、系统通知和幂等奖励；时间线周视图专注节奏分析（7 日柱状图、总投入、专注段、平均时长、投入最多任务） |
-| 飞书 | 可选零服务器连接、已有应用接入、自动/手动/交互后立即同步、离线队列、冲突入口和私人计划层 |
-| Agent | 小窗与主应用流式对话、Markdown、任务 CRUD（含重点标记、分组标题和稍后日期的查询/创建/修改/清除）、任务拆分预览与本地子任务、研究卡写入、重复任务“跳过本次”预览与执行、主 Agent 回复保存到当前任务私人研究卡（标题/来源/摘要/行动项可编辑确认）、网页研究/本机工具、权限确认、审计、停止与临时全权限模式；对话内可信执行过程卡（工具拟定/确认/运行/结果/失败，支持影响预览）；权限中心五层独立能力开关与运行中二次校验，飞书关闭时 fail-closed；主 Agent / 小窗上下文快捷回答；本机最多 8 个短期会话归档、切换、按标题/正文搜索、重命名、置顶、删除、新对话、清除当前会话与 Markdown 导出；主/备用模型价格与每日费用硬预算；可选跟随 DesktopBuddy 四种人格或保持独立人格；4–50 轮记忆、Ollama 原生协议、确认后的文件摘要和屏幕选区问答，权限和任务事实不受影响 |
-| 数据与安全 | 本地原子持久化、系统安全存储保存凭据、安全 JSON 备份、可读 Markdown 任务清单（可选任务事件摘要）、独立 `.todo-pet.json` 宠物档案备份与导入预览（含习惯与本周同行目标）、可恢复删除、模型数据范围、提醒每日预算 / 来源策略 / 项目例外（含最多 100 个项目批量编辑）/ 同类间隔 / 连续忽略降频、提醒处理面板的“为什么现在提醒”本地原因解释、宠物主动消息预算、安静时段与减少动态效果 |
-
-## 打开可读的任务清单
-
-在 Todo Agent 的“设置 → 数据与安全”中点击“可读 Markdown”，保存后会得到一个 `.md` 文件。macOS 或 Windows 上直接双击即可用系统默认应用打开；如果默认应用只显示原始标记，可右键选择 VS Code、Typora、Obsidian，或把文件拖到浏览器 / GitHub 中查看排版后的内容。需要查看任务创建、修改、完成和撤销轨迹时，先打开“包含事件摘要”再导出；它只写入时间、操作类型、任务标识和字段名，不包含任务快照、私人路径或凭据。这个文件用于阅读与分享，恢复数据请使用旁边的“安全 JSON”备份。
-
-如果要迁移宠物本身，请在同一页点击“导出宠物档案”，得到可读的 `.todo-pet.json` 文件。它可以用 VS Code、任意文本编辑器或浏览器打开查看（JSON 会显示原始结构）；要恢复时选择“导入并预览”，确认数量后选择“保留本机”或“用备份覆盖本机”。活动专注、凭据和本地文件路径不会被导出。
-
-## DesktopBuddy 伙伴与本地 AI
-
-在「设置 → Todo Pet → 选择你的桌面伙伴」切换 Wanko、Hiyori、Rice、Mark 或 Haru，选择会在重启后保留。原版专属互动位于角色预览下方和宠物小窗的「小窝」。重力、惯性、边缘弹簧、呼吸和光标跟随可以单独关闭；拖放后会在当前显示器工作区内运动，展开面板、开始专注、锁定或免打扰会停止物理移动。
-
-- **连续动画**：Live2D 模型持续绘制，动作改变不卸载模型；切换角色时保留旧角色，直到新模型画出首帧。帧截图验证的是实际模型像素变化，不只检查整张图的位置变化。
-- **宠物显示与动作恢复**：桌面头像、小窝和专注预览共用一个绘图引擎，但各自保留模型和关节状态，避免多个预览互相干扰变透明。图形连接中断时保留上一帧并自动恢复，首次加载失败时显示原角色保底图，点击宠物可重试。既有 48 种动作均有明确映射，补充头部、耳朵、手臂、眼睑等现有关节反馈；连续摸头可再次响应，思考/搜索/专注不会播放一小段后停住。动作受角色本身的关节能力限制，不新增或改造原模型肢体。
-- **图片生成**：选一张本地 PNG/JPEG/WebP，生成 1 张基准图 + 原版 33 张状态帧，可额外选择抚摸、跳绳、搬运等每组 33 帧的连续运动。图片不自动上传；这是单张图片变换，不是 AI 补画关节或新姿势。支持 ZIP 角色包导入、切换、停用和可恢复移除。
-- **一套模型配置**：所有 LLM 能力和相关请求复用「设置 → 模型与 Agent」中的 `base_url`（Endpoint）、认证、主副模型、超时重试及用量限制。宠物对话、晨间简报、文件摘要、屏幕问答不另存地址或密钥；已有 Agent 可用就无需再次配置。宠物设置提供直达入口，修改后下一次请求生效，尚未发送的资料预览也会实时更新主/备用目的地。
-- **可选 Ollama**：只有希望改用本机模型时，才在同一个 Agent 设置页选择 Ollama 原生协议并填写本机地址（例如 `http://127.0.0.1:11434`）与已安装模型名。不需要为了启用宠物功能额外安装 Ollama，也不会自动改写已有的模型配置。
-- **陪伴记忆**：温柔、轻吐槽、安静、效率四种表达风格；最近历史可选 4–50 轮，默认 12 轮。只有开启「向模型发送最近对话」才发送历史，关闭 Agent 人格联动则使用独立风格。
-- **资料问答**：主 Agent 和小窗「聊聊」提供文件摘要、屏幕选区问答。先选取和预览，确认后才发送到界面显示的模型；取消选区不截图。当前文件入口支持 UTF-8 文本/代码，不宣称支持 PDF/Word；截图需要视觉模型。资料问答轮不开放任务写入等工具，后续要执行操作需再发一条明确指令。
-
-上游代码来源及模型的独立使用条款见 [DesktopBuddy 集成与验收](./docs/DESKTOPBUDDY_INTEGRATION.md)。
-
-## 悬浮桌面模式
-
-Todo Pet 有三种连续的桌面形态：
-
-1. **仅宠物**：只保留可拖动、可点击互动的宠物本体，窗口会同步缩小，不会用透明区域挡住桌面。
-2. **宠物 + 任务栏**：显示当前任务、专注计时和宠物消息气泡；任务栏支持全部、今天、专注、聊聊和小窝五个入口。
-3. **完整小窗口**：展开任务列表、Agent 对话、专注控制和小窝内容。
-
-点击宠物旁的箭头可以在“仅宠物”和“宠物 + 任务栏”之间切换；互动轮盘和小游戏会临时展开所需空间，结束后自动回到原来的模式。仅宠物模式与最后选中的任务入口会在本地记忆，重启应用后继续使用。
-
-右键宠物可开启“边缘收纳”。它会把仅宠物形态滑到当前显示器左/右边缘，只保留一小截作为探头；鼠标移入会平滑恢复，离开整个宠物区域后自动再次收纳。拖动、展开任务栏或关闭该菜单会先恢复完整位置，不会把隐藏坐标当成新的永久位置。
-
-## 界面预览
-
-以下小窝、专注和任务界面截图保留历史版本布局示例；宠物外观以顶部 DesktopBuddy 截图和当前应用为准，旧版服装/换色不会覆盖原版 Live2D 设计。
+## 一条完整的执行回路
 
 <table>
   <tr>
-    <td width="50%"><img src="./docs/screenshots/todo-pet-room.png" alt="Todo Pet 可布置小房间" /></td>
-    <td width="50%"><img src="./docs/screenshots/todo-pet-adventure.png" alt="Todo Pet 每日冒险" /></td>
-  </tr>
-  <tr>
-    <td align="center">小房间：配色、服装、主题与摆件</td>
-    <td align="center">每日冒险：选择、故事结果与无压力成长</td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="./docs/screenshots/todo-pet-focus.png" alt="Todo Pet 专注面板" /></td>
-    <td width="50%"><img src="./docs/screenshots/todo-pet-companion.png" alt="Todo Pet 随身小窝" /></td>
-  </tr>
-  <tr>
-    <td align="center">专注：番茄钟、正计时与任务绑定</td>
-    <td align="center">小窝：成长、天气、同步和最近活动</td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="./agent-page.png" alt="任务助理与权限范围" /></td>
-    <td width="50%"><img src="./docs/screenshots/floating-context-menu.png" alt="Todo Pet 右键快捷菜单" /></td>
-  </tr>
-  <tr>
-    <td align="center">Agent：流式任务对话和权限确认</td>
-    <td align="center">右键：快速新增、聊天、隐私、锁定与安静</td>
+    <td width="25%" align="center"><strong>01 · 捕获</strong><br /><sub>一句话、剪贴板、选中文本、窗口与语音，先预览再保存</sub></td>
+    <td width="25%" align="center"><strong>02 · 看清</strong><br /><sub>列表、表格、筛选、项目、依赖和全局搜索，共用同一份事实</sub></td>
+    <td width="25%" align="center"><strong>03 · 排进时间</strong><br /><sub>Today、日历、容量、时间线、周视图、看板和甘特路线</sub></td>
+    <td width="25%" align="center"><strong>04 · 开始行动</strong><br /><sub>专注计时、温和提醒、自动化、Agent 与 Todo Pet 一起推进</sub></td>
   </tr>
 </table>
 
-## 下载与安装
+<p align="center">
+  <img src="./docs/readme/screenshots/today.webp" width="100%" alt="ToDoAgent 今日工作台：晨间简报、快速新增、任务列表和任务详情" />
+</p>
 
-已发布的预览版本：[v0.0.1](https://github.com/BrotherHappy/TodoAgent/releases/tag/v0.0.1)。
+<p align="center"><sub>今日工作台不是“另一张清单”：它把今天值得做什么、为什么值得做、预计多久和下一步放到同一屏。</sub></p>
 
-- **macOS（Apple Silicon）**：[DMG](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-arm64.dmg) · [ZIP](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-arm64-mac.zip)
-- **Windows x64**：[ZIP](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-win.zip)
+## 从零散想法，到清楚的任务系统
 
-这是 Early Preview。macOS 产物尚未进行 Developer ID 签名和公证；Windows 包仍建议在目标设备完成安装、系统通知和多显示器实机验收。
+先捕获，再决定它是任务、暂存还是日记。任务进入工作台后，可以用列表快速推进，也可以用表格横向比较字段；项目、清单、标签、情境、分组、依赖、讨论、研究卡、附件和自定义字段都不会被压扁成一行标题。
 
-仓库中的 DesktopBuddy 增量需要从当前源码构建；上述远程预览附件不保证包含本次增量。
+<table>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/quick-capture.webp" alt="安全快速捕获：输入、上下文预览和保存去向" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/table.webp" alt="任务表格工作台" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>快速捕获</strong> · 自然语言解析，任何上下文都先预览</sub></td>
+    <td align="center"><sub><strong>表格工作台</strong> · 状态、日期、优先级、项目与来源横向对齐</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/task-detail.webp" alt="任务详情、组织字段、依赖和上下文" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/filters.webp" alt="任务筛选与智能视图" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>任务详情</strong> · 子任务、依赖、评论、研究卡与附件</sub></td>
+    <td align="center"><sub><strong>保存视图</strong> · 项目、标签、情境、日期、来源与排序自由组合</sub></td>
+  </tr>
+</table>
 
-## 从源码启动
+## 不只写截止日期，而是把任务放进真实时间
 
-前置条件：Node.js 24 LTS，npm。
+ToDoAgent 会先读你真正可用的时间：工作时段、任务时长、缓冲、依赖，以及只读导入的 `.ics` 日历忙碌区。排程先给出可解释预览，确认后只写私人计划；它不会擅自修改飞书截止时间或外部日历。
+
+<table>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/daily-plan.webp" alt="每日规划预览与容量解释" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/timeline.webp" alt="半小时时间线与只读日历议程" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>一起排今天</strong> · 风险、容量、冲突和顺延都说清楚</sub></td>
+    <td align="center"><sub><strong>日时间线</strong> · 会议占用、任务时间块与“现在”同屏</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/week.webp" alt="周视图、容量与专注节奏" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/kanban.webp" alt="项目看板" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>周概览</strong> · 看见会议、容量、专注投入和未来节奏</sub></td>
+    <td align="center"><sub><strong>项目看板</strong> · 下一步、进行中、已完成一眼可见</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="./docs/readme/screenshots/gantt.webp" width="100%" alt="2 周、4 周和 12 周甘特路线，展示依赖、阻塞与关键路线" />
+</p>
+
+<p align="center"><sub>甘特路线支持 2 / 4 / 12 周时间窗、未安排托盘、依赖阻塞与关键路线；拖动只修改本地时间块。</sub></p>
+
+## Agent 可以做事，但不能越权
+
+Agent 不是藏在输入框后的黑盒。每次运行都明确显示使用的模型、数据范围、可用能力、工具执行过程和影响预览；任务读写、飞书同步、网页研究、文件与终端、剪贴板与屏幕五层权限可以独立关闭，并在真正执行时再次校验。
+
+<p align="center">
+  <img src="./docs/readme/screenshots/agent.webp" width="100%" alt="真实运行中的 ToDoAgent 任务助理、执行过程和上下文范围" />
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/models.webp" alt="OpenAI-compatible、Codex 与 Ollama 模型配置" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/permissions.webp" alt="Agent 五层权限中心" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>模型由你选</strong> · OpenAI-compatible、Codex 与 Ollama，支持主备路由和费用上限</sub></td>
+    <td align="center"><sub><strong>能力由你开</strong> · 关闭后工具从下一次运行中消失，执行时仍会复核</sub></td>
+  </tr>
+</table>
+
+Agent 可以用自然语言查询、创建、修改和整理任务，把大任务拆成子任务，研究网页或本机资料，并把回复转成可编辑的行动项与私人研究卡；所有有副作用的步骤仍由用户确认。
+
+## 飞书任务，不再是另一个孤岛
+
+连接飞书后，本地任务与飞书 Task V2 在同一工作台展示，但始终保留来源。公共字段按授权同步，Today、私人排序、时间块、专注状态、研究卡等本地字段不会写回飞书；离线修改进入队列，冲突不会被静默覆盖。
+
+<table>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/feishu-tasks.webp" alt="本地任务与飞书任务在同一工作台" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/feishu-sync.webp" alt="飞书双向同步、同步摘要与冲突处理" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>统一查看</strong> · 本地 / 飞书来源清楚可辨，私人计划仍留在本机</sub></td>
+    <td align="center"><sub><strong>可靠同步</strong> · 全量 / 增量、上传 / 拉取、离线队列与逐字段冲突选择</sub></td>
+  </tr>
+</table>
+
+## 重复的事交给规则，散落的事交给搜索
+
+本地自动化支持任务新建、完成、临近截止、手动应用与定时运行；AND / OR 条件、试运行预览、周期去重和可撤销记录都在本机完成，不执行脚本，也不会把私人组织字段写回飞书。全局搜索则横跨任务、评论、研究卡、附件元数据、项目、清单、日历事件和 Agent 会话。
+
+<table>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/automations.webp" alt="本地任务自动化规则编辑器" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/global-search.webp" alt="统一本机全局搜索" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>任务自动化</strong> · 先试运行，再让确定性规则接手重复动作</sub></td>
+    <td align="center"><sub><strong>全局搜索</strong> · 一个快捷键，穿过任务、资料、日历和会话</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/reminders.webp" alt="温和提醒与提醒预算" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/integrations.webp" alt="外部 Agent 活动桥接" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>温和提醒</strong> · 解释为什么现在提醒，并尊重安静时段与预算</sub></td>
+    <td align="center"><sub><strong>外部 Agent 桥接</strong> · 把 Codex、Claude Code 等运行状态投影到桌面伙伴</sub></td>
+  </tr>
+</table>
+
+## Todo Pet：任务完成之后，也留下了一点温度
+
+Todo Pet 常驻桌面，轮播今天的下一步，也能展开任务、专注、聊天和小窝。五个 DesktopBuddy 原版 Live2D 伙伴持续呼吸、注视与回应；拖动带惯性和边缘弹簧，忙碌时可以收成只露一小截的桌面探头，演示或会议时一键进入 Boss Mode。
+
+<table>
+  <tr>
+    <td width="50%"><img src="./docs/readme/screenshots/pet-home.webp" alt="Todo Pet 小窝成长首页" /></td>
+    <td width="50%"><img src="./docs/readme/screenshots/pet-room.webp" alt="Todo Pet 可布置小房间" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><strong>成长</strong> · 来自真实完成与专注，不靠惩罚和连续签到</sub></td>
+    <td align="center"><sub><strong>小房间</strong> · 氛围、摆件、主题、旅程、日记与共同完成印章</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="./docs/readme/screenshots/companions.webp" width="100%" alt="Wanko、Hiyori、Rice、Mark、Haru 五个 Live2D 桌面伙伴" />
+</p>
+
+<table>
+  <tr>
+    <td width="20%"><img src="./docs/readme/companions/wanko-live2d.webp" alt="Wanko" /></td>
+    <td width="20%"><img src="./docs/readme/companions/hiyori-live2d.webp" alt="Hiyori" /></td>
+    <td width="20%"><img src="./docs/readme/companions/rice-live2d.webp" alt="Rice" /></td>
+    <td width="20%"><img src="./docs/readme/companions/mark-live2d.webp" alt="Mark" /></td>
+    <td width="20%"><img src="./docs/readme/companions/haru-live2d.webp" alt="Haru" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Wanko</sub></td>
+    <td align="center"><sub>Hiyori</sub></td>
+    <td align="center"><sub>Rice</sub></td>
+    <td align="center"><sub>Mark</sub></td>
+    <td align="center"><sub>Haru</sub></td>
+  </tr>
+</table>
+
+## 功能地图
+
+| 模块 | 已包含能力 |
+| --- | --- |
+| 捕获 | 一行式快速新增、自然语言日期 / 时长 / 循环 / 优先级解析、剪贴板、当前窗口、选中文本、拖入文本与链接、语音入口、最近 12 条本机捕获回用；保存前可选任务 / 暂存 / 日记 |
+| 任务 | 暂存、Today、即将到来、稍后、全部、完成与回收站；列表 / 表格、批量编辑、撤销 / 重做、子任务、依赖防环、讨论、研究卡、附件、链接、自定义字段、重复任务和工作流模板 |
+| 组织 | 项目、清单、标签、情境、分组标题、优先级、重点标记、保存视图、一句话筛选、项目健康与任务来源 |
+| 规划 | 晨间简报、三步开始今天、可用时段与容量、任务缓冲、日历忙碌区、日 / 周时间线、工作周期、容量预测、项目看板、2 / 4 / 12 周甘特路线、关键路线、每周回顾与估时复盘 |
+| 专注 | 25/5、50/10、90/20、自定义番茄钟、正计时、暂停恢复、任务绑定、环境音、专注守护、系统通知、重启恢复和专注节奏分析 |
+| 飞书 | Task V2 双向同步、已有应用接入、自动 / 手动 / 交互后同步、离线队列、同步摘要、逐字段冲突处理、按用户与 OAuth 应用隔离；私人计划与本地组织字段不回写 |
+| Agent | OpenAI-compatible、Codex 与 Ollama；主备模型、流式 Markdown、会话历史、费用预算、任务 CRUD、任务拆分、网页研究、文件 / 终端、屏幕 / 剪贴板、行动项提取、研究卡和执行过程卡 |
+| 自动化 | 最多 50 条本机规则；新建、完成、临近截止、手动与定时触发；AND + OR 条件、试运行预览、补执行、周期去重、原子执行与撤销 |
+| 搜索与数据 | 跨任务 / 评论 / 研究卡 / 附件元数据 / 项目 / 清单 / 日历 / 会话的本机搜索；最近查询、保存搜索、可读 Markdown、安全 JSON 备份与宠物档案迁移 |
+| Todo Pet | 五个 Live2D 伙伴、桌面常驻与边缘收纳、任务轮播、互动与物理反馈、六种陪伴性格、专注联动、小窝、天气、习惯、同行目标、冒险、日记、记忆、主题、动作包与 Boss Mode |
+| 外部 Agent | Claude Code、Codex CLI、Copilot、Gemini、Cursor、OpenClaw、Hermes、opencode、MiMo、Qoder、Qwen、TraeCode 等活动状态桥接；仅监听 `127.0.0.1`，不读取提示词和文件内容 |
+
+想查每一个边界、字段和交互？打开 [完整功能与产品说明](./docs/PRODUCT_GUIDE.md)。
+
+## 本地优先，不是一句口号
+
+<p align="center">
+  <img src="./docs/readme/screenshots/privacy.webp" width="100%" alt="ToDoAgent 隐私与数据范围设置" />
+</p>
+
+- **本地事实层**：任务、规划、专注、提醒、成长和日记默认保存在本机，不因为启用模型就自动上传。
+- **凭据进安全存储**：飞书 Secret、Token 和模型密钥由系统安全存储保护，普通设置只保存引用。
+- **范围看得见**：每次 Agent 运行都显示将使用的数据范围；聊天历史、任务备注、文件与屏幕分别控制。
+- **高风险操作先确认**：批量写入、外部访问和高风险工具先展示影响，支持停止、审计与撤销。
+- **不制造压力**：宠物不会死亡、饥饿或扣资产，也不靠强制连续签到维持关系；休假模式会暂停主动陪伴。
+
+## 下载
+
+当前为 **Early Preview v0.0.1**，对应源码提交 `ecabc157`。
+
+| 平台 | 安装包 | 免安装 / 备用 |
+| --- | --- | --- |
+| macOS Apple Silicon | [下载 DMG](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-arm64.dmg) | [下载 ZIP](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-arm64-mac.zip) |
+| Windows x64 | [下载安装程序](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent.Setup.0.0.1.exe) | [下载 ZIP](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/Todo.Agent-0.0.1-win.zip) |
+
+[查看版本说明](https://github.com/BrotherHappy/TodoAgent/releases/tag/v0.0.1) · [校验 SHA-256](https://github.com/BrotherHappy/TodoAgent/releases/download/v0.0.1/SHA256SUMS.txt)
+
+> [!WARNING]
+> 预览安装包尚未使用公开受信任证书签名：macOS 首次打开可能需要在“隐私与安全性”中确认，Windows 可能显示 SmartScreen 提示。
+
+## 从源码运行
+
+前置条件：Node.js 24 LTS、npm。
 
 ```bash
+git clone https://github.com/BrotherHappy/TodoAgent.git
+cd TodoAgent
 npm install
 npm run dev
 ```
 
-常用命令：
+提交前的完整检查：
 
 ```bash
 npm run verify
-npm run test:e2e
-npm run capture:screenshots
-npm run package:mac:current
-npm run package:win:zip
 ```
 
-## 规划与同步容错
+当前门禁包含 TypeScript 类型检查、184 个测试文件 / 1,212 项测试和正式构建。常用开发、打包和截图命令见 [完整功能手册](./docs/PRODUCT_GUIDE.md#从源码启动)。
 
-“一起排今天”只修改私人计划、顺序与确认后的预计时长，不会因为一条历史任务缺少标题而阻断整批任务。飞书缺字段会先补读详情，仍不完整时保留本地内容并继续同步其他正常任务；已知缓存可安全恢复旧标题。计划预览过期时保留选择并提供“刷新并重新预览”，错误用中文解释，窄窗口中的内容、提示和底部按钮各自保持可读。
+## 设计原则
 
-防回归规则和后台测试入口见 [今日规划与同步数据完整性](./docs/DAILY_PLAN_INTEGRITY.md)。
+1. **事实先于拟人化**：真实任务和飞书同步属于事实层，宠物只负责陪伴，Agent 不能伪造状态。
+2. **建议先于替你决定**：规划、研究和 Agent 写入先给可读预览，用户确认后才执行。
+3. **推进而不惩罚**：用下一步、专注和正向成长帮助行动，不用焦虑、死亡或连签绑架注意力。
+4. **离线仍然完整**：没有云端账号、飞书或模型时，核心任务系统仍然是一款完整应用。
 
-## 隐私与安全
+## 文档与边界
 
-- 默认没有云端账号或模型依赖；本地任务不会自动上传。
-- 飞书与模型均为可选项。Token、App Secret 和模型密钥由系统安全存储保护，普通设置只保存凭据引用；模型支持主模型、本地备用和只用本地三种路由。
-- 天气只使用用户填写的城市并在本机缓存，不申请精确定位。
-- 任务、天气、专注和同步是确定性事实；模型不能伪造这些状态。
-- 长期记忆必须由用户明确保存或批准，并支持查看、暂停、编辑和删除。
-- Agent 只能通过类型化工具提出操作；批量、外部和高风险操作在标准模式下请求确认。
-
-详细设计与边界：
-
+- [完整功能与产品说明](./docs/PRODUCT_GUIDE.md)
 - [统一 PRD](./docs/PRD.md)
-- [竞品研究与可借鉴设计](./docs/COMPETITIVE_PRODUCT_RESEARCH.md)
-- [Todo Pet 产品设计](./docs/TODO_PET_PRODUCT_DESIGN.md)
-- [Todo Pet 实现规范](./docs/TODO_PET_IMPLEMENTATION_SPEC.md)
-- [DesktopBuddy 五个伙伴、动画生成与本地 AI 使用说明](./docs/DESKTOPBUDDY_INTEGRATION.md)
-- [页面信息架构与交互](./docs/UX_INFORMATION_ARCHITECTURE.md)
-- [飞书连接说明](./docs/FEISHU_CONNECTION.md)
-- [clawd-on-desk 能力融合与外部 Agent 接入](./docs/CLAWD_INTEGRATION.md)
-- [外部 Agent 状态发送器](./scripts/todo-agent-activity.mjs)
 - [技术架构与测试门禁](./docs/TECHNICAL_ARCHITECTURE.md)
+- [飞书连接说明](./docs/FEISHU_CONNECTION.md)
+- [DesktopBuddy 集成与验收](./docs/DESKTOPBUDDY_INTEGRATION.md)
+- [外部 Agent 活动桥接](./docs/CLAWD_INTEGRATION.md)
+- [隐私与安全边界](./docs/PRODUCT_GUIDE.md#隐私与安全)
+- [第三方资源声明](./assets/desktopbuddy/licenses/NOTICE.md)
 
-## 当前边界
+## 许可
 
-- 飞书 Task V2 首次全量同步会合并“我负责”与授权身份可读取的任务清单；若应用尚未获得 `task:tasklist:read`，会安全降级为“我负责”并明确提示重新授权，不会把缺失任务误删。
-- 每个授权用户与 OAuth 应用组合使用独立的本地凭据、同步队列和映射空间；仅修改显示用的账号标签不会混用数据。
-- 天气使用结构化公共服务，供应商不可用时保留并标明最后缓存结果。
-- 真实飞书租户、Windows 设备、全屏应用和多显示器组合仍需要持续实机验收。
-- Todo Agent 自有代码尚未声明开源许可证，保留全部权利。DesktopBuddy 引入代码保留 MIT 许可；Live2D 模型及 Cubism Core 使用独立条款，详见 [第三方资源声明](./assets/desktopbuddy/licenses/NOTICE.md)。公开或商业分发前须按实际用途核对许可。
+ToDoAgent 自有代码目前未声明开源许可证，保留全部权利。DesktopBuddy 引入代码保留 MIT 许可；Live2D 模型与 Cubism Core 适用各自条款。公开或商业分发前，请阅读 [第三方资源声明](./assets/desktopbuddy/licenses/NOTICE.md)。
 
-## 设计研究
-
-我们把 Todo Pet 放在“任务管理 × 桌面宠物 × AI Agent”的交叉点上，持续对照 50+ 个商用和开源产品，包括 Todoist、TickTick、Things、OmniFocus、Sunsama、Motion、Notion AI、Taskade、Vikunja、Super Productivity、AppFlowy、Finch、Forest、Habitica、Weyrdlets、Shimeji 等。
-
-详细的逐产品 UI / 交互 / 功能矩阵、优势差异、可迁移模式、风险取舍和 P0/P1/P2 实现清单见：[竞品研究与可借鉴设计](./docs/COMPETITIVE_PRODUCT_RESEARCH.md)。这份研究也明确了 Todo Pet 的边界：真实任务和飞书同步是事实层，宠物是陪伴层，Agent 必须经过权限预览；不使用宠物死亡、饥饿、扣资产或强制连续签到制造压力。
+<p align="center">
+  <strong>给待办一个位置。给自己一个伙伴。</strong><br />
+  <a href="https://todoagent-showcase.brotherhappy.chatgpt.site/">探索 ToDoAgent</a>
+</p>
