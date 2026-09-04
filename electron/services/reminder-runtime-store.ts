@@ -66,6 +66,7 @@ const validateRuntimeState = (value: unknown): ReminderRuntimeState => {
     'delivered',
     'dismissed',
     'snoozedUntil',
+    'taskNotificationLog',
     'lastMorningBriefDate',
     'lastRiskNoticeDate',
   ]);
@@ -79,6 +80,12 @@ const validateRuntimeState = (value: unknown): ReminderRuntimeState => {
     'dismissed',
   );
   validateStringRecord(value.snoozedUntil, isIsoDateTime, 'snoozedUntil');
+  // Older runtime files predate the task notification budget. Accept them and
+  // let the scheduler initialize the new log instead of invalidating all
+  // reminder history on upgrade.
+  if (value.taskNotificationLog !== undefined) {
+    validateStringRecord(value.taskNotificationLog, isIsoDateTime, 'taskNotificationLog');
+  }
   if (
     value.lastMorningBriefDate !== undefined &&
     !isLocalDate(value.lastMorningBriefDate)
@@ -88,7 +95,9 @@ const validateRuntimeState = (value: unknown): ReminderRuntimeState => {
   if (value.lastRiskNoticeDate !== undefined && !isLocalDate(value.lastRiskNoticeDate)) {
     throw new ReminderRuntimeStoreValidationError('lastRiskNoticeDate is invalid.');
   }
-  return structuredClone(value) as unknown as ReminderRuntimeState;
+  const normalized = structuredClone(value) as unknown as ReminderRuntimeState;
+  normalized.taskNotificationLog ??= {};
+  return normalized;
 };
 
 const parseEnvelope = (text: string, maxBytes: number): ReminderRuntimeState => {

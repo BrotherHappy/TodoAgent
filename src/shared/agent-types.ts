@@ -146,7 +146,8 @@ export interface ModelToolCall {
 }
 
 export type ModelMessage =
-  | { role: 'system' | 'developer' | 'user'; content: string }
+  | { role: 'system' | 'developer'; content: string }
+  | { role: 'user'; content: string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }> }
   | {
       role: 'assistant';
       content: string | null;
@@ -169,6 +170,17 @@ export interface ModelUsage {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
+}
+
+/**
+ * User-supplied prices for one million provider tokens.  Prices are never
+ * inferred from a model name: zero means the corresponding side is free or
+ * intentionally left unpriced, while the pair is considered configured when
+ * at least one side is positive.
+ */
+export interface ModelPricing {
+  promptUsdPerMillionTokens: number;
+  completionUsdPerMillionTokens: number;
 }
 
 export interface ModelCompletion {

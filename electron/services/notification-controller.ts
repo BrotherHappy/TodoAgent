@@ -144,7 +144,14 @@ export const mapNotificationInteraction = (
   delivery: ReminderDelivery,
   interaction: NotificationInteraction,
 ): ReminderActionEvent | undefined => {
-  if (interaction.type === 'close') return undefined;
+  // A closed task banner is an explicit “ignored” signal for the gentle
+  // backoff rule. Important non-task notices (sync risk, approvals and the
+  // morning brief) are never silently counted as ignored task work.
+  if (interaction.type === 'close') {
+    return delivery.kind === 'task'
+      ? { reminderId: delivery.id, action: 'dismiss' }
+      : undefined;
+  }
   if (interaction.type === 'click') {
     return delivery.actions.some(({ id }) => id === 'open')
       ? { reminderId: delivery.id, action: 'open' }

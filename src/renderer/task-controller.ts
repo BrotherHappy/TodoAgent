@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ApplyTodayPlanRequest,
+  BulkTaskRequest,
   CreateTaskInput,
+  RecordWorkLogInput,
   RecurrenceEditScope,
   Task,
   TaskFilter,
@@ -11,13 +14,18 @@ import type {
   TaskSourceType,
   UpdateTaskInput,
 } from "../shared/models";
+import type { ApplyTaskAutomationRequest } from "../shared/desktop-api";
+import { actualMinutesForTask } from "../shared/task-time-accounting";
+import { isInboxTask } from "../shared/task-view-predicates";
+import { localDateKey, localDateKeyFromInstant } from "./timeline-utils";
 
-const localDate = (date = new Date()): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
+const localDate = localDateKey;
+
+// A phone-sized window has very little room for a split inspector. Keep the
+// list as the first thing users see there and open details only after an
+// explicit task tap. Desktop keeps the useful first-task inspector preview.
+const shouldAutoSelectFirstTask = (): boolean =>
+  !window.matchMedia?.("(max-width: 520px)").matches;
 
 const demoTask = (
   id: string,
@@ -72,18 +80,24 @@ const demoTasks: Task[] = [
 ];
 
 function fallbackMatchesView(task: Task, view: TaskView): boolean {
+  const dueDate = localDateKeyFromInstant(task.dueAt);
   if (view === "trash") return Boolean(task.deletedAt);
   if (task.deletedAt) return false;
   if (view === "completed") return task.status === "completed";
   if (view === "all") return true;
-  if (view === "inbox")
-    return !task.plannedDate && !task.dueAt && !task.projectId;
+  if (view === "inbox") return isInboxTask(task);
+  if (view === "deferred")
+    return task.status === "open" && Boolean(task.deferUntil && task.deferUntil > localDate());
   if (view === "upcoming")
-    return Boolean(task.plannedDate && task.plannedDate > localDate());
+    return Boolean(
+      (task.plannedDate && task.plannedDate > localDate()) ||
+        (task.deferUntil && task.deferUntil > localDate()),
+    );
   return (
     task.status === "open" &&
+    !(task.deferUntil && task.deferUntil > localDate()) &&
     (task.plannedDate === localDate() ||
-      Boolean(task.dueAt && task.dueAt.slice(0, 10) <= localDate()))
+      Boolean(dueDate && dueDate <= localDate()))
   );
 }
 
@@ -98,17 +112,20 @@ function fallbackSections(tasks: Task[], view: TaskView): TaskViewSection[] {
               ? "completed"
               : view === "upcoming"
                 ? "upcoming"
+                : view === "deferred"
+                  ? "deferred"
                 : view === "inbox"
                   ? "inbox"
                   : "open",
         tasks,
       },
     ];
-  const overdue = tasks.filter(
-    (task) => task.dueAt && task.dueAt.slice(0, 10) < localDate(),
-  );
+  const overdue = tasks.filter((task) => {
+    const dueDate = localDateKeyFromInstant(task.dueAt);
+    return Boolean(dueDate && dueDate < localDate());
+  });
   const dueToday = tasks.filter(
-    (task) => task.dueAt?.slice(0, 10) === localDate(),
+    (task) => localDateKeyFromInstant(task.dueAt) === localDate(),
   );
   const planned = tasks.filter(
     (task) => !dueToday.includes(task) && task.plannedDate === localDate(),
@@ -130,21 +147,35 @@ export interface TaskController {
   lastOperationId?: string;
   select(id?: TaskId): void;
   refresh(): Promise<void>;
-  create(input: CreateTaskInput): Promise<TaskMutationResult | undefined>;
+  create(
+    input: CreateTaskInput,
+    options?: { selectCreated?: boolean },
+  ): Promise<TaskMutationResult | undefined>;
   update(
     id: TaskId,
     patch: UpdateTaskInput,
     recurrenceScope?: RecurrenceEditScope,
   ): Promise<string | undefined>;
-  toggleComplete(task: Task): Promise<string | undefined>;
+  toggleComplete(
+    task: Task,
+    options?: { selectUpdated?: boolean },
+  ): Promise<string | undefined>;
+  skipRecurring(id: TaskId): Promise<string | undefined>;
   moveToToday(id: TaskId): Promise<string | undefined>;
   startFocus(id: TaskId): Promise<string | undefined>;
   pauseFocus(id: TaskId): Promise<string | undefined>;
   resetFocus(id: TaskId): Promise<string | undefined>;
+  recordWorkLog(
+    id: TaskId,
+    input: RecordWorkLogInput,
+  ): Promise<string | undefined>;
   trash(id: TaskId): Promise<string | undefined>;
   restore(id: TaskId): Promise<string | undefined>;
   purge(id: TaskId): Promise<string | undefined>;
   reorderToday(taskIds: TaskId[]): Promise<string | undefined>;
+  applyTodayPlan(request: ApplyTodayPlanRequest): Promise<string | undefined>;
+  applyBulkTaskAction(request: BulkTaskRequest): Promise<string | undefined>;
+  applyTaskAutomation(request: ApplyTaskAutomationRequest): Promise<string | undefined>;
   undo(operationId?: string): Promise<void>;
 }
 
@@ -175,12 +206,30 @@ export function useTaskController(
   // creates overlapping IPC calls. Their responses can arrive out of order;
   // only the newest mutation may directly replace the selected inspector task.
   const mutationRequestRef = useRef(0);
+  // Dependency and project views can open a task that is outside the current
+  // collection (for example, an unplanned prerequisite from Today). Keep the
+  // fetch tied to the latest explicit selection so a slow lookup cannot
+  // replace a newer task the user already opened.
+  const selectionRequestRef = useRef(0);
+  // Desktop previews the first task on an initial collection load, but an
+  // explicit close is a user intent that background refreshes must respect.
+  // Keep that intent separate from the selected id so a save finishing after
+  // the inspector closes cannot reopen the first visible task.
+  const selectionPreferenceRef = useRef<"auto" | "open" | "closed">("auto");
   // Electron invokes from a renderer are asynchronous. Without a per-editor
   // write queue, two quick blur saves can arrive at the main process in the
   // reverse order, leaving the earlier date in persistent storage. Preserve
   // the user's input order while allowing reads and unrelated UI work to run.
   const updateQueueRef = useRef<Promise<void>>(Promise.resolve());
   const api = window.desktopApi?.tasks;
+  const controllerInputRef = useRef({ view, search, sourceType });
+  const controllerInputChanged =
+    controllerInputRef.current.view !== view ||
+    controllerInputRef.current.search !== search ||
+    controllerInputRef.current.sourceType !== sourceType;
+  useEffect(() => {
+    controllerInputRef.current = { view, search, sourceType };
+  }, [search, sourceType, view]);
 
   const refresh = useCallback(async () => {
     const requestId = ++refreshRequestRef.current;
@@ -193,6 +242,7 @@ export function useTaskController(
           text: search || undefined,
           sourceTypes: sourceType ? [sourceType] : undefined,
         };
+        const selectionRequest = selectionRequestRef.current;
         // Do not read `list` and `sections` in parallel: an edit between those
         // two IPC reads can otherwise give the inspector a newer task while
         // the visible list still renders its old section snapshot. Sections
@@ -201,33 +251,56 @@ export function useTaskController(
         const nextSections = await api.sections(filter);
         const nextTasks = nextSections.flatMap((section) => section.tasks);
         if (requestId !== refreshRequestRef.current) return;
+        if (selectionRequest !== selectionRequestRef.current) {
+          // The collection read is still useful after an explicit selection
+          // changed mid-flight; only the selection result is stale.
+          setTasks(nextTasks);
+          setSections(nextSections);
+          return;
+        }
         const currentSelection = selectedIdRef.current;
         const visibleSelection = currentSelection
           ? nextTasks.find((task) => task.id === currentSelection)
           : undefined;
         let nextSelection = visibleSelection;
         if (currentSelection && !visibleSelection && typeof api.get === "function") {
-          // A filtered-out task is still a valid selection. `get(..., true)`
-          // also lets a concurrent trash/restore operation clear an inspector
-          // whose deletion state no longer belongs in the active view. Other
-          // filter changes (for example, moving Today to tomorrow) keep the
-          // editor open so a multi-field edit is not interrupted.
+          // A filtered-out task is still a valid selection while it remains a
+          // member of the same semantic collection. `get(..., true)` also
+          // lets a concurrent trash/restore or complete/reopen operation
+          // clear an inspector whose status no longer belongs in the active
+          // view. Other filter changes (for example, moving Today to
+          // tomorrow) keep the editor open so a multi-field edit is not
+          // interrupted.
           const fetchedSelection = await api.get(currentSelection, true);
           if (requestId !== refreshRequestRef.current) return;
-          const deletionMatchesView =
+          if (selectionRequest !== selectionRequestRef.current) {
+            setTasks(nextTasks);
+            setSections(nextSections);
+            return;
+          }
+          const selectionMatchesView =
             view === "trash"
               ? Boolean(fetchedSelection?.deletedAt)
-              : !fetchedSelection?.deletedAt;
-          nextSelection = deletionMatchesView
+              : view === "completed"
+                ? fetchedSelection?.status === "completed" && !fetchedSelection?.deletedAt
+                : !fetchedSelection?.deletedAt;
+          nextSelection = selectionMatchesView
             ? fetchedSelection
             : undefined;
         }
-        if (!currentSelection) nextSelection = nextTasks[0];
+        if (!currentSelection) {
+          nextSelection =
+            (controllerInputChanged || selectionPreferenceRef.current !== "closed") &&
+            shouldAutoSelectFirstTask()
+              ? nextTasks[0]
+              : undefined;
+        }
         setTasks(nextTasks);
         setSections(nextSections);
         selectedIdRef.current = nextSelection?.id;
         setSelectedId(nextSelection?.id);
         setSelectedTask(nextSelection);
+        if (nextSelection) selectionPreferenceRef.current = "open";
       } else {
         const query = search.trim().toLocaleLowerCase();
         const next = fallback
@@ -244,12 +317,16 @@ export function useTaskController(
         const currentSelection = selectedIdRef.current;
         const nextSelection = currentSelection
           ? fallback.find((task) => task.id === currentSelection)
-          : next[0];
+          : (controllerInputChanged || selectionPreferenceRef.current !== "closed") &&
+              shouldAutoSelectFirstTask()
+            ? next[0]
+            : undefined;
         setTasks(next);
         setSections(fallbackSections(next, view));
         selectedIdRef.current = nextSelection?.id;
         setSelectedId(nextSelection?.id);
         setSelectedTask(nextSelection);
+        if (nextSelection) selectionPreferenceRef.current = "open";
       }
     } catch (reason) {
       if (requestId !== refreshRequestRef.current) return;
@@ -257,7 +334,7 @@ export function useTaskController(
     } finally {
       if (requestId === refreshRequestRef.current) setLoading(false);
     }
-  }, [api, fallback, search, sourceType, view]);
+  }, [api, controllerInputChanged, fallback, search, sourceType, view]);
 
   useEffect(() => {
     void refresh();
@@ -270,6 +347,27 @@ export function useTaskController(
     });
   }, [refresh]);
 
+  // A mutation can clear the selection just as a collection navigation
+  // finishes loading (most noticeable when moving a task into the Trash).
+  // Keep the inspector useful by selecting the first task once the settled
+  // snapshot has arrived. `refresh` already preserves an intentional
+  // filtered-out selection, so this only fills an actually empty selection.
+  useEffect(() => {
+    if (
+      loading ||
+      tasks.length === 0 ||
+      selectedIdRef.current ||
+      selectionPreferenceRef.current === "closed" ||
+      !shouldAutoSelectFirstTask()
+    )
+      return;
+    const first = tasks[0];
+    selectedIdRef.current = first.id;
+    setSelectedId(first.id);
+    setSelectedTask(first);
+    selectionPreferenceRef.current = "open";
+  }, [loading, tasks]);
+
   const applyFallback = useCallback((id: TaskId, patch: Partial<Task>) => {
     setFallback((current) =>
       current.map((task) =>
@@ -281,16 +379,23 @@ export function useTaskController(
   }, []);
 
   const create = useCallback(
-    async (input: CreateTaskInput) => {
+    async (
+      input: CreateTaskInput,
+      options?: { selectCreated?: boolean },
+    ) => {
+      const selectCreated = options?.selectCreated !== false;
       if (api) {
         const mutationRequest = ++mutationRequestRef.current;
         const result = await api.create(input);
         if (mutationRequest !== mutationRequestRef.current) return result;
         setLastOperationId(result.operationId);
-        selectedIdRef.current = result.task.id;
-        setSelectedId(result.task.id);
+        if (selectCreated) {
+          selectionPreferenceRef.current = "open";
+          selectedIdRef.current = result.task.id;
+          setSelectedId(result.task.id);
+        }
         await refresh();
-        if (mutationRequest === mutationRequestRef.current) {
+        if (selectCreated && mutationRequest === mutationRequestRef.current) {
           selectedIdRef.current = result.task.id;
           setSelectedId(result.task.id);
           setSelectedTask(result.task);
@@ -313,9 +418,12 @@ export function useTaskController(
             : { status: "local" },
       });
       setFallback((current) => [task, ...current]);
-      selectedIdRef.current = task.id;
-      setSelectedId(task.id);
-      setSelectedTask(task);
+      if (selectCreated) {
+        selectionPreferenceRef.current = "open";
+        selectedIdRef.current = task.id;
+        setSelectedId(task.id);
+        setSelectedTask(task);
+      }
       return undefined;
     },
     [api, refresh],
@@ -329,13 +437,18 @@ export function useTaskController(
     ) => {
       if (api) {
         const mutationRequest = ++mutationRequestRef.current;
+        const selectionRequest = selectionRequestRef.current;
         const write = async (): Promise<string | undefined> => {
           const result = await api.update({ id, patch, recurrenceScope });
           if (mutationRequest !== mutationRequestRef.current)
             return result.operationId;
           setLastOperationId(result.operationId);
           await refresh();
-          if (mutationRequest === mutationRequestRef.current) {
+          if (
+            mutationRequest === mutationRequestRef.current &&
+            selectionRequest === selectionRequestRef.current
+          ) {
+            selectionPreferenceRef.current = "open";
             selectedIdRef.current = result.task.id;
             setSelectedId(result.task.id);
             setSelectedTask(result.task);
@@ -383,8 +496,129 @@ export function useTaskController(
     [api, refresh],
   );
 
+  const applyTodayPlan = useCallback(
+    async (request: ApplyTodayPlanRequest) => {
+      if (api) {
+        const operation = await api.applyTodayPlan(request);
+        setLastOperationId(operation.id);
+        await refresh();
+        return operation.id;
+      }
+      const selected = new Map(
+        request.items.map((item, index) => [item.id, { item, index }]),
+      );
+      const cleared = new Set(request.clearTaskIds);
+      const plannedDate = request.date ?? localDate();
+      setFallback((current) =>
+        current.map((task) => {
+          const plan = selected.get(task.id);
+          if (plan) {
+            return {
+              ...task,
+              plannedDate,
+              privateOrder: plan.index,
+              estimatedMinutes:
+                plan.item.estimatedMinutes ?? task.estimatedMinutes,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          if (cleared.has(task.id)) {
+            return {
+              ...task,
+              plannedDate: undefined,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return task;
+        }),
+      );
+      return undefined;
+    },
+    [api, refresh],
+  );
+
+  const applyBulkTaskAction = useCallback(
+    async (request: BulkTaskRequest) => {
+      if (api) {
+        const operation = await api.applyBulkTaskAction(request);
+        setLastOperationId(operation.id);
+        await refresh();
+        return operation.id;
+      }
+      const selected = new Set(request.ids);
+      const now = new Date().toISOString();
+      setFallback((current) =>
+        current.map((task) => {
+          if (!selected.has(task.id)) return task;
+          if (request.action.kind === "complete") {
+            return {
+              ...task,
+              status: "completed",
+              completedAt: request.action.completedAt ?? now,
+              updatedAt: now,
+            };
+          }
+          if (request.action.kind === "reopen") {
+            return {
+              ...task,
+              status: "open",
+              completedAt: undefined,
+              updatedAt: now,
+            };
+          }
+          if (request.action.kind === "move-to-today") {
+            return {
+              ...task,
+              plannedDate: request.action.date ?? localDate(),
+              updatedAt: now,
+            };
+          }
+          if (request.action.kind === "edit") {
+            const { patch } = request.action;
+            let tags = task.tags;
+            if (patch.tags !== undefined) {
+              tags = patch.tags.mode === "replace"
+                ? [...patch.tags.values]
+                : patch.tags.mode === "add"
+                  ? [...new Set([...tags, ...patch.tags.values])]
+                  : tags.filter((tag) => !patch.tags?.values.includes(tag));
+            }
+            return {
+              ...task,
+              ...(patch.priority === undefined ? {} : { priority: patch.priority }),
+              ...(patch.projectId === undefined ? {} : { projectId: patch.projectId ?? undefined }),
+              ...(patch.listId === undefined ? {} : { listId: patch.listId ?? undefined }),
+              tags,
+              updatedAt: now,
+            };
+          }
+          if (request.action.kind === "trash") {
+            return { ...task, deletedAt: now, updatedAt: now };
+          }
+          return { ...task, deletedAt: undefined, updatedAt: now };
+        }),
+      );
+      return undefined;
+    },
+    [api, refresh],
+  );
+
+  const applyTaskAutomation = useCallback(
+    async (request: ApplyTaskAutomationRequest) => {
+      if (api) {
+        const operation = await api.applyTaskAutomation(request);
+        setLastOperationId(operation.id);
+        await refresh();
+        return operation.id;
+      }
+      return undefined;
+    },
+    [api, refresh],
+  );
+
   const toggleComplete = useCallback(
-    async (task: Task) => {
+    async (task: Task, options?: { selectUpdated?: boolean }) => {
+      const selectUpdated = options?.selectUpdated !== false;
       if (api) {
         const mutationRequest = ++mutationRequestRef.current;
         const result =
@@ -395,7 +629,8 @@ export function useTaskController(
           return result.operationId;
         setLastOperationId(result.operationId);
         await refresh();
-        if (mutationRequest === mutationRequestRef.current) {
+        if (selectUpdated && mutationRequest === mutationRequestRef.current) {
+          selectionPreferenceRef.current = "open";
           selectedIdRef.current = result.task.id;
           setSelectedId(result.task.id);
           setSelectedTask(result.task);
@@ -409,13 +644,14 @@ export function useTaskController(
       });
       return undefined;
     },
-    [api, applyFallback, refresh],
+    [api, applyFallback, fallback, refresh],
   );
 
   const runMutation = useCallback(
     async (
       name:
         | "moveToToday"
+        | "skipRecurring"
         | "startFocus"
         | "pauseFocus"
         | "resetFocus"
@@ -425,6 +661,9 @@ export function useTaskController(
     ) => {
       if (api) {
         const mutationRequest = ++mutationRequestRef.current;
+        if (name === "moveToTrash" || name === "restore") {
+          selectionPreferenceRef.current = "auto";
+        }
         const result =
           name === "moveToToday"
             ? await api.moveToToday({ id })
@@ -436,10 +675,12 @@ export function useTaskController(
         if (mutationRequest !== mutationRequestRef.current)
           return result.operationId;
         if (name === "moveToTrash" || name === "restore") {
+          selectionPreferenceRef.current = "auto";
           selectedIdRef.current = undefined;
           setSelectedId(undefined);
           setSelectedTask(undefined);
         } else {
+          selectionPreferenceRef.current = "open";
           selectedIdRef.current = result.task.id;
           setSelectedId(result.task.id);
           setSelectedTask(result.task);
@@ -448,6 +689,14 @@ export function useTaskController(
       }
       if (name === "moveToToday")
         applyFallback(id, { plannedDate: localDate() });
+      if (name === "skipRecurring") {
+        const task = fallback.find((candidate) => candidate.id === id);
+        if (task?.recurrence !== undefined) {
+          applyFallback(id, {
+            recurrenceIndex: (task.recurrenceIndex ?? 0) + 1,
+          });
+        }
+      }
       if (name === "startFocus")
         applyFallback(id, { focusStartedAt: new Date().toISOString() });
       if (name === "pauseFocus")
@@ -475,11 +724,57 @@ export function useTaskController(
     [api, lastOperationId, refresh],
   );
 
+  const recordWorkLog = useCallback(
+    async (id: TaskId, input: RecordWorkLogInput) => {
+      if (api) {
+        const mutationRequest = ++mutationRequestRef.current;
+        const result = await api.recordWorkLog({ id, ...input });
+        if (mutationRequest !== mutationRequestRef.current) return result.operationId;
+        setLastOperationId(result.operationId);
+        await refresh();
+        if (mutationRequest !== mutationRequestRef.current) return result.operationId;
+        selectionPreferenceRef.current = "open";
+        selectedIdRef.current = result.task.id;
+        setSelectedId(result.task.id);
+        setSelectedTask(result.task);
+        return result.operationId;
+      }
+
+      const task = fallback.find((candidate) => candidate.id === id);
+      if (!task || task.deletedAt !== undefined) return undefined;
+      const minutes = input.minutes;
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > 720) {
+        throw new Error("投入时长必须是 1–720 分钟的整数");
+      }
+      const endedAt = input.endedAt ?? new Date().toISOString();
+      const startedAt = new Date(
+        new Date(endedAt).getTime() - minutes * 60_000,
+      ).toISOString();
+      const existingActualMinutes = actualMinutesForTask(task);
+      applyFallback(id, {
+        actualMinutes: existingActualMinutes + minutes,
+        focusSessions: [
+          ...(task.focusSessions ?? []),
+          {
+            id: `${task.id}:manual:${crypto.randomUUID()}`,
+            startedAt,
+            endedAt,
+            elapsedSeconds: minutes * 60,
+            source: "manual",
+          },
+        ],
+      });
+      return undefined;
+    },
+    [api, applyFallback, fallback, refresh],
+  );
+
   const purge = useCallback(
     async (id: TaskId) => {
       if (api) {
         ++mutationRequestRef.current;
         await api.purge(id);
+        selectionPreferenceRef.current = "auto";
         selectedIdRef.current = undefined;
         setSelectedId(undefined);
         setSelectedTask(undefined);
@@ -487,6 +782,7 @@ export function useTaskController(
         return undefined;
       }
       setFallback((current) => current.filter((task) => task.id !== id));
+      selectionPreferenceRef.current = "auto";
       selectedIdRef.current = undefined;
       setSelectedId(undefined);
       setSelectedTask(undefined);
@@ -503,28 +799,59 @@ export function useTaskController(
         tasks.find((task) => task.id === selectedId) ??
         (selectedTask?.id === selectedId ? selectedTask : undefined),
       selectedId,
-      loading,
+      // `refresh` starts from an effect, so React can render one stale
+      // snapshot with loading=false immediately after a route/filter change.
+      // Treat the changed controller input as loading during that handoff;
+      // otherwise a pending search jump may focus a row that is removed by
+      // the refresh one frame later.
+      loading: loading || controllerInputChanged,
       error,
       lastOperationId,
       select: (id) => {
+        const selectionRequest = ++selectionRequestRef.current;
+        selectionPreferenceRef.current = id ? "open" : "closed";
         selectedIdRef.current = id;
         setSelectedId(id);
-        setSelectedTask(
-          id ? tasks.find((task) => task.id === id) : undefined,
-        );
+        const localTask = id ? tasks.find((task) => task.id === id) : undefined;
+        setSelectedTask(localTask);
+        if (!id || localTask || !api?.get) return;
+        void api.get(id, true).then((fetchedTask) => {
+          if (
+            selectionRequest !== selectionRequestRef.current ||
+            selectedIdRef.current !== id
+          ) {
+            return;
+          }
+          if (!fetchedTask) {
+            selectionPreferenceRef.current = "closed";
+            selectedIdRef.current = undefined;
+            setSelectedId(undefined);
+            setSelectedTask(undefined);
+            return;
+          }
+          setSelectedTask(fetchedTask);
+        }).catch(() => {
+          // Keep the selection stable when an optional cross-collection read
+          // fails; the next task refresh can still resolve it normally.
+        });
       },
       refresh,
       create,
       update,
       toggleComplete,
       moveToToday: (id) => runMutation("moveToToday", id),
+      skipRecurring: (id) => runMutation("skipRecurring", id),
       startFocus: (id) => runMutation("startFocus", id),
       pauseFocus: (id) => runMutation("pauseFocus", id),
       resetFocus: (id) => runMutation("resetFocus", id),
+      recordWorkLog,
       trash: (id) => runMutation("moveToTrash", id),
       restore: (id) => runMutation("restore", id),
       purge,
       reorderToday,
+      applyTodayPlan,
+      applyBulkTaskAction,
+      applyTaskAutomation,
       undo,
     }),
     [
@@ -533,6 +860,7 @@ export function useTaskController(
       selectedId,
       selectedTask,
       loading,
+      controllerInputChanged,
       error,
       lastOperationId,
       refresh,
@@ -540,8 +868,12 @@ export function useTaskController(
       update,
       toggleComplete,
       runMutation,
+      recordWorkLog,
       purge,
       reorderToday,
+      applyTodayPlan,
+      applyBulkTaskAction,
+      applyTaskAutomation,
       undo,
     ],
   );

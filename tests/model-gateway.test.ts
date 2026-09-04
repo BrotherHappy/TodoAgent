@@ -119,6 +119,36 @@ describe("OpenAIChatCompletionsGateway", () => {
     expect(capturedUrl).toBe(expectedUrl);
   });
 
+  it("trims pasted endpoint, model, and bearer values before sending", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const gateway = new OpenAIChatCompletionsGateway({
+      baseUrl: "  http://models.example/v1/  ",
+      model: "  gpt-5.6-sol\n",
+      credentialRef: "model.default",
+      secretResolver: { resolve: async () => "  provider-key\n" },
+      fetch: async (input, init) => {
+        capturedUrl = input.toString();
+        capturedInit = init;
+        return successfulResponse();
+      },
+    });
+
+    await gateway.complete({
+      messages: [{ role: "user", content: "Reply with OK." }],
+      tools: [],
+      toolChoice: "none",
+    });
+
+    expect(capturedUrl).toBe("http://models.example/v1/chat/completions");
+    expect(new Headers(capturedInit?.headers).get("Authorization")).toBe(
+      "Bearer provider-key",
+    );
+    expect(JSON.parse(String(capturedInit?.body))).toMatchObject({
+      model: "gpt-5.6-sol",
+    });
+  });
+
   it.each([
     "not-a-url",
     "file:///tmp/model",
@@ -219,6 +249,45 @@ describe("OpenAIChatCompletionsGateway", () => {
       usage: { promptTokens: 10, completionTokens: 8, totalTokens: 23 },
     });
     expect(completion.assistantMessage.tool_calls?.[0].id).toBe("call-1");
+  });
+
+  it("accepts an explicit null tool_calls field from compatible gateways", async () => {
+    const gateway = new OpenAIChatCompletionsGateway({
+      baseUrl: "http://10.40.0.2",
+      model: "gpt-5.6-sol",
+      credentialRef: "model.default",
+      secretResolver: { resolve: async () => "provider-key" },
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            id: "resp-null-tool-calls",
+            choices: [
+              {
+                finish_reason: "stop",
+                message: {
+                  role: "assistant",
+                  content: "OK",
+                  tool_calls: null,
+                },
+              },
+            ],
+            usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+
+    await expect(
+      gateway.complete({
+        messages: [{ role: "user", content: "Reply with exactly OK." }],
+        tools: [],
+        toolChoice: "none",
+      }),
+    ).resolves.toMatchObject({
+      assistantMessage: { content: "OK" },
+      toolCalls: [],
+      usage: { totalTokens: 3 },
+    });
   });
 
   it("omits Authorization and does not resolve a key in explicit no-auth mode", async () => {
@@ -376,6 +445,105 @@ describe("OpenAIChatCompletionsGateway", () => {
           arguments: { taskId: "task-1", title: "New title" },
         },
       ],
+    });
+  });
+
+  it("accepts null metadata on OpenAI-compatible tool-call continuation chunks", async () => {
+    const gateway = new OpenAIChatCompletionsGateway({
+      baseUrl: "http://10.30.0.21:8005",
+      model: "DeepSeek-V4-Flash-0731",
+      credentialRef: "model.default",
+      secretResolver: { resolve: async () => "provider-key" },
+      fetch: async () =>
+        streamingResponse([
+          JSON.stringify({
+            id: "chatcmpl-deepseek-tool-stream",
+            choices: [
+              {
+                delta: {
+                  role: "assistant",
+                  content: "\n\n",
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call-deepseek-stream",
+                      type: "function",
+                      function: {
+                        name: "task_update",
+                        arguments: "",
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          JSON.stringify({
+            id: "chatcmpl-deepseek-tool-stream",
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: null,
+                      type: null,
+                      function: {
+                        name: null,
+                        arguments: '{"taskId":"task-1",',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          JSON.stringify({
+            id: "chatcmpl-deepseek-tool-stream",
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: null,
+                      type: null,
+                      function: {
+                        name: null,
+                        arguments: '"title":"New title"}',
+                      },
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          }),
+          JSON.stringify({
+            choices: [],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          }),
+        ]),
+    });
+
+    const deltas: string[] = [];
+    const completion = await gateway.complete(request(), undefined, (delta) =>
+      deltas.push(delta),
+    );
+
+    expect(deltas).toEqual(["\n\n"]);
+    expect(completion).toMatchObject({
+      id: "chatcmpl-deepseek-tool-stream",
+      finishReason: "tool_calls",
+      assistantMessage: { content: "\n\n" },
+      toolCalls: [
+        {
+          id: "call-deepseek-stream",
+          name: "task_update",
+          arguments: { taskId: "task-1", title: "New title" },
+        },
+      ],
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
     });
   });
 

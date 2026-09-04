@@ -1,17 +1,34 @@
 import type {
+  ApplyTodayPlanRequest,
+  BulkTaskRequest,
+  CreateListInput,
+  CreateProjectInput,
   CreateTaskInput,
+  DeleteListResult,
+  DeleteProjectResult,
+  IsoDateTime,
   RecurrenceEditScope,
   SaveDraftInput,
   Task,
+  TaskAttachment,
+  TaskAttachmentPreview,
   TaskDraft,
   TaskFilter,
   TaskId,
+  TaskHistoryEntry,
+  TaskList,
   TaskMutationResult,
   TaskOperation,
+  TaskOperationSummary,
+  RedoResult,
+  RecordWorkLogInput,
+  TaskProject,
   TaskSyncStatus,
   TaskViewSection,
   UndoResult,
   UpdateTaskInput,
+  UpdateListInput,
+  UpdateProjectInput,
 } from "./models";
 import type {
   FeishuSyncedTaskField,
@@ -28,20 +45,52 @@ import type {
   FullAccessLease,
   FullAccessToolScope,
 } from "./agent-types";
+import type {
+  AgentActivitySetup,
+  AgentActivitySnapshot,
+  AgentActivityStatus,
+} from "./agent-activity";
 import type { AppSettings, PublicCredentialState } from "./settings";
 import type {
+  PetAdventure,
+  PetCompanion,
+  PetCompanionKind,
+  PetCustomizationPatch,
   PetDiaryEntry,
   PetEvent,
+  PetGoal,
+  PetGoalMetric,
   PetMemoryEntry,
   PetSnapshot,
+  PetMiniGameRecord,
+  PetPersonality,
+  ProactiveMessageRecord,
   StartFocusRequest,
   WeatherSnapshot,
 } from "./pet-types";
+
+/** A coarse, local-only posture cue derived from system idle time. */
+export type PetInputActivityKind = "typing" | "reading";
+
+export interface PetInputActivityEvent {
+  kind: PetInputActivityKind;
+  at: string;
+  /** Seconds since the last system input; never contains key or pointer data. */
+  idleSeconds: number;
+}
 
 export interface UpdateTaskRequest {
   id: TaskId;
   patch: UpdateTaskInput;
   recurrenceScope?: RecurrenceEditScope;
+}
+
+/** Renderer-facing request for a reviewed manual automation run. The main
+ * process resolves `ruleId` from canonical settings before applying it. */
+export interface ApplyTaskAutomationRequest {
+  ids: TaskId[];
+  ruleId: string;
+  baselines?: Array<{ id: TaskId; updatedAt: IsoDateTime }>;
 }
 
 export interface CompleteTaskRequest {
@@ -54,6 +103,16 @@ export interface MoveToTodayRequest {
   date?: string;
 }
 
+export interface UpdateProjectRequest {
+  id: string;
+  patch: UpdateProjectInput;
+}
+
+export interface UpdateListRequest {
+  id: string;
+  patch: UpdateListInput;
+}
+
 export interface TaskDesktopApi {
   create(input: CreateTaskInput): Promise<TaskMutationResult>;
   get(id: TaskId, includeDeleted?: boolean): Promise<Task | undefined>;
@@ -62,19 +121,42 @@ export interface TaskDesktopApi {
   update(request: UpdateTaskRequest): Promise<TaskMutationResult>;
   complete(request: CompleteTaskRequest): Promise<TaskMutationResult>;
   reopen(id: TaskId): Promise<TaskMutationResult>;
+  skipRecurring(id: TaskId): Promise<TaskMutationResult>;
   moveToToday(request: MoveToTodayRequest): Promise<TaskMutationResult>;
   startFocus(id: TaskId): Promise<TaskMutationResult>;
   pauseFocus(id: TaskId): Promise<TaskMutationResult>;
   resetFocus(id: TaskId): Promise<TaskMutationResult>;
+  recordWorkLog(
+    request: RecordWorkLogInput & { id: TaskId },
+  ): Promise<TaskMutationResult>;
   reorderToday(taskIds: TaskId[]): Promise<TaskOperation>;
+  applyTodayPlan(request: ApplyTodayPlanRequest): Promise<TaskOperation>;
+  applyBulkTaskAction(request: BulkTaskRequest): Promise<TaskOperation>;
+  applyTaskAutomation(request: ApplyTaskAutomationRequest): Promise<TaskOperation>;
   moveToTrash(id: TaskId): Promise<TaskMutationResult>;
   restore(id: TaskId): Promise<TaskMutationResult>;
   purge(id: TaskId): Promise<TaskOperation>;
+  history(id: TaskId, limit?: number): Promise<TaskHistoryEntry[]>;
+  getLatestUndoableOperation(): Promise<TaskOperationSummary | undefined>;
+  getLatestRedoableOperation(): Promise<TaskOperationSummary | undefined>;
   undo(operationId?: string): Promise<UndoResult>;
+  redo(operationId?: string): Promise<RedoResult>;
   saveDraft(input: SaveDraftInput): Promise<TaskDraft>;
   getDraft(id: string): Promise<TaskDraft | undefined>;
   listDrafts(): Promise<TaskDraft[]>;
   deleteDraft(id: string): Promise<boolean>;
+  chooseAttachments(): Promise<TaskAttachment[]>;
+  openAttachment(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<void>;
+  deleteAttachment(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<void>;
+  previewAttachment(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<TaskAttachmentPreview>;
+  listProjects(includeArchived?: boolean): Promise<TaskProject[]>;
+  createProject(input: CreateProjectInput): Promise<TaskProject>;
+  updateProject(request: UpdateProjectRequest): Promise<TaskProject>;
+  deleteProject(id: string): Promise<DeleteProjectResult>;
+  listLists(includeArchived?: boolean): Promise<TaskList[]>;
+  createList(input: CreateListInput): Promise<TaskList>;
+  updateList(request: UpdateListRequest): Promise<TaskList>;
+  deleteList(id: string): Promise<DeleteListResult>;
 }
 
 export interface AppInfo {
@@ -101,13 +183,46 @@ export interface SettingsDesktopApi {
 
 export interface ShellDesktopApi {
   getInfo(): Promise<AppInfo>;
+  readClipboard(): Promise<ClipboardContextView>;
+  readActiveWindow(): Promise<ActiveWindowContextView>;
+  readSelectedText(): Promise<SelectedTextContextView>;
   showMain(route?: string): Promise<void>;
   showQuickCapture(): Promise<void>;
   hideCurrentWindow(): Promise<void>;
   setFloatingVisible(visible: boolean): Promise<AppSettings>;
   setFloatingExpanded(expanded: boolean): Promise<void>;
+  setFloatingPetOnly(petOnly: boolean): Promise<void>;
+  setFloatingEdgeDocked(docked: boolean): Promise<boolean>;
+  peekFloatingEdge(): Promise<boolean>;
+  beginFloatingDrag(screenX: number, screenY: number): Promise<boolean>;
+  updateFloatingDrag(screenX: number, screenY: number): Promise<boolean>;
+  endFloatingDrag(): Promise<void>;
   setLaunchAtLogin(enabled: boolean): Promise<AppSettings>;
   openExternal(url: string): Promise<void>;
+}
+
+export interface ClipboardContextView {
+  text: string;
+  characters: number;
+  truncated: boolean;
+  capturedAt: IsoDateTime;
+}
+
+export interface SelectedTextContextView {
+  status: "captured" | "unavailable";
+  text?: string;
+  characters?: number;
+  truncated?: boolean;
+  capturedAt: IsoDateTime;
+  reason?: "unsupported" | "permission-denied" | "empty" | "error";
+}
+
+export interface ActiveWindowContextView {
+  status: "captured" | "unavailable";
+  appName?: string;
+  title?: string;
+  reason?: "unsupported" | "permission-denied" | "empty" | "error";
+  capturedAt: IsoDateTime;
 }
 
 export interface CaptureDesktopApi {
@@ -120,6 +235,10 @@ export interface AgentChatMessage {
 }
 
 export interface AgentSendRequest {
+  /** One-use previews explicitly confirmed in this window. Never model supplied. */
+  contextTokens?: string[];
+  /** Assigned by the main-process IPC router, not accepted from a renderer. */
+  contextOwnerId?: number;
   /** Optional caller-generated correlation ID for matching live events. */
   runId?: string;
   /**
@@ -217,18 +336,26 @@ export interface ModelUsageStatus {
   blocked: boolean;
   blockedReason?:
     | "daily-token-limit-reached"
+    | "daily-cost-limit-reached"
     | "provider-usage-unavailable"
+    | "provider-cost-unavailable"
     | "usage-state-unavailable";
   reportedRequestCount: number;
   unreportedRequestCount: number;
+  /** Requests with token dimensions missing for a configured price profile. */
+  unpricedRequestCount: number;
   lastUpdatedAt?: string;
   accounting: "none" | "provider-reported" | "partial" | "unavailable";
   /** A completed request can cross the boundary; subsequent runs are blocked. */
   enforcement: "block-new-runs-at-or-over-limit";
   cost: {
     configuredDailyLimitUsd: number | null;
-    mode: "not-enforced";
-    reason: "MODEL_PRICING_NOT_CONFIGURED";
+    usedUsd: number | null;
+    remainingUsd: number | null;
+    mode: "enforced" | "not-enforced";
+    reason?:
+      | "MODEL_PRICING_NOT_CONFIGURED"
+      | "DAILY_COST_LIMIT_DISABLED";
   };
 }
 
@@ -269,6 +396,13 @@ export interface AgentDesktopApi {
     request: FullAccessLeaseRequest,
   ): Promise<FullAccessLease>;
   revokeFullAccess(): Promise<void>;
+}
+
+export interface AgentActivityDesktopApi {
+  status(): Promise<AgentActivityStatus>;
+  setup(): Promise<AgentActivitySetup>;
+  rotateToken(): Promise<AgentActivitySetup>;
+  snapshot(): Promise<AgentActivitySnapshot>;
 }
 
 export type FeishuConnectionState =
@@ -424,7 +558,31 @@ export interface NotificationDesktopApi {
 export interface PetDesktopApi {
   snapshot(): Promise<PetSnapshot>;
   rename(name: string): Promise<PetSnapshot>;
+  customize(patch: PetCustomizationPatch): Promise<PetSnapshot>;
+  addCompanion(input: {
+    kind: PetCompanionKind;
+    name?: string;
+    personality?: PetPersonality;
+  }): Promise<PetSnapshot>;
+  updateCompanion(
+    id: string,
+    patch: Partial<Pick<PetCompanion, "name" | "personality">>,
+  ): Promise<PetSnapshot>;
+  deleteCompanion(id: string): Promise<boolean>;
   interact(kind?: string): Promise<PetSnapshot>;
+  dailyAdventure(localDate?: string): Promise<PetAdventure>;
+  completeAdventure(
+    adventureId: string,
+    choiceId: string,
+  ): Promise<PetSnapshot>;
+  recordMiniGame(input: {
+    game: PetMiniGameRecord["game"];
+    score: number;
+    durationSeconds: number;
+  }): Promise<PetSnapshot>;
+  recordProactiveMessage(
+    input: Pick<ProactiveMessageRecord, "kind" | "reason" | "dismissed">,
+  ): Promise<PetSnapshot>;
   startFocus(request: StartFocusRequest): Promise<PetSnapshot>;
   pauseFocus(reason?: string): Promise<PetSnapshot>;
   resumeFocus(): Promise<PetSnapshot>;
@@ -433,6 +591,13 @@ export interface PetDesktopApi {
   weather(): Promise<WeatherSnapshot | undefined>;
   refreshWeather(force?: boolean): Promise<WeatherSnapshot | undefined>;
   generateDiary(userNote?: string): Promise<PetDiaryEntry>;
+  createDiaryFromTask(taskId: string, userNote?: string): Promise<PetDiaryEntry>;
+  createDiaryFromCapture(input: {
+    title: string;
+    content: string;
+    localDate?: string;
+    captureId?: string;
+  }): Promise<PetDiaryEntry>;
   updateDiary(
     id: string,
     patch: Pick<PetDiaryEntry, "title" | "content">,
@@ -446,6 +611,84 @@ export interface PetDesktopApi {
     patch: Partial<Pick<PetMemoryEntry, "content" | "enabled">>,
   ): Promise<PetMemoryEntry>;
   deleteMemory(id: string): Promise<boolean>;
+  addHabit(input: { label: string; hint: string; cadenceMinutes: number }): Promise<PetSnapshot>;
+  updateHabit(
+    id: string,
+    patch: Partial<{ label: string; hint: string; cadenceMinutes: number; enabled: boolean }>,
+  ): Promise<PetSnapshot>;
+  completeHabit(id: string): Promise<PetSnapshot>;
+  snoozeHabit(id: string, minutes?: number): Promise<PetSnapshot>;
+  deleteHabit(id: string): Promise<boolean>;
+  addGoal(input: {
+    title: string;
+    metric: PetGoalMetric;
+    target: number;
+    periodStart: string;
+    periodEnd: string;
+  }): Promise<PetSnapshot>;
+  updateGoal(
+    id: string,
+    patch: Partial<Pick<PetGoal, "title" | "metric" | "target" | "periodStart" | "periodEnd" | "enabled">>,
+  ): Promise<PetSnapshot>;
+  deleteGoal(id: string): Promise<boolean>;
+  exportData(): Promise<PetDataExportResultView>;
+  previewDataImport(): Promise<PetDataPreviewResultView>;
+  commitDataImport(
+    previewToken: string,
+    strategy: PetDataImportStrategyView,
+  ): Promise<{ status: "imported"; result: PetDataImportResultView }>;
+  cancelDataImport(previewToken: string): Promise<boolean>;
+}
+
+export type PetDataImportStrategyView = "skip" | "overwrite";
+
+export interface PetDataCountsView {
+  rewards: number;
+  inventory: number;
+  habits: number;
+  goals: number;
+  adventures: number;
+  miniGames: number;
+  diary: number;
+  memories: number;
+  companions: number;
+  proactiveMessages: number;
+  focusHistory: number;
+}
+
+export type PetDataExportResultView =
+  | { status: "cancelled" }
+  | { status: "exported"; filePath: string; bytes: number };
+
+export interface PetDataImportPreviewView {
+  digest: string;
+  strategy: PetDataImportStrategyView;
+  exportedAt: string;
+  redaction: DataRedactionView;
+  incoming: PetDataCountsView;
+  existing: PetDataCountsView;
+  willReplace: boolean;
+  activeFocusPreserved: boolean;
+  warnings: string[];
+}
+
+export type PetDataPreviewResultView =
+  | { status: "cancelled" }
+  | {
+      status: "ready";
+      previewToken: string;
+      expiresAt: string;
+      filePath: string;
+      bytes: number;
+      strategies: Record<PetDataImportStrategyView, PetDataImportPreviewView>;
+    };
+
+export interface PetDataImportResultView {
+  digest: string;
+  strategy: PetDataImportStrategyView;
+  replaced: boolean;
+  imported: PetDataCountsView;
+  activeFocusPreserved: boolean;
 }
 
 export type DataRedactionView = "none" | "private" | "strict";
@@ -459,6 +702,8 @@ export interface DataExportRequestView {
     operations: boolean;
     settings: boolean;
     permissionAudit: boolean;
+    projects: boolean;
+    lists: boolean;
   }>;
 }
 
@@ -483,6 +728,8 @@ export interface DataImportPreviewView {
   tasks: DataCategoryPlanView;
   drafts: DataCategoryPlanView;
   operations: DataCategoryPlanView;
+  projects?: DataCategoryPlanView;
+  lists?: DataCategoryPlanView;
   settings: {
     included: boolean;
     differs: boolean;
@@ -513,6 +760,8 @@ export interface DataImportResultView {
   tasks: Omit<DataCategoryPlanView, "conflicts">;
   drafts: Omit<DataCategoryPlanView, "conflicts">;
   operations: Omit<DataCategoryPlanView, "conflicts">;
+  projects?: Omit<DataCategoryPlanView, "conflicts">;
+  lists?: Omit<DataCategoryPlanView, "conflicts">;
   settings: "none" | "overwritten" | "skipped";
   permissionAudit: "none" | "replaced" | "skipped";
   copiedTaskIds: Record<string, string>;
@@ -520,6 +769,7 @@ export interface DataImportResultView {
 
 export interface DataDesktopApi {
   exportToFile(request?: DataExportRequestView): Promise<DataExportResultView>;
+  exportMarkdownToFile(request?: DataExportRequestView): Promise<DataExportResultView>;
   previewImport(): Promise<DataPreviewResultView>;
   commitImport(
     previewToken: string,
@@ -548,17 +798,22 @@ export interface DesktopEventApi {
   onShortcutError(listener: (shortcut: string) => void): () => void;
   onAgentEvent(listener: (event: AgentRunEvent) => void): () => void;
   onAgentApproval(listener: (approval: AgentApprovalView) => void): () => void;
+  onAgentActivity(listener: (snapshot: AgentActivitySnapshot) => void): () => void;
   onFeishuStatus(listener: (status: FeishuStatusView) => void): () => void;
   onNotification(listener: (event: InAppNotificationView) => void): () => void;
   onPetEvent(listener: (event: PetEvent) => void): () => void;
+  onPetInputActivity(listener: (event: PetInputActivityEvent) => void): () => void;
 }
 
 export interface DesktopApi {
+  agentContext?: import('./agent-context').AgentContextApi;
+  buddy?: import('./desktopbuddy-contract').BuddyDesktopApi;
   tasks: TaskDesktopApi;
   settings: SettingsDesktopApi;
   shell: ShellDesktopApi;
   capture: CaptureDesktopApi;
   agent: AgentDesktopApi;
+  agentActivity: AgentActivityDesktopApi;
   feishu: FeishuDesktopApi;
   notifications: NotificationDesktopApi;
   pet: PetDesktopApi;
@@ -574,15 +829,36 @@ export const DESKTOP_CHANNELS = {
   taskUpdate: "tasks:update",
   taskComplete: "tasks:complete",
   taskReopen: "tasks:reopen",
+  taskSkipRecurring: "tasks:skip-recurring",
   taskMoveToToday: "tasks:move-to-today",
   taskStartFocus: "tasks:start-focus",
   taskPauseFocus: "tasks:pause-focus",
   taskResetFocus: "tasks:reset-focus",
+  taskRecordWorkLog: "tasks:record-work-log",
   taskReorderToday: "tasks:reorder-today",
+  taskApplyTodayPlan: "tasks:apply-today-plan",
+  taskApplyBulkAction: "tasks:apply-bulk-action",
+  taskApplyAutomation: "tasks:apply-automation",
   taskTrash: "tasks:trash",
   taskRestore: "tasks:restore",
   taskPurge: "tasks:purge",
+  taskHistory: "tasks:history",
+  taskLatestUndoableOperation: "tasks:latest-undoable-operation",
+  taskLatestRedoableOperation: "tasks:latest-redoable-operation",
   taskUndo: "tasks:undo",
+  taskRedo: "tasks:redo",
+  taskChooseAttachments: "tasks:choose-attachments",
+  taskOpenAttachment: "tasks:open-attachment",
+  taskDeleteAttachment: "tasks:delete-attachment",
+  taskPreviewAttachment: "tasks:preview-attachment",
+  projectList: "projects:list",
+  projectCreate: "projects:create",
+  projectUpdate: "projects:update",
+  projectDelete: "projects:delete",
+  listList: "lists:list",
+  listCreate: "lists:create",
+  listUpdate: "lists:update",
+  listDelete: "lists:delete",
   draftSave: "drafts:save",
   draftGet: "drafts:get",
   draftList: "drafts:list",
@@ -593,11 +869,20 @@ export const DESKTOP_CHANNELS = {
   credentialSet: "credentials:set",
   credentialDelete: "credentials:delete",
   shellGetInfo: "shell:get-info",
+  shellReadClipboard: "shell:read-clipboard",
+  shellReadActiveWindow: "shell:read-active-window",
+  shellReadSelectedText: "shell:read-selected-text",
   shellShowMain: "shell:show-main",
   shellShowQuick: "shell:show-quick",
   shellHideCurrent: "shell:hide-current",
   shellSetFloatingVisible: "shell:set-floating-visible",
   shellSetFloatingExpanded: "shell:set-floating-expanded",
+  shellSetFloatingPetOnly: "shell:set-floating-pet-only",
+  shellSetFloatingEdgeDocked: "shell:set-floating-edge-docked",
+  shellPeekFloatingEdge: "shell:peek-floating-edge",
+  shellBeginFloatingDrag: "shell:begin-floating-drag",
+  shellUpdateFloatingDrag: "shell:update-floating-drag",
+  shellEndFloatingDrag: "shell:end-floating-drag",
   shellSetLaunchAtLogin: "shell:set-launch-at-login",
   shellOpenExternal: "shell:open-external",
   captureParse: "capture:parse",
@@ -611,6 +896,10 @@ export const DESKTOP_CHANNELS = {
   agentAudit: "agent:audit",
   agentFullAccessCreate: "agent:full-access-create",
   agentFullAccessRevoke: "agent:full-access-revoke",
+  agentActivityStatus: "agent-activity:status",
+  agentActivitySetup: "agent-activity:setup",
+  agentActivityRotateToken: "agent-activity:rotate-token",
+  agentActivitySnapshot: "agent-activity:snapshot",
   feishuStatus: "feishu:status",
   feishuConfigure: "feishu:configure",
   feishuBeginPersonalConnect: "feishu:begin-personal-connect",
@@ -625,7 +914,15 @@ export const DESKTOP_CHANNELS = {
   notificationRefresh: "notifications:refresh",
   petSnapshot: "pet:snapshot",
   petRename: "pet:rename",
+  petCustomize: "pet:customize",
+  petCompanionAdd: "pet:companion-add",
+  petCompanionUpdate: "pet:companion-update",
+  petCompanionDelete: "pet:companion-delete",
   petInteract: "pet:interact",
+  petAdventureDaily: "pet:adventure-daily",
+  petAdventureComplete: "pet:adventure-complete",
+  petMiniGameRecord: "pet:mini-game-record",
+  petProactiveRecord: "pet:proactive-record",
   petFocusStart: "pet:focus-start",
   petFocusPause: "pet:focus-pause",
   petFocusResume: "pet:focus-resume",
@@ -634,12 +931,27 @@ export const DESKTOP_CHANNELS = {
   petWeatherGet: "pet:weather-get",
   petWeatherRefresh: "pet:weather-refresh",
   petDiaryGenerate: "pet:diary-generate",
+  petDiaryFromTask: "pet:diary-from-task",
+  petDiaryFromCapture: "pet:diary-from-capture",
   petDiaryUpdate: "pet:diary-update",
   petDiaryDelete: "pet:diary-delete",
   petMemoryAdd: "pet:memory-add",
   petMemoryUpdate: "pet:memory-update",
   petMemoryDelete: "pet:memory-delete",
+  petHabitAdd: "pet:habit-add",
+  petHabitUpdate: "pet:habit-update",
+  petHabitComplete: "pet:habit-complete",
+  petHabitSnooze: "pet:habit-snooze",
+  petHabitDelete: "pet:habit-delete",
+  petGoalAdd: "pet:goal-add",
+  petGoalUpdate: "pet:goal-update",
+  petGoalDelete: "pet:goal-delete",
+  petDataExport: "pet:data-export",
+  petDataPreviewImport: "pet:data-preview-import",
+  petDataCommitImport: "pet:data-commit-import",
+  petDataCancelImport: "pet:data-cancel-import",
   dataExport: "data:export",
+  dataMarkdownExport: "data:markdown-export",
   dataPreviewImport: "data:preview-import",
   dataCommitImport: "data:commit-import",
   dataCancelPreview: "data:cancel-preview",
@@ -651,9 +963,11 @@ export const DESKTOP_CHANNELS = {
   eventShortcutError: "system:shortcut-error",
   eventAgentRun: "event:agent-run",
   eventAgentApproval: "event:agent-approval",
+  eventAgentActivity: "event:agent-activity",
   eventFeishuStatus: "event:feishu-status",
   eventNotification: "event:notification",
   eventPet: "event:pet",
+  eventPetInputActivity: "event:pet-input-activity",
 } as const;
 
 declare global {

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "id": "hiyori-live2d",
+  "displayName": "Hiyori / 人类陪伴",
+  "version": "0.1.0",
+  "author": "Live2D sample / Desktop Buddy wrapper",
+  "type": "human",
+  "renderer": "live2d",
+  "description": "官方 Cubism Web Samples 中的人形 Live2D 预设，用来验证基础陪伴、视线追随和触摸反馈。",
+  "source": {
+    "type": "official-sample",
+    "url": "https://github.com/Live2D/CubismWebSamples/tree/develop/Samples/Resources/Hiyori",
+    "license": "Live2D Sample Data Terms"
+  },
+  "layout": {
+    "defaultSize": 100,
+    "minSize": 28,
+    "maxSize": 170,
+    "anchor": "bottomCenter",
+    "preferredDock": "bottomRight"
+  },
+  "model": {
+    "core": "assets/live2d-presets/hiyori/live2dcubismcore.min.js",
+    "model3": "assets/live2d-presets/hiyori/Hiyori.model3.json",
+    "preview": "assets/live2d-presets/hiyori/Hiyori.model3.json"
+  },
+  "colors": {
+    "swatches": ["#6d7dfd", "#1f2440", "#f6eefb"],
+    "cssClass": "pet-hiyori-live2d"
+  },
+  "capabilities": {
+    "idleMotion": true,
+    "attention": true,
+    "touchReaction": true,
+    "dragReaction": true,
+    "lifeRoutine": true,
+    "ambientMood": true,
+    "optionalCare": ["chat", "rest"],
+    "aiExpression": true,
+    "lookAtCursor": true,
+    "audioFeedback": false
+  },
+  "motions": {
+    "idleMotion": { "default": "Idle", "sleepy": "Idle" },
+    "attention": { "cursorNear": "Idle", "cursorLeave": "Idle", "called": "TapBody" },
+    "touchReaction": { "default": "TapBody", "head": "TapBody" },
+    "dragReaction": { "start": "TapBody", "holding": "Idle" },
+    "dropReaction": { "default": "TapBody" },
+    "lifeRoutine": {
+      "morning": "TapBody",
+      "focusTime": "Idle",
+      "idleLong": "Idle",
+      "night": "Idle",
+      "sleep": "Idle",
+      "rest": "Idle",
+      "wake": "TapBody"
+    },
+    "optionalCare": { "chat": "TapBody", "rest": "Idle" },
+    "aiThinking": { "default": "Idle" },
+    "aiSpeaking": { "default": "TapBody" },
+    "aiNeedConfirm": { "default": "Idle" },
+    "aiSuccess": { "default": "TapBody" },
+    "aiError": { "default": "Idle", "cancelled": "Idle" },
+    "aiExpression": { "thinking": "Idle", "speaking": "TapBody", "success": "TapBody", "error": "Idle" }
+  },
+  "interactions": [
+    { "id": "touch", "label": "打招呼", "behavior": "touchReaction.default", "cooldownMs": 800 },
+    { "id": "chat", "label": "陪我一下", "behavior": "optionalCare.chat", "cooldownMs": 5000 },
+    { "id": "rest", "label": "安静待机", "behavior": "lifeRoutine.rest", "cooldownMs": 5000 }
+  ],
+  "routine": {
+    "timezoneMode": "system",
+    "segments": [
+      { "id": "morning", "from": "07:30", "to": "10:00", "behavior": "lifeRoutine.morning", "cooldownMs": 1800000, "weight": 1.2, "message": "早上好，我来桌面上打个招呼。", "mood": "happy" },
+      { "id": "focusTime", "when": "userActiveLong", "behavior": "lifeRoutine.focusTime", "minQuietMs": 480000, "cooldownMs": 1200000, "weight": 1, "message": "我会安静陪你专注一会儿。", "mood": "neutral" },
+      { "id": "idleLong", "when": "noInteraction", "behavior": "lifeRoutine.idleLong", "afterMs": 420000, "cooldownMs": 900000, "weight": 1, "message": "我自己待机观察一下。", "mood": "thinking" },
+      { "id": "night", "from": "23:30", "to": "06:30", "behavior": "lifeRoutine.night", "cooldownMs": 1800000, "weight": 1.7, "message": "夜间模式，我会安静一点。", "mood": "sleepy" }
+    ]
+  },
+  "fallback": {
+    "renderer": "live2d",
+    "motion": {
+      "attention.cursorNear": "idleMotion.default",
+      "attention.cursorLeave": "idleMotion.default",
+      "touchReaction.head": "touchReaction.default",
+      "lifeRoutine.sleep": "idleMotion.sleepy",
+      "lifeRoutine.night": "lifeRoutine.sleep",
+      "lifeRoutine.idleLong": "lifeRoutine.rest",
+      "aiThinking": "idleMotion.default",
+      "aiSpeaking": "touchReaction.default",
+      "aiNeedConfirm": "idleMotion.default",
+      "aiSuccess": "touchReaction.default",
+      "aiError": "idleMotion.default"
+    }
+  }
+}

@@ -2,6 +2,8 @@ import {
   FEISHU_OPEN_API_BASE_URL,
   type FeishuApiEnvelope,
   type FeishuAuthConfig,
+  type FeishuAccessibleTasklist,
+  type FeishuAccessibleTasklistPage,
   type FeishuCreateTaskPayload,
   type FeishuFetch,
   type FeishuListTasksOptions,
@@ -327,6 +329,8 @@ export class FeishuClient implements FeishuTaskApi {
       const next: FeishuTokenSet = {
         ...refreshed,
         openId: refreshed.openId ?? staleToken.openId,
+        tenantKey: refreshed.tenantKey ?? staleToken.tenantKey,
+        appIdentityId: staleToken.appIdentityId,
       };
       const committed = await this.tokenStore.compareAndSwap(
         expectedRefreshToken,
@@ -471,6 +475,134 @@ export class FeishuClient implements FeishuTaskApi {
       seenTokens.add(page.page_token);
       pageToken = page.page_token;
     }
+  }
+
+  private async listAccessibleTasklistsPage(
+    pageToken?: string,
+  ): Promise<FeishuAccessibleTasklistPage> {
+    const query = new URLSearchParams({
+      page_size: "100",
+      user_id_type: "open_id",
+    });
+    if (pageToken) query.set("page_token", pageToken);
+    const page = await this.request<FeishuAccessibleTasklistPage>(
+      "/task/v2/tasklists",
+      { method: "GET" },
+      query,
+    );
+    return {
+      items: Array.isArray(page?.items)
+        ? page.items.filter(
+            (item): item is FeishuAccessibleTasklist =>
+              typeof item?.guid === "string" && item.guid.trim().length > 0,
+          )
+        : [],
+      page_token: page?.page_token,
+      has_more: page?.has_more === true,
+    };
+  }
+
+  private async listTasklistTasksPage(
+    tasklistGuid: string,
+    pageToken?: string,
+  ): Promise<FeishuTaskListPage> {
+    const query = new URLSearchParams({
+      page_size: "100",
+      user_id_type: "open_id",
+    });
+    if (pageToken) query.set("page_token", pageToken);
+    const page = await this.request<FeishuTaskListPage>(
+      `/task/v2/tasklists/${encodeURIComponent(tasklistGuid)}/tasks`,
+      { method: "GET" },
+      query,
+    );
+    return {
+      items: Array.isArray(page?.items) ? page.items : [],
+      page_token: page?.page_token,
+      has_more: page?.has_more === true,
+    };
+  }
+
+  /**
+   * Returns the union of `my_tasks` and every readable tasklist. Tasklist
+   * endpoints intentionally return summaries, so missing tasks are hydrated
+   * with `getTask` before entering the merge layer. A task may belong to more
+   * than one list; membership is retained without creating duplicate tasks.
+   */
+  async listAllAccessibleTasks(): Promise<FeishuTaskV2[]> {
+    const byGuid = new Map<string, FeishuTaskV2>();
+    const myTasks = await this.listAllTasks();
+    for (const task of myTasks) byGuid.set(task.guid, task);
+
+    const listGuids = new Set<string>();
+    const seenListTokens = new Set<string>();
+    let listToken: string | undefined;
+    try {
+      for (;;) {
+        const page = await this.listAccessibleTasklistsPage(listToken);
+        for (const list of page.items) listGuids.add(list.guid);
+        if (!page.has_more) break;
+        if (!page.page_token || seenListTokens.has(page.page_token)) {
+          throw new FeishuApiError(
+            "Feishu tasklist pagination reported has_more without a new page_token.",
+          );
+        }
+        seenListTokens.add(page.page_token);
+        listToken = page.page_token;
+      }
+    } catch (error) {
+      // Older tenants and test/relay deployments may not expose the list
+      // catalogue yet. Keep the proven `my_tasks` result in that case; a
+      // permission failure remains visible to the sync layer for reauth.
+      if (
+        error instanceof FeishuApiError &&
+        [404, 405, 501].includes(error.status ?? 0)
+      ) {
+        return myTasks;
+      }
+      throw error;
+    }
+
+    const memberships = new Map<string, FeishuTasklistMembership[]>();
+    for (const tasklistGuid of listGuids) {
+      const seenTaskTokens = new Set<string>();
+      let taskToken: string | undefined;
+      for (;;) {
+        const page = await this.listTasklistTasksPage(tasklistGuid, taskToken);
+        for (const summary of page.items) {
+          if (!summary?.guid) continue;
+          const currentMemberships = memberships.get(summary.guid) ?? [];
+          if (!currentMemberships.some((item) => item.tasklist_guid === tasklistGuid)) {
+            currentMemberships.push({ tasklist_guid: tasklistGuid });
+            memberships.set(summary.guid, currentMemberships);
+          }
+          if (!byGuid.has(summary.guid)) {
+            byGuid.set(summary.guid, await this.getTask(summary.guid));
+          }
+        }
+        if (!page.has_more) break;
+        if (!page.page_token || seenTaskTokens.has(page.page_token)) {
+          throw new FeishuApiError(
+            `Feishu tasklist ${tasklistGuid} pagination reported has_more without a new page_token.`,
+          );
+        }
+        seenTaskTokens.add(page.page_token);
+        taskToken = page.page_token;
+      }
+    }
+
+    return Array.from(byGuid.values(), (task) => {
+      const extraMemberships = memberships.get(task.guid);
+      if (!extraMemberships?.length) return task;
+      const existing = task.tasklists ?? [];
+      const merged = [...existing];
+      for (const membership of extraMemberships) {
+        if (!merged.some((item) => item.tasklist_guid === membership.tasklist_guid)) {
+          merged.push(membership);
+        }
+      }
+      return { ...task, tasklists: merged };
+    });
   }
 
   async getTask(taskGuid: string): Promise<FeishuTaskV2> {

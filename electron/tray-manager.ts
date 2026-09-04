@@ -1,10 +1,13 @@
 import { Menu, Tray, nativeImage } from 'electron';
+import type { TrayTodaySummary } from './tray-task-preview';
 
 export interface TrayStatus {
   sync: 'local' | 'synced' | 'pending' | 'offline' | 'error' | 'conflict';
   agent: 'disabled' | 'ready' | 'thinking' | 'awaiting-approval' | 'running' | 'stopped' | 'error';
   fullAccessExpiresAt?: string;
   floatingVisible: boolean;
+  mousePassthrough: boolean;
+  meetingMode: boolean;
   launchAtLogin: boolean;
 }
 
@@ -14,8 +17,11 @@ interface TrayManagerOptions {
   showMain: (route?: string) => void;
   showQuick: () => void;
   toggleFloating: (visible: boolean) => void;
+  toggleMousePassthrough: (enabled: boolean) => void;
+  toggleBossMode: (enabled: boolean) => void;
   setLaunchAtLogin: (enabled: boolean) => void;
   stopAgent: () => void;
+  getTodaySummary?: () => Promise<TrayTodaySummary>;
   quit: () => void;
 }
 
@@ -37,6 +43,7 @@ function statusText(status: TrayStatus): string {
 export class TrayManager {
   readonly #options: TrayManagerOptions;
   #tray?: Tray;
+  #refreshToken = 0;
 
   constructor(options: TrayManagerOptions) {
     this.#options = options;
@@ -55,9 +62,40 @@ export class TrayManager {
 
   refresh(): void {
     if (!this.#tray) return;
+    const token = ++this.#refreshToken;
     const status = this.#options.getStatus();
+    void this.#refreshMenu(token, status);
+  }
+
+  async #refreshMenu(
+    token: number,
+    status: TrayStatus,
+  ): Promise<void> {
+    let today: TrayTodaySummary = { tasks: [], totalOpen: 0 };
+    try {
+      today = (await this.#options.getTodaySummary?.()) ?? today;
+    } catch {
+      // A stale/temporarily unavailable task read must never break the tray.
+    }
+    if (token !== this.#refreshToken || !this.#tray) return;
     this.#tray.setContextMenu(Menu.buildFromTemplate([
       { label: statusText(status), enabled: false },
+      { type: 'separator' },
+      {
+        label: today.totalOpen > 0
+          ? `今日待办 · ${today.totalOpen} 项`
+          : '今日待办 · 暂无未完成任务',
+        enabled: false,
+      },
+      ...(today.tasks.length
+        ? today.tasks.map((task, index) => ({
+            label: `${index + 1}. ${task.title}`,
+            click: () => this.#options.showMain('today'),
+          }))
+        : [{ label: '打开 Today 查看全部任务', click: () => this.#options.showMain('today') }]),
+      ...(today.totalOpen > today.tasks.length
+        ? [{ label: '打开 Today 查看其余任务…', click: () => this.#options.showMain('today') }]
+        : []),
       { type: 'separator' },
       { label: '快速录入', accelerator: 'CommandOrControl+Shift+Space', click: this.#options.showQuick },
       { label: '打开 Today', click: () => this.#options.showMain('today') },
@@ -68,6 +106,18 @@ export class TrayManager {
         type: 'checkbox',
         checked: status.floatingVisible,
         click: (item) => this.#options.toggleFloating(item.checked),
+      },
+      {
+        label: '鼠标穿透（设置中可恢复）',
+        type: 'checkbox',
+        checked: status.mousePassthrough,
+        click: (item) => this.#options.toggleMousePassthrough(item.checked),
+      },
+      {
+        label: status.meetingMode ? '退出 Boss Mode' : '进入 Boss Mode',
+        type: 'checkbox',
+        checked: status.meetingMode,
+        click: (item) => this.#options.toggleBossMode(item.checked),
       },
       {
         label: '开机启动',
@@ -87,6 +137,7 @@ export class TrayManager {
   }
 
   destroy(): void {
+    this.#refreshToken += 1;
     this.#tray?.destroy();
     this.#tray = undefined;
   }

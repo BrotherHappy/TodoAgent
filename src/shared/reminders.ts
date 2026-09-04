@@ -1,4 +1,27 @@
+import type { TaskPriority } from './models';
+
 export type ReminderKind = 'task' | 'morning-brief' | 'sync-risk' | 'agent-approval';
+
+/**
+ * A small, local explanation for why a reminder is eligible right now.
+ *
+ * This is deliberately a closed vocabulary rather than model-generated copy:
+ * the explanation must remain trustworthy even when AI is disabled or an
+ * external task contains untrusted text.
+ */
+export type ReminderReasonCode =
+  | 'explicit'
+  | 'deadline'
+  | 'morning-brief'
+  | 'missed-summary'
+  | 'sync-risk'
+  | 'agent-approval';
+
+export interface ReminderReason {
+  code: ReminderReasonCode;
+  label: string;
+  detail?: string;
+}
 
 export interface ReminderCandidate {
   id: string;
@@ -8,7 +31,10 @@ export interface ReminderCandidate {
   body: string;
   scheduledAt: string;
   source?: 'local' | 'feishu';
+  projectId?: string;
+  priority?: TaskPriority;
   completed?: boolean;
+  reason?: ReminderReason;
 }
 
 export type ReminderPresetAction =
@@ -80,12 +106,15 @@ export interface ReminderDelivery {
   kind: ReminderKind | 'missed-summary';
   taskId?: string;
   actions: Array<{ id: ReminderPresetAction; label: string }>;
+  reason?: ReminderReason;
 }
 
 export interface ReminderRuntimeState {
   delivered: Record<string, string>;
   dismissed: Record<string, number>;
   snoozedUntil: Record<string, string>;
+  /** Delivery timestamps used for the local-day task notification budget. */
+  taskNotificationLog: Record<string, string>;
   lastMorningBriefDate?: string;
   lastRiskNoticeDate?: string;
 }
@@ -94,4 +123,5 @@ export const emptyReminderRuntimeState = (): ReminderRuntimeState => ({
   delivered: {},
   dismissed: {},
   snoozedUntil: {},
+  taskNotificationLog: {},
 });

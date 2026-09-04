@@ -10,6 +10,7 @@ import {
 } from "../electron/agent/tool-registry";
 import type {
   AgentJsonValue,
+  AgentRunEvent,
   ModelCompletion,
   NormalizedToolCall,
 } from "../src/shared/agent-types";
@@ -107,6 +108,59 @@ const runWith = async (
 };
 
 describe("Agent tool-run reliability", () => {
+  it("emits a terminal denied event when permission policy blocks a tool", async () => {
+    const events: AgentRunEvent[] = [];
+    const base = counterTool(async () => ({
+      invocationId: "never-executed",
+      status: "ok" as const,
+    }));
+    const registry = new ToolRegistry([
+      {
+        ...base,
+        analyze: (args: CounterArguments, context) => ({
+          ...base.analyze(args, context),
+          risk: "R2" as const,
+        }),
+      },
+    ]);
+    const completions = [
+      completionWith(toolCall("blocked", "denied-call")),
+      finalCompletion(),
+    ];
+    const runtime = new AgentRuntime({
+      modelGateway: {
+        complete: vi.fn(async () => {
+          const completion = completions.shift();
+          if (!completion) throw new Error("Unexpected model turn.");
+          return completion;
+        }),
+      },
+      permissionEngine: new PermissionEngine(),
+      auditLog: new AuditLog({ store: new InMemoryAuditStore() }),
+      toolRegistry: registry,
+      getPermissionContext: () => ({ mode: "standard" }),
+      requestApproval: () => "deny",
+    });
+
+    const output = await runtime.run({
+      runId: "denied-event-run",
+      messages: [{ role: "user", content: "请执行被拒绝的操作" }],
+      onEvent: (event) => events.push(event),
+    });
+
+    expect(output.state).toBe("partial");
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool-finished",
+        payload: expect.objectContaining({
+          toolName: "counter_write",
+          status: "denied",
+          errorCode: "USER_DENIED",
+        }),
+      }),
+    );
+  });
+
   it("replays a successful provider call receipt without repeating its side effect", async () => {
     let executions = 0;
     const registry = new ToolRegistry([

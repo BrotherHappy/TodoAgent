@@ -70,10 +70,39 @@ export type PetAttribute =
   | "organization"
   | "courage";
 
+/** A low-pressure companion style that changes presence, not task facts. */
+export type PetPersonality =
+  | "gentle"
+  | "energetic"
+  | "calm"
+  | "playful"
+  | "witty"
+  | "quiet";
+
+/**
+ * Optional room companions. They are presentation-only helpers: the main
+ * pet remains the single desktop presence and all task facts continue to live
+ * in the task store.
+ */
+export type PetCompanionKind =
+  | "paper-bird"
+  | "cloudlet"
+  | "moss-mouse"
+  | "moon-moth";
+
+export interface PetCompanion {
+  id: string;
+  kind: PetCompanionKind;
+  name: string;
+  personality: PetPersonality;
+  unlockedAt: string;
+}
+
 export interface PetProfile {
   id: string;
   name: string;
   species: "task-sprite";
+  personality: PetPersonality;
   stage: "seed" | "companion" | "partner" | "guardian";
   level: number;
   experience: number;
@@ -87,7 +116,16 @@ export interface PetProfile {
 export interface PetReward {
   id: string;
   idempotencyKey: string;
-  source: "task" | "focus" | "planning" | "review" | "rest" | "interaction";
+  source:
+    | "task"
+    | "focus"
+    | "planning"
+    | "review"
+    | "rest"
+    | "interaction"
+    | "adventure"
+    | "game"
+    | "customization";
   sourceId: string;
   experience: number;
   intimacy: number;
@@ -103,11 +141,83 @@ export interface PetInventoryItem {
   unlockedAt: string;
 }
 
+export type PetPalette = "lavender" | "mint" | "sunset" | "midnight";
+export type PetOutfit = "none" | "scarf" | "explorer" | "starlight";
+export type PetRoomTheme = "cloud-room" | "forest-nook" | "night-library";
+export type PetRoomAtmosphere = "daylight" | "cozy" | "moonlit";
+
+/**
+ * A room-only placement. Coordinates are percentages of the room stage so
+ * the same saved layout remains useful when the desktop window is resized.
+ * The service clamps values before persisting them.
+ */
+export interface PetDecorationPlacement {
+  x: number;
+  y: number;
+  scale?: number;
+}
+
+export interface PetAppearance {
+  palette: PetPalette;
+  outfit: PetOutfit;
+  roomTheme: PetRoomTheme;
+  decorations: string[];
+  /** Optional for backwards-compatible pet archives created before layouts. */
+  decorationPositions?: Record<string, PetDecorationPlacement>;
+  /** Optional so pre-atmosphere archives keep their exact shape. */
+  atmosphere?: PetRoomAtmosphere;
+}
+
+export interface PetCustomizationPatch {
+  palette?: PetPalette;
+  outfit?: PetOutfit;
+  roomTheme?: PetRoomTheme;
+  atmosphere?: PetRoomAtmosphere;
+  decorations?: string[];
+  /** Set a placement, or null to remove a saved override and use the default. */
+  decorationPositions?: Record<string, PetDecorationPlacement | null>;
+  personality?: PetPersonality;
+}
+
+export interface PetAdventureChoice {
+  id: string;
+  label: string;
+}
+
+export interface PetAdventure {
+  id: string;
+  localDate: string;
+  title: string;
+  prompt: string;
+  choices: PetAdventureChoice[];
+  selectedChoiceId?: string;
+  outcome?: string;
+  rewardId?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface PetMiniGameRecord {
+  id: string;
+  game: "breathing" | "star-catch" | "jump-rope" | "stretch-mirror";
+  score: number;
+  durationSeconds: number;
+  completedAt: string;
+}
+
 export interface PetDiaryEntry {
   id: string;
   localDate: string;
   title: string;
   content: string;
+  /** Optional id supplied by a capture flow so retrying the same save is idempotent. */
+  captureId?: string;
+  /**
+   * Local links back to the task records that shaped this entry. The links
+   * are intentionally private to Todo Agent: they are navigation metadata,
+   * never provider-owned fields written to Feishu.
+   */
+  taskIds?: TaskId[];
   generation: "local-template" | "model" | "user";
   completedTaskCount: number;
   focusRounds: number;
@@ -129,6 +239,34 @@ export interface PetMemoryEntry {
   updatedAt: string;
 }
 
+/** A gentle, user-controlled rhythm cue. It never creates a task or streak. */
+export interface PetHabit {
+  id: string;
+  label: string;
+  hint: string;
+  cadenceMinutes: number;
+  enabled: boolean;
+  lastCompletedAt?: string;
+  snoozedUntil?: string;
+}
+
+/** A gentle, optional direction for the current week. Progress is projected
+ * from task/focus/habit facts in the renderer rather than stored as a second
+ * counter, so it can never drift from the real records. */
+export type PetGoalMetric = "tasks-completed" | "focus-minutes" | "habit-checkins";
+
+export interface PetGoal {
+  id: string;
+  title: string;
+  metric: PetGoalMetric;
+  target: number;
+  periodStart: string;
+  periodEnd: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProactiveMessageRecord {
   id: string;
   kind:
@@ -137,7 +275,9 @@ export interface ProactiveMessageRecord {
     | "deadline"
     | "wellbeing"
     | "weather"
-    | "sync";
+    | "sync"
+    | "morning"
+    | "evening";
   reason: string;
   shownAt: string;
   dismissed?: boolean;
@@ -151,13 +291,37 @@ export interface PetState {
   focusHistory: FocusHistoryRecord[];
   rewards: PetReward[];
   inventory: PetInventoryItem[];
+  appearance: PetAppearance;
+  adventures: PetAdventure[];
+  miniGames: PetMiniGameRecord[];
   diary: PetDiaryEntry[];
   memories: PetMemoryEntry[];
+  habits: PetHabit[];
+  goals: PetGoal[];
+  companions: PetCompanion[];
   proactiveMessages: ProactiveMessageRecord[];
 }
 
+/**
+ * Stable, portable portion of a pet profile.  A running focus session is
+ * intentionally excluded: importing a backup must never interrupt the work
+ * that is currently in progress on this device.
+ */
+export type PetPortableState = Omit<PetState, "focus">;
+
 export interface PetSnapshot extends Omit<PetState, "focus"> {
   focus?: FocusSessionView;
+}
+
+export interface WeatherForecastDay {
+  /** Provider-local calendar date, formatted as YYYY-MM-DD. */
+  date: string;
+  conditionCode: number;
+  conditionLabel: string;
+  lowC?: number;
+  highC?: number;
+  precipitationProbability?: number;
+  severe: boolean;
 }
 
 export interface WeatherSnapshot {
@@ -171,6 +335,8 @@ export interface WeatherSnapshot {
   lowC?: number;
   highC?: number;
   precipitationProbability?: number;
+  /** Optional multi-day data; old cached snapshots may not contain it. */
+  forecast?: WeatherForecastDay[];
   severe: boolean;
   fetchedAt: string;
   expiresAt: string;
@@ -183,7 +349,10 @@ export interface PetEvent {
     | "focus-phase-completed"
     | "focus-phase-started"
     | "reward-granted"
-    | "weather-updated";
+    | "weather-updated"
+    | "adventure-completed"
+    | "mini-game-completed"
+    | "customization-changed";
   at: string;
   focus?: FocusSessionView;
   reward?: PetReward;

@@ -22,22 +22,9 @@ test.skip(
 );
 test.setTimeout(180_000);
 
+import { waitForElectronWindow } from '../helpers/electron-window';
 async function mainWindow(app: ElectronApplication): Promise<Page> {
-  const existing = app
-    .windows()
-    .find((page) => new URL(page.url()).searchParams.get("window") === "main");
-  return (
-    existing ??
-    app.waitForEvent("window", {
-      predicate: (page) => {
-        try {
-          return new URL(page.url()).searchParams.get("window") === "main";
-        } catch {
-          return false;
-        }
-      },
-    })
-  );
+  return waitForElectronWindow(app, 'main');
 }
 
 test("authorized live model supports connection, task CRUD approval, and morning brief", async () => {
@@ -55,6 +42,7 @@ test("authorized live model supports connection, task CRUD approval, and morning
         NO_PROXY: "10.30.0.21,127.0.0.1,localhost",
         no_proxy: "10.30.0.21,127.0.0.1,localhost",
         TODO_AGENT_E2E: "1",
+        TODO_AGENT_E2E_BACKGROUND: "1",
       },
     });
     const main = await mainWindow(app);

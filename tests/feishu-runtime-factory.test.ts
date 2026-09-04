@@ -211,6 +211,7 @@ describe("createFeishuRuntime", () => {
     expect(authorizationBody.get("scope")?.split(" ")).toEqual([
       "task:task:read",
       "task:task:write",
+      "task:tasklist:read",
       "offline_access",
     ]);
 
@@ -434,6 +435,15 @@ describe("createFeishuRuntime", () => {
               scope: "task:task:read task:task:write offline_access",
               expires_in: 7_200,
               refresh_token_expires_in: 2_592_000,
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/task/v2/tasklists")) {
+          return new Response(
+            JSON.stringify({
+              code: 0,
+              data: { items: [], has_more: false },
             }),
             { status: 200 },
           );

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "designSystem": {
+    "slug": "arc",
+    "path": "design-systems/arc"
+  },
+  "skill": {
+    "slug": "emilkowalski-motion",
+    "path": "skills/emilkowalski-motion",
+    "kind": "skill",
+    "mode": "prototype"
+  },
+  "boundAt": "2026-08-19T07:10:00Z"
+}

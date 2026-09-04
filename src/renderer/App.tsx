@@ -1,3 +1,7 @@
+import { BuddyGallery, BuddyInteractions } from './desktopbuddy/BuddyGallery';
+import { ScreenRegionSelector } from './desktopbuddy/ScreenRegionSelector';
+import { AgentContextControls } from './desktopbuddy/AgentContextControls';
+import { agentProviderFor } from '../shared/agent-model-config';
 import {
   Activity,
   AlarmClock,
@@ -6,10 +10,15 @@ import {
   ArrowLeft,
   ArrowUp,
   Bell,
+  BookOpen,
   CalendarDays,
+  CalendarClock,
   Check,
   CheckCircle2,
+  Clipboard,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleDot,
   ClipboardCheck,
   Clock3,
@@ -20,21 +29,35 @@ import {
   Download,
   ExternalLink,
   EyeOff,
+  Eye,
   FileText,
   Filter,
   Focus,
+  FolderKanban,
+  GitBranch,
   GripVertical,
+  Heart,
+  History,
   Inbox,
   Info,
+  Keyboard,
   Laptop,
   LayoutList,
   ListChecks,
   LockKeyhole,
+  Mic,
   MessageCircle,
   MoreHorizontal,
   PanelTop,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Pause,
+  Pencil,
   Play,
+  Pin,
+  PinOff,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -43,38 +66,85 @@ import {
   Settings,
   ShieldAlert,
   ShieldCheck,
+  SkipForward,
   Sparkles,
   Square,
+  Star,
+  Table2,
   Sun,
   Tag,
   Trash2,
   Undo2,
+  Redo2,
   Upload,
   UserRound,
   WandSparkles,
   X,
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
+  lazy,
   useMemo,
   useRef,
   useState,
+  Suspense,
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import type {
+  JsonValue,
+  BulkTaskAction,
+  BulkTaskEditPatch,
   RecurrenceEditScope,
   Task,
+  TaskAttachment,
+  TaskAttachmentPreview,
+  TaskComment,
+  TaskHistoryEntry,
+  TaskLink,
   TaskPriority,
+  TaskProject,
+  TaskList,
+  TaskResearchCard,
+  RecurrenceRule,
   TaskSourceType,
+  TaskSyncStatus,
+  TaskId,
+  TaskOperationSummary,
+  TaskMutationResult,
   TaskView,
   TaskViewSectionId,
 } from "../shared/models";
-import type { AuditRecord } from "../shared/agent-types";
+import type { PetDecorationPlacement } from "../shared/pet-types";
+import type { AuditRecord, ModelPricing } from "../shared/agent-types";
+import type {
+  AgentActivitySetup,
+  AgentActivitySnapshot,
+  AgentActivityStatus,
+} from "../shared/agent-activity";
+import { externalAgentStateLabels } from "../shared/agent-activity";
 import type { QuickCaptureResult } from "../shared/quick-capture";
+import type { CalendarEvent } from "../shared/calendar-events";
+import {
+  extractCalendarActionItems,
+  extractActionItemsFromText,
+  type CalendarActionItemDraft,
+} from "../shared/calendar-action-items";
+import {
+  buildCalendarFollowUpDraft,
+  type CalendarFollowUpDraft,
+} from "../shared/calendar-follow-up";
+import {
+  buildDropContextPreview,
+  type DropContextPreview,
+} from "../shared/drop-context";
 import type {
   ReminderDelivery,
   ReminderPresetAction,
@@ -83,10 +153,31 @@ import {
   defaultSettings,
   type AiAuthenticationMode,
   type AppSettings,
+  type ExternalAgentId,
   type PetTab,
+  type TaskUrgencyWeights,
 } from "../shared/settings";
+import {
+  createTaskAutomationRule,
+  matchesTaskAutomation,
+  taskAutomationPatch,
+  taskAutomationActionLabel,
+  taskAutomationDeadlineLabel,
+  taskAutomationPreviewTasks,
+  taskAutomationScheduleLabel,
+  taskAutomationTriggerLabel,
+  type TaskAutomationAction,
+  type TaskAutomationConditionBranch,
+  type TaskAutomationRule,
+  type TaskAutomationScheduleFrequency,
+  type TaskAutomationTrigger,
+} from "../shared/task-automations";
+import { AGENT_CAPABILITY_DESCRIPTORS } from "../shared/agent-capabilities";
+import { withBossMode } from "../shared/boss-mode";
 import type {
   AgentApprovalView,
+  PetDataImportStrategyView,
+  PetDataPreviewResultView,
   DataImportStrategyView,
   DataPreviewResultView,
   FeishuConfigureRequest,
@@ -101,40 +192,333 @@ import type {
 } from "../shared/desktop-api";
 import type {
   FocusSessionView,
+  PetAdventure,
+  PetCompanionKind,
   PetDiaryEntry,
+  PetGoal,
+  PetGoalMetric,
   PetMemoryEntry,
+  PetPersonality,
   PetSnapshot,
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { useDialogFocus } from "./dialog-focus";
+import { ResearchCardMarkdown } from "./ResearchCardMarkdown";
+import { summarizeFeishuSyncReport } from "./feishu-sync-summary";
+import {
+  ResearchCardActionList,
+  researchCardActionKey,
+} from "./ResearchCardActionList";
+import { SpeechOutputButton } from "./SpeechOutputButton";
+import { AgentRunActivity } from "./AgentRunActivity";
+import { PetWeatherForecast } from "./PetWeatherForecast";
+import { actualMinutesForTask } from "../shared/task-time-accounting";
+import { isInboxTask } from "../shared/task-view-predicates";
+import { QuickCaptureHistory } from "./QuickCaptureHistory";
+import { ContextCaptureHistory } from "./ContextCaptureHistory";
+import {
+  clearContextCaptureHistory,
+  CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+  readContextCaptureHistory,
+  rememberContextCapture,
+  type ContextCaptureHistoryItem,
+  type ContextCaptureHistoryKind,
+} from "./context-capture-history";
+import {
+  clearQuickCaptureHistory,
+  readQuickCaptureHistory,
+  rememberQuickCapture,
+  type QuickCaptureHistoryDestination,
+  type QuickCaptureHistoryItem,
+} from "./quick-capture-history";
+import {
+  conversationTitle,
+  filterStoredAgentConversations,
+  readStoredAgentConversationCollection,
+} from "./agent-conversation-store";
+import { GlobalSearchSheet } from "./GlobalSearchSheet";
+import {
+  InlineTaskComposer,
+  type InlineTaskComposerRoute,
+} from "./InlineTaskComposer";
+import type {
+  GlobalSearchConversation,
+  GlobalSearchResult,
+} from "../shared/global-search";
+import { buildAgentQuickSuggestions } from "./agent-quick-suggestions";
+import {
+  buildBulkTaskAgentPrompt,
+  buildTaskAgentPrompt,
+} from "./task-agent-context";
+import { groupTasksBySection } from "./task-sections";
+import { moveTaskBefore } from "./today-reorder";
+import {
+  readTaskSectionCollapseState,
+  taskSectionGroupKey,
+  toggleTaskSectionCollapse,
+  writeTaskSectionCollapseState,
+  type TaskSectionCollapseState,
+} from "./task-section-state";
+import {
+  FocusEnvironmentSound,
+  environmentSoundOptions,
+} from "./focus-environment-sound";
+import { DailyPlanSheet } from "./DailyPlanSheet";
+import { InboxTriageSheet } from "./InboxTriageSheet";
+import {
+  MorningKickoffCard,
+  type MorningKickoffPreset,
+} from "./MorningKickoffCard";
+import {
+  CommandPalette,
+  type CommandPaletteAction,
+} from "./CommandPalette";
+import { KeyboardShortcutsSheet } from "./KeyboardShortcutsSheet";
+import {
+  buildDependencyChain,
+  buildDependencyGraph,
+} from "./dependency-chain";
+import { CalendarActionItemsSheet } from "./CalendarActionItemsSheet";
+import { AgentActionItemsSheet } from "./AgentActionItemsSheet";
+import { BulkTaskEditSheet } from "./BulkTaskEditSheet";
+import {
+  AgentResearchCardSheet,
+  buildAgentResearchCardDraft,
+  type AgentResearchCardInput,
+} from "./AgentResearchCardSheet";
+import { readCalendarEvents, writeCalendarEvents } from "./calendar-store";
+import { buildMorningCalendarSummary } from "./morning-calendar";
+import { suggestMorningRollover } from "./morning-rollover";
+import {
+  updateProjectReminderModes,
+  type ProjectReminderSelection,
+} from "./project-reminder-policy";
+import { filterTasksForPetView } from "./pet-smart-view";
+import { PetReviewSession } from "./PetReviewSession";
+import type { PetReviewAction } from "./pet-review-session";
+import {
+  FOCUS_SHIELD_DISMISS_MS,
+  FOCUS_SHIELD_POLL_INTERVAL_MS,
+  matchesShieldApplication,
+  normalizeShieldApplications,
+} from "./focus-shield";
+import {
+  defaultGoalTitle,
+  projectPetGoal,
+  weekRangeFor,
+} from "./pet-goals";
 import {
   localDateTimeInputToIso,
   toLocalDateTimeInput,
 } from "./local-datetime";
 import { feishuCreationBlockedMessage } from "./feishu-create-guard";
-import { PetCharacter, type PetMood } from "./PetCharacter";
+import { buildResearchActionTaskInput } from "../shared/research-card-actions";
+import {
+  PetCharacter,
+  type PetMood,
+  type PetOutfit,
+  type PetPalette,
+  type PetSeason,
+} from "./PetCharacter";
+import {
+  PetInteractionWheel,
+  type FloatingPetGame,
+} from "./PetInteractionWheel";
+import { PetActionPackEditor } from "./PetActionPackEditor";
+import { PetCollectionCard } from "./PetCollectionCard";
+import { PetCompletionStampsCard } from "./PetCompletionStampsCard";
+import { PetProjectChapters } from "./PetProjectChapters";
+import { PetRoomLayoutControls } from "./PetRoomLayoutControls";
+import { PetRoomThemeEditor } from "./PetRoomThemeEditor";
+import { petRoomSeasonalDecorations } from "./pet-room-season";
+import {
+  PET_ROOM_DECORATION_DEFAULTS,
+  placementForPetRoomPoint,
+  projectPetRoomPlacements,
+  type PetRoomDecorationId,
+} from "./pet-room-layout";
+import { useInstalledPetRoomThemePacks } from "./pet-room-theme-packs";
+import {
+  PetCompanionAvatar,
+  kindLabels as petCompanionKindLabels,
+} from "./PetCompanionAvatar";
+import { PetTeamHuddleCard } from "./PetTeamHuddleCard";
+import { PetPostcardCard } from "./PetPostcardCard";
+import { petCompanionGreeting } from "./pet-companion-interactions";
+import {
+  petInteractionFromPoint,
+  type PetAction,
+  type PetIdleActionProfile,
+  type PetInteractionKind,
+} from "./pet-behavior";
+import {
+  emptyJumpRopeScore,
+  jumpRopeFrame,
+  scoreJumpRopeAttempt,
+  type JumpRopeScore,
+} from "./pet-jump-rope";
+import {
+  getPetTaskDropTarget,
+  petTaskDropTargets,
+  type PetTaskDropTargetId,
+} from "./pet-task-drop-zones";
+import {
+  buildPetProactiveSuggestion,
+  proactiveBudgetAvailable,
+  shouldSuppressPetProactive,
+  type PetNextTask,
+} from "./pet-companion";
 import { useTaskController, type TaskController } from "./task-controller";
+import {
+  taskUndoFailureMessage,
+  undoTaskOperationWithFeedback,
+} from "./task-operation-feedback";
 import { useAgentChat } from "./use-agent-chat";
+import { usePetBehavior } from "./use-pet-behavior";
+import {
+  parsePetActionPackJson,
+  useInstalledPetActionPacks,
+} from "./pet-action-packs";
+import {
+  buildTaskTemplateInputs,
+  installTaskTemplate,
+  parentTaskIdForTemplateInput,
+  parseTaskTemplateJson,
+  previewTaskTemplate,
+  type TaskTemplate,
+  useTaskTemplates,
+} from "./task-templates";
+import { TaskTemplateSaveSheet } from "./TaskTemplateSaveSheet";
+import { TaskTable, type TaskTableViewMode } from "./TaskTable";
+import { suggestDailyPlan } from "../shared/daily-planner";
+import { formatDailyScheduleTime } from "../shared/daily-schedule";
+import {
+  inferTaskTheme,
+  type TaskThemeActionPack,
+} from "./task-theme-action-packs";
+import { buildEveningReview } from "./evening-review";
+import { useVoiceCapture } from "./voice-capture";
+import {
+  createSmartView,
+  priorityReason,
+  readSmartViews,
+  smartViewSortLabels,
+  sortSmartViewTasks,
+  writeSmartViews,
+  type SmartViewDateFilter,
+  type SmartViewDefinition,
+  type SmartViewSort,
+} from "./smart-views";
+import {
+  parseSmartViewQuery,
+  type SmartViewQueryResult,
+} from "./smart-view-query";
+import {
+  buildSubtaskProgress,
+  subtaskProgressLabel,
+  type SubtaskProgress,
+} from "./subtask-progress";
+import {
+  ELASTIC_HABITS_MIGRATED_KEY,
+  formatHabitWait,
+  habitState,
+  readStoredElasticHabits,
+} from "./elastic-habits";
+import { weeklyReviewSummary } from "./timeline-utils";
+import {
+  checkinCopy,
+  normalizeWeeklyCheckin,
+  weekStartFor,
+  weeklyCheckinPaceLabel,
+  type WeeklyCheckinEnergy,
+  type WeeklyCheckinPace,
+  type WeeklyCheckinRecord,
+} from "./weekly-checkin";
+import { buildPetReviewSummary } from "./pet-review";
+import { feishuSyncVisualState } from "./feishu-status";
+import { petSeasonalEventForDate } from "./pet-season";
+import { buildPetWeatherChip } from "./pet-weather-chip";
+import { petWeatherEffectFor, type PetWeatherEffect } from "./pet-weather-effect";
+import {
+  applyCompanionStrategy,
+  companionStrategyLabels,
+  detectCompanionStrategy,
+  type CompanionStrategy,
+} from "./companion-presets";
+
+const TimelinePage = lazy(() =>
+  import("./TimelinePage").then(({ TimelinePage: Page }) => ({ default: Page })),
+);
+const ProjectPage = lazy(() =>
+  import("./ProjectPage").then(({ ProjectPage: Page }) => ({ default: Page })),
+);
+const ListPage = lazy(() =>
+  import("./ListPage").then(({ ListPage: Page }) => ({ default: Page })),
+);
+const DocsPage = lazy(() =>
+  import("./DocsPage").then(({ DocsPage: Page }) => ({ default: Page })),
+);
+
+function DeferredRouteFallback({ label }: { label: string }) {
+  return (
+    <div className="route-loading" role="status">
+      {label}
+    </div>
+  );
+}
 
 type MainRoute =
   | TaskView
   | "pet"
   | "agent"
   | "activity"
+  | "timeline"
+  | "projects"
+  | "lists"
   | "sync"
-  | "settings";
+  | "settings"
+  | "docs";
 type ToastKind = "success" | "error" | "info";
 type TaskEditorDirtyField =
   | "title"
   | "notes"
   | "projectId"
+  | "listId"
+  | "sectionId"
   | "tags"
+  | "contexts"
   | "plannedDate"
+  | "deferUntil"
   | "startAt"
   | "startAtAllDay"
   | "dueAt"
   | "dueAtAllDay"
   | "localReminder";
+type PendingTaskPatch = {
+  patch: Parameters<TaskController["update"]>[1];
+  dirtyRevisions: Partial<Record<TaskEditorDirtyField, number>>;
+};
+type CustomFieldType = "text" | "number" | "date" | "url" | "checkbox";
+
+const customFieldTypeLabels: Record<CustomFieldType, string> = {
+  text: "文本",
+  number: "数字",
+  date: "日期",
+  url: "链接",
+  checkbox: "勾选",
+};
+
+const urgencyWeightLabels: Array<{
+  key: keyof TaskUrgencyWeights;
+  label: string;
+  description: string;
+}> = [
+  { key: "deadline", label: "截止日期", description: "逾期、今天或临近截止的任务" },
+  { key: "plannedToday", label: "今天计划", description: "已经放入 Today 的任务" },
+  { key: "priority", label: "优先级", description: "任务自身的紧急 / 高 / 中 / 低优先级" },
+  { key: "quickWin", label: "短任务", description: "预计时长较短、容易马上开始的任务" },
+];
 
 interface MainNavigationState {
   route: MainRoute;
@@ -150,9 +534,33 @@ interface ToastState {
 }
 
 type ReadyDataPreview = Extract<DataPreviewResultView, { status: "ready" }>;
+type ReadyPetDataPreview = Extract<PetDataPreviewResultView, { status: "ready" }>;
 const floatingAgentDraftId = "floating-agent-prompt";
 const floatingTabStorageKey = "todoAgentFloatingTab";
+const floatingPetOnlyStorageKey = "todoAgentFloatingPetOnly";
+const floatingEdgePeekStorageKey = "todoAgentFloatingEdgePeek";
+const floatingSmartViewStorageKey = "todoAgentFloatingSmartView";
 const mainNavigationStateKey = "todoAgentMainNavigation";
+const taskListViewStorageKey = "todoAgentTaskListView";
+const sidebarCollapsedStorageKey = "todoAgentSidebarCollapsed";
+
+function readTaskListViewMode(): TaskTableViewMode {
+  try {
+    return localStorage.getItem(taskListViewStorageKey) === "table"
+      ? "table"
+      : "list";
+  } catch {
+    return "list";
+  }
+}
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(sidebarCollapsedStorageKey) === "true";
+  } catch {
+    return false;
+  }
+}
 
 function isPetTab(value: unknown): value is PetTab {
   return (
@@ -178,24 +586,55 @@ function readFloatingTab(): PetTab {
   }
 }
 
+function readFloatingPetOnly(): boolean {
+  try {
+    return localStorage.getItem(floatingPetOnlyStorageKey) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function readFloatingEdgePeekMode(): boolean {
+  try {
+    return localStorage.getItem(floatingEdgePeekStorageKey) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function readFloatingSmartView(): string | undefined {
+  try {
+    const saved = localStorage.getItem(floatingSmartViewStorageKey)?.trim();
+    return saved || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const routeTitles: Record<MainRoute, string> = {
   inbox: "暂存",
   today: "今天",
   upcoming: "即将到来",
+  deferred: "稍后安排",
   all: "全部任务",
   completed: "已完成",
   trash: "回收站",
   pet: "小窝",
   agent: "Agent",
   activity: "动态",
+  timeline: "时间线",
+  projects: "项目",
+  lists: "清单",
   sync: "同步问题",
   settings: "设置",
+  docs: "文档中心",
 };
 
 const taskRouteNames = new Set<MainRoute>([
   "inbox",
   "today",
   "upcoming",
+  "deferred",
   "all",
   "completed",
   "trash",
@@ -208,6 +647,32 @@ function isTaskMainRoute(route: MainRoute): route is TaskView {
 function isMainRoute(value: unknown): value is MainRoute {
   return typeof value === "string" && value in routeTitles;
 }
+
+const projectLabel = (id: string | undefined, projects: readonly TaskProject[]): string => {
+  if (!id) return "";
+  return projects.find((project) => project.id === id)?.name ?? id;
+};
+
+const resolveProjectInput = (value: string, projects: readonly TaskProject[]): string => {
+  const trimmed = value.trim();
+  const match = projects.find(
+    (project) => project.id === trimmed || project.name.toLocaleLowerCase() === trimmed.toLocaleLowerCase(),
+  );
+  return match?.id ?? trimmed;
+};
+
+const listLabel = (id: string | undefined, lists: readonly TaskList[]): string => {
+  if (!id) return "";
+  return lists.find((list) => list.id === id)?.name ?? id;
+};
+
+const resolveListInput = (value: string, lists: readonly TaskList[]): string => {
+  const trimmed = value.trim();
+  const match = lists.find(
+    (list) => list.id === trimmed || list.name.toLocaleLowerCase() === trimmed.toLocaleLowerCase(),
+  );
+  return match?.id ?? trimmed;
+};
 
 function readMainNavigationState(value: unknown): MainNavigationState | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -245,6 +710,7 @@ const sectionTitles: Record<TaskViewSectionId, string> = {
   "due-today": "今天到期",
   "planned-today": "今天计划",
   upcoming: "即将到来",
+  deferred: "稍后安排",
   inbox: "暂存",
   open: "待办",
   completed: "已完成",
@@ -259,11 +725,126 @@ const priorityLabels: Record<TaskPriority, string> = {
   urgent: "紧急",
 };
 
+const taskHistoryOperationLabels: Record<TaskHistoryEntry["kind"], string> = {
+  create: "创建任务",
+  update: "更新任务",
+  complete: "标记完成",
+  reopen: "重新打开",
+  bulk: "批量操作",
+  "move-to-today": "移到今天",
+  focus: "专注记录",
+  "work-log": "手动记录投入",
+  "skip-recurring": "跳过本次循环",
+  "reorder-today": "调整今日顺序",
+  "plan-today": "安排今日计划",
+  trash: "移入回收站",
+  restore: "恢复任务",
+  purge: "永久删除",
+};
+
+const taskHistoryFieldLabels: Record<string, string> = {
+  task: "任务记录",
+  title: "标题",
+  notes: "备注",
+  privateNotes: "私人备注",
+  status: "状态",
+  flagged: "重点标记",
+  deferUntil: "稍后日期",
+  completedAt: "完成时间",
+  priority: "优先级",
+  projectId: "项目",
+  listId: "清单",
+  sectionId: "分组",
+  tags: "标签",
+  contexts: "情境",
+  parentId: "父任务",
+  dependencyIds: "前置依赖",
+  assigneeIds: "负责人",
+  followerIds: "关注人",
+  attachments: "附件",
+  links: "链接",
+  customFields: "自定义字段",
+  plannedDate: "私人计划日",
+  startAt: "开始时间",
+  startAtIsAllDay: "开始全天标记",
+  dueAt: "截止时间",
+  dueAtIsAllDay: "截止全天标记",
+  timeBlock: "时间块",
+  reminders: "提醒",
+  recurrence: "循环规则",
+  recurrenceSeriesId: "循环系列",
+  recurrenceIndex: "循环序号",
+  estimatedMinutes: "预计时长",
+  actualMinutes: "实际时长",
+  focusStartedAt: "专注状态",
+  focusElapsedSeconds: "专注时长",
+  focusSessions: "专注记录",
+  privateOrder: "排序",
+  completionMode: "完成方式",
+  currentUserRole: "我的角色",
+  currentUserCompleted: "我的完成状态",
+  deletedAt: "回收站状态",
+  comments: "讨论",
+  researchCards: "研究卡",
+};
+
 const dateKey = (date = new Date()): string => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+
+const relativePlanLabel = (value: string): string => {
+  const today = dateKey();
+  if (value === today) return "今天";
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (value === dateKey(tomorrow)) return "明天";
+  return value;
+};
+
+const temporalDateKey = (value?: string): string | undefined => {
+  if (!value) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/u.test(value)) return value;
+  const instant = new Date(value);
+  return Number.isNaN(instant.getTime()) ? undefined : dateKey(instant);
+};
+
+const smartViewDateLabels: Record<SmartViewDateFilter, string> = {
+  any: "任意日期",
+  overdue: "已逾期",
+  today: "今天",
+  "next-7-days": "未来 7 天",
+  "no-date": "无日期",
+};
+
+const smartViewMatchesDate = (
+  task: Task,
+  filter: SmartViewDateFilter,
+  today = dateKey(),
+): boolean => {
+  if (filter === "any") return true;
+  const dates = [temporalDateKey(task.dueAt), task.plannedDate].filter(
+    (value): value is string => Boolean(value),
+  );
+  if (filter === "no-date") return dates.length === 0;
+  if (filter === "overdue") return dates.some((value) => value < today);
+  if (filter === "today") return dates.some((value) => value === today);
+  const horizon = new Date(`${today}T00:00:00`);
+  horizon.setDate(horizon.getDate() + 7);
+  const horizonKey = dateKey(horizon);
+  return dates.some((value) => value > today && value <= horizonKey);
+};
+
+const isOpenTaskOverdue = (task: Task, today = dateKey()): boolean => {
+  const dueDate = temporalDateKey(task.dueAt);
+  return (
+    task.status === "open" &&
+    !task.deletedAt &&
+    dueDate !== undefined &&
+    dueDate < today
+  );
 };
 
 function isMacPlatform(): boolean {
@@ -508,6 +1089,45 @@ function SourcePill({ source }: { source: TaskSourceType }) {
   );
 }
 
+type TaskSyncVisualState = "synced" | "pending" | "conflict" | "error";
+
+function taskSyncVisualState(status: TaskSyncStatus): TaskSyncVisualState {
+  if (status === "conflict") return "conflict";
+  if (
+    ["failed", "permission-denied", "read-only", "remote-deleted"].includes(
+      status,
+    )
+  ) {
+    return "error";
+  }
+  if (["pending", "offline", "syncing"].includes(status)) return "pending";
+  return "synced";
+}
+
+function taskSyncLabel(status: TaskSyncStatus): string | undefined {
+  switch (status) {
+    case "pending":
+      return "待同步";
+    case "offline":
+      return "离线待同步";
+    case "syncing":
+      return "正在同步";
+    case "conflict":
+      return "同步冲突";
+    case "failed":
+      return "同步失败";
+    case "permission-denied":
+      return "权限不足";
+    case "read-only":
+      return "只读，未写回";
+    case "remote-deleted":
+      return "飞书已删除";
+    default:
+      return undefined;
+  }
+}
+
+
 function needsFeishuForCosignCompletion(task: Task): boolean {
   return (
     task.source.type === "feishu" &&
@@ -526,6 +1146,47 @@ function canToggleTaskCompletion(task: Task): boolean {
     return false;
   }
   return !needsFeishuForCosignCompletion(task);
+}
+
+async function toggleTaskCompletionWithFeedback(
+  task: Task,
+  controller: TaskController,
+  notify: (
+    message: string,
+    kind?: ToastKind,
+    action?: ToastState["action"],
+  ) => void,
+): Promise<boolean> {
+  if (!canToggleTaskCompletion(task)) return false;
+  const completionVerb = needsFeishuForCosignCompletion(task)
+    ? "请在飞书完成"
+    : "完成";
+  try {
+    const operationId = await controller.toggleComplete(task);
+    notify(
+      task.status === "completed"
+        ? "任务已恢复"
+        : task.source.type === "feishu"
+          ? `${completionVerb} · 正在同步飞书`
+          : "任务已完成",
+      "success",
+      operationId
+        ? {
+            label: "撤销",
+            run: () => {
+              void undoTaskOperationWithFeedback(controller, operationId, notify);
+            },
+          }
+        : undefined,
+    );
+    return true;
+  } catch (reason) {
+    notify(
+      reason instanceof Error ? reason.message : "暂时无法更新完成状态",
+      "error",
+    );
+    return false;
+  }
 }
 
 function Brand({ onHome }: { onHome?: () => void }) {
@@ -555,6 +1216,11 @@ function Titlebar({
   search,
   onSearch,
   onNew,
+  onOpenCommands,
+  onOpenShortcuts,
+  onToggleSidebar,
+  sidebarCollapsed = false,
+  shortcutsButtonRef,
   onHome,
   onBack,
   syncState = "synced",
@@ -563,9 +1229,14 @@ function Titlebar({
   search?: string;
   onSearch?: (value: string) => void;
   onNew?: () => void;
+  onOpenCommands?: () => void;
+  onOpenShortcuts?: () => void;
+  onToggleSidebar?: () => void;
+  sidebarCollapsed?: boolean;
+  shortcutsButtonRef?: { current: HTMLButtonElement | null };
   onHome?: () => void;
   onBack?: () => void;
-  syncState?: "synced" | "pending" | "conflict";
+  syncState?: TaskSyncVisualState;
   children?: ReactNode;
 }) {
   const isMac = isMacPlatform();
@@ -609,18 +1280,63 @@ function Titlebar({
               <X size={15} aria-hidden="true" />
             </button>
           ) : (
-            <kbd>{isMacPlatform() ? "⌘ K" : "Ctrl K"}</kbd>
+            onOpenCommands ? (
+              <button
+                type="button"
+                className="title-search-command no-drag"
+                onClick={onOpenCommands}
+                aria-label="打开快速命令"
+                title="打开快速命令"
+              >
+                {isMacPlatform() ? "⌘ K" : "Ctrl K"}
+              </button>
+            ) : (
+              <kbd>{isMacPlatform() ? "⌘ K" : "Ctrl K"}</kbd>
+            )
           )}
         </label>
       )}
       {children}
+      {onToggleSidebar && (
+        <button
+          type="button"
+          className="icon-button titlebar-sidebar-toggle no-drag"
+          onClick={onToggleSidebar}
+          aria-label={sidebarCollapsed ? "显示侧栏" : "隐藏侧栏"}
+          aria-pressed={sidebarCollapsed}
+          aria-keyshortcuts={`${isMac ? "Meta" : "Control"}+/`}
+          title={sidebarCollapsed ? "显示侧栏（⌘/Ctrl + /）" : "隐藏侧栏（⌘/Ctrl + /）"}
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen size={16} aria-hidden="true" />
+          ) : (
+            <PanelLeftClose size={16} aria-hidden="true" />
+          )}
+        </button>
+      )}
+      {onOpenShortcuts && (
+        <button
+          ref={shortcutsButtonRef}
+          type="button"
+          className="icon-button titlebar-shortcuts no-drag"
+          onClick={onOpenShortcuts}
+          aria-label="打开快捷键说明"
+          aria-keyshortcuts="?"
+          title="快捷键（?）"
+        >
+          <Keyboard size={16} aria-hidden="true" />
+          <span aria-hidden="true">?</span>
+        </button>
+      )}
       <span
-        className={`status-pill ${syncState === "synced" ? "success" : syncState === "conflict" ? "warning" : "syncing"}`}
+        className={`status-pill ${syncState === "synced" ? "success" : syncState === "conflict" ? "warning" : syncState === "error" ? "danger" : "syncing"}`}
       >
         {syncState === "synced" ? (
           <CloudCheck size={15} />
         ) : syncState === "conflict" ? (
           <AlertTriangle size={15} />
+        ) : syncState === "error" ? (
+          <ShieldAlert size={15} />
         ) : (
           <RefreshCw size={15} />
         )}
@@ -628,6 +1344,8 @@ function Titlebar({
           ? "已保存"
           : syncState === "conflict"
             ? "有冲突"
+            : syncState === "error"
+              ? "同步异常"
             : "待同步"}
       </span>
       {onNew && (
@@ -648,12 +1366,14 @@ interface SidebarCounts {
   inbox?: number;
   today?: number;
   upcoming?: number;
+  deferred?: number;
   all?: number;
   completed?: number;
   trash?: number;
   local?: number;
   feishu?: number;
   conflicts?: number;
+  syncIssues?: number;
 }
 
 function useSidebarCounts(): SidebarCounts {
@@ -667,6 +1387,7 @@ function useSidebarCounts(): SidebarCounts {
       inbox,
       today,
       upcoming,
+      deferred,
       all,
       completed,
       trash,
@@ -677,6 +1398,7 @@ function useSidebarCounts(): SidebarCounts {
       api.list({ view: "inbox" }),
       api.list({ view: "today" }),
       api.list({ view: "upcoming" }),
+      api.list({ view: "deferred" }),
       api.list({ view: "all" }),
       api.list({ view: "completed" }),
       api.list({ view: "trash" }),
@@ -692,6 +1414,7 @@ function useSidebarCounts(): SidebarCounts {
       inbox: inbox.length,
       today: today.filter((task) => task.status === "open").length,
       upcoming: upcoming.length,
+      deferred: deferred.length,
       all: all.length,
       completed: completed.length,
       trash: trash.length,
@@ -699,6 +1422,11 @@ function useSidebarCounts(): SidebarCounts {
       feishu: feishu.length,
       conflicts: visible.filter((task) => task.sync.status === "conflict")
         .length,
+      syncIssues: visible.filter(
+        (task) =>
+          task.source.type === "feishu" &&
+          !["local", "synced"].includes(task.sync.status),
+      ).length,
     });
   }, []);
   useEffect(() => {
@@ -708,6 +1436,74 @@ function useSidebarCounts(): SidebarCounts {
     });
   }, [refresh]);
   return counts;
+}
+
+function useProjects(): {
+  projects: TaskProject[];
+  loading: boolean;
+  error?: string;
+  refresh: () => Promise<void>;
+} {
+  const [projects, setProjects] = useState<TaskProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const refresh = useCallback(async () => {
+    if (!window.desktopApi) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(undefined);
+    try {
+      setProjects(await window.desktopApi.tasks.listProjects(true));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "读取项目失败");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    void refresh();
+    return window.desktopApi?.events.onTasksChanged(() => {
+      void refresh();
+    });
+  }, [refresh]);
+  return { projects, loading, error, refresh };
+}
+
+function useLists(): {
+  lists: TaskList[];
+  loading: boolean;
+  error?: string;
+  refresh: () => Promise<void>;
+} {
+  const [lists, setLists] = useState<TaskList[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const refresh = useCallback(async () => {
+    if (!window.desktopApi) {
+      setLists([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(undefined);
+    try {
+      setLists(await window.desktopApi.tasks.listLists(true));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "读取清单失败");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    void refresh();
+    return window.desktopApi?.events.onTasksChanged(() => {
+      void refresh();
+    });
+  }, [refresh]);
+  return { lists, loading, error, refresh };
 }
 
 function Sidebar({
@@ -747,6 +1543,7 @@ function Sidebar({
       {item("inbox", <Inbox size={17} />, counts.inbox)}
       {item("today", <Sun size={17} />, counts.today)}
       {item("upcoming", <CalendarDays size={17} />, counts.upcoming)}
+      {item("deferred", <Clock3 size={17} />, counts.deferred)}
       {item("all", <LayoutList size={17} />, counts.all)}
       {item("completed", <CheckCircle2 size={17} />, counts.completed)}
       {item("trash", <Trash2 size={17} />, counts.trash)}
@@ -773,11 +1570,21 @@ function Sidebar({
           <span className="nav-count">{counts.feishu}</span>
         )}
       </button>
-      {item("sync", <AlertTriangle size={17} />, counts.conflicts, "warning")}
+      {item(
+        "sync",
+        <AlertTriangle size={17} />,
+        counts.syncIssues,
+        counts.syncIssues ? "warning" : "",
+      )}
       <div className="nav-section-label">工作台</div>
       {item("pet", <UserRound size={17} />)}
       {item("agent", <Sparkles size={17} />)}
+      {item("timeline", <CalendarDays size={17} />)}
+      {item("projects", <FolderKanban size={17} />)}
+      {item("lists", <ListChecks size={17} />)}
       {item("activity", <Activity size={17} />)}
+      <div className="nav-section-label">参考</div>
+      {item("docs", <BookOpen size={17} />)}
       <div className="sidebar-footer">
         {item("settings", <Settings size={17} />)}
       </div>
@@ -787,27 +1594,68 @@ function Sidebar({
 
 function MorningBrief({
   controller,
+  planningTasks,
   notify,
+  onPlanToday,
+  calendarEvents = [],
+  onOpenTimeline,
+  onOpenAll,
 }: {
   controller: TaskController;
-  notify: (message: string, kind?: ToastKind) => void;
+  planningTasks?: Task[];
+  notify: (
+    message: string,
+    kind?: ToastKind,
+    action?: ToastState["action"],
+  ) => void;
+  onPlanToday: (preset?: MorningKickoffPreset) => void;
+  calendarEvents?: readonly CalendarEvent[];
+  onOpenTimeline?: () => void;
+  onOpenAll?: () => void;
 }) {
+  const formatBriefMinutes = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    if (!hours) return `${rest} 分钟`;
+    return rest ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`;
+  };
+  const formatClock = formatDailyScheduleTime;
   const [aiSummary, setAiSummary] = useState<string>();
   const [aiRefreshing, setAiRefreshing] = useState(false);
-  const overdue = controller.tasks.filter(
-    (task) =>
-      task.dueAt &&
-      task.dueAt.slice(0, 10) < dateKey() &&
-      task.status === "open",
-  ).length;
-  const feishu = controller.tasks.filter(
+  const [shortPlanOpen, setShortPlanOpen] = useState(false);
+  const [kickoffOpen, setKickoffOpen] = useState(false);
+  const openTasks = controller.tasks.filter(
+    (task) => task.status === "open" && !task.deletedAt,
+  );
+  const overdue = openTasks.filter((task) => isOpenTaskOverdue(task)).length;
+  const feishu = openTasks.filter(
     (task) => task.source.type === "feishu",
   ).length;
-  const first = controller.tasks.find((task) => task.status === "open");
+  const first = openTasks[0];
+  const shortPlan = useMemo(
+    () =>
+      suggestDailyPlan(planningTasks ?? controller.tasks, {
+        date: new Date(),
+        capacityMinutes: 120,
+        maxSuggestedItems: 3,
+      }),
+    [controller.tasks, planningTasks],
+  );
+  const today = dateKey();
+  const todayCalendar = useMemo(
+    () => buildMorningCalendarSummary(calendarEvents, today),
+    [calendarEvents, today],
+  );
+  const rolloverSuggestions = useMemo(
+    () => suggestMorningRollover(planningTasks ?? controller.tasks, today),
+    [controller.tasks, planningTasks, today],
+  );
+  const [rolloverDismissed, setRolloverDismissed] = useState(false);
+  const [rolloverBusyId, setRolloverBusyId] = useState<string>();
   const localSummary =
-    controller.tasks.length === 0
+    openTasks.length === 0
       ? "今天还没有安排。可以先写下一件最重要的小事。"
-      : `${overdue ? `有 ${overdue} 项逾期；` : ""}今天共 ${controller.tasks.length} 项，其中 ${feishu} 项来自飞书。${first ? `建议先从“${first.title}”开始。` : ""}`;
+      : `${overdue ? `有 ${overdue} 项逾期；` : ""}今天共 ${openTasks.length} 项，其中 ${feishu} 项来自飞书。${first ? `建议先从“${first.title}”开始。` : ""}`;
 
   const requestAiBrief = useCallback(
     async (trigger: "automatic" | "manual"): Promise<void> => {
@@ -874,6 +1722,17 @@ function MorningBrief({
       );
     }
   };
+  const startKickoffFocus = async (task: Task) => {
+    try {
+      await controller.startFocus(task.id);
+      notify(`已开始“${task.title}”`, "success");
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "暂时无法开始专注",
+        "error",
+      );
+    }
+  };
   return (
     <section className="morning-brief" aria-label="晨间简报">
       <div className="brief-title">
@@ -881,22 +1740,137 @@ function MorningBrief({
           <Sparkles size={18} />
         </span>
         <span>晨间简报</span>
+        <SpeechOutputButton
+          text={aiSummary ?? localSummary}
+          label="朗读"
+          ariaLabel="朗读晨间简报"
+          className="agent-speak-button brief-speak-button"
+        />
       </div>
       <p className="brief-copy">{aiSummary ?? localSummary}</p>
+      {todayCalendar.blocks.length > 0 && (
+        <section className="brief-calendar" aria-label="今日议程">
+          <div className="brief-calendar-heading">
+            <div>
+              <strong><CalendarClock size={14} /> 今日议程</strong>
+              <small>{todayCalendar.events.length} 个事件 · 占用 {formatBriefMinutes(todayCalendar.busyMinutes)}</small>
+            </div>
+            {onOpenTimeline && (
+              <button type="button" className="ghost-button" onClick={onOpenTimeline}>
+                打开时间线
+              </button>
+            )}
+          </div>
+          <div className="brief-calendar-list">
+            {todayCalendar.blocks.slice(0, 4).map((block) => (
+              <div className="brief-calendar-row" key={block.id}>
+                <span>{block.startMinutes === 0 && block.endMinutes >= 1_440 ? "全天" : `${formatClock(block.startMinutes)}–${formatClock(block.endMinutes)}`}</span>
+                <strong>{block.title}</strong>
+                <small>{block.sourceName}</small>
+              </div>
+            ))}
+            {todayCalendar.blocks.length > 4 && <small className="brief-calendar-more">还有 {todayCalendar.blocks.length - 4} 个事件</small>}
+          </div>
+        </section>
+      )}
+      {rolloverSuggestions.length > 0 && !rolloverDismissed && (
+        <section className="brief-rollover" aria-label="接上之前的计划">
+          <div className="brief-rollover-heading">
+            <div>
+              <strong><RotateCcw size={14} /> 接上之前的计划</strong>
+              <small>
+                {rolloverSuggestions.length} 项之前安排但还没完成；你可以只挑想继续的。
+              </small>
+            </div>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setRolloverDismissed(true)}
+            >
+              稍后再看
+            </button>
+          </div>
+          <div className="brief-rollover-list">
+            {rolloverSuggestions.map((suggestion) => (
+              <div className="brief-rollover-row" key={suggestion.task.id}>
+                <div>
+                  <strong>{suggestion.task.title}</strong>
+                  <small>{suggestion.reason}{suggestion.task.dueAt ? " · 有截止时间" : ""}</small>
+                </div>
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={rolloverBusyId === suggestion.task.id}
+                  onClick={() => {
+                    setRolloverBusyId(suggestion.task.id);
+                    void controller.moveToToday(suggestion.task.id)
+                      .then((operationId) => {
+                        notify(`已把“${suggestion.task.title}”安排到今天`, "success", operationId
+                          ? {
+                              label: "撤销",
+                              run: () => {
+                                void undoTaskOperationWithFeedback(
+                                  controller,
+                                  operationId,
+                                  notify,
+                                );
+                              },
+                            }
+                          : undefined);
+                      })
+                      .catch((reason) => {
+                        notify(reason instanceof Error ? reason.message : "暂时无法安排到今天", "error");
+                      })
+                      .finally(() => setRolloverBusyId(undefined));
+                  }}
+                >
+                  <CalendarDays size={14} />
+                  {rolloverBusyId === suggestion.task.id ? "安排中…" : "安排今天"}
+                </button>
+              </div>
+            ))}
+          </div>
+          {onOpenAll && (
+            <button type="button" className="ghost-button brief-rollover-all" onClick={onOpenAll}>
+              打开全部任务查看
+            </button>
+          )}
+        </section>
+      )}
       <div className="brief-actions">
+        <button type="button" className="primary-button" onClick={() => onPlanToday()}>
+          <CalendarDays size={15} />
+          帮我选今天
+        </button>
+        <button
+          type="button"
+          className={`soft-button ${kickoffOpen ? "active" : ""}`}
+          aria-pressed={kickoffOpen}
+          onClick={() => setKickoffOpen((value) => !value)}
+        >
+          <Sparkles size={15} />
+          {kickoffOpen ? "收起晨间启动" : "三步开始今天"}
+        </button>
         {first && (
           <button
             type="button"
             className="soft-button"
             onClick={() => {
-              void controller.startFocus(first.id);
-              notify(`已开始“${first.title}”`);
+              void startKickoffFocus(first);
             }}
           >
             <Play size={15} />
             开始首项
           </button>
         )}
+        <button
+          type="button"
+          className="ghost-button"
+          onClick={() => setShortPlanOpen((value) => !value)}
+        >
+          <Clock3 size={14} />
+          {shortPlanOpen ? "收起 2 小时方案" : "只剩 2 小时？"}
+        </button>
         <button
           type="button"
           className="ghost-button"
@@ -914,6 +1888,49 @@ function MorningBrief({
           今日不再提醒
         </button>
       </div>
+      {kickoffOpen && (
+        <MorningKickoffCard
+          tasks={planningTasks ?? controller.tasks}
+          onOpenPlan={(preset) => onPlanToday(preset)}
+          onStartFocus={(task) => void startKickoffFocus(task)}
+        />
+      )}
+      {shortPlanOpen && (
+        <section className="brief-short-plan" aria-label="只剩两小时的替代计划">
+          <div className="brief-short-plan-heading">
+            <div>
+              <strong>如果今天只剩 2 小时</strong>
+              <small>
+                先处理最紧急、能解锁后续工作的任务；这是只读建议，不会自动改动任务。
+              </small>
+            </div>
+            <span>{shortPlan.totalMinutes} 分钟 / 2 小时</span>
+          </div>
+          {shortPlan.selectedItems.length > 0 ? (
+            <ol>
+              {shortPlan.selectedItems.slice(0, 3).map((item) => (
+                <li key={item.task.id}>
+                  <span className="brief-short-plan-task">
+                    <strong>{item.task.title}</strong>
+                    <small>{item.primaryReason} · {item.estimatedMinutes} 分钟</small>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="brief-short-plan-empty">目前没有能在两小时内安排的开放任务。</p>
+          )}
+          <div className="brief-short-plan-actions">
+            <button type="button" className="soft-button" onClick={() => onPlanToday()}>
+              <CalendarDays size={14} />
+              在今日规划中确认
+            </button>
+            <button type="button" className="ghost-button" onClick={() => setShortPlanOpen(false)}>
+              先不安排
+            </button>
+          </div>
+        </section>
+      )}
     </section>
   );
 }
@@ -925,6 +1942,19 @@ function TaskRow({
   notify,
   moveUp,
   moveDown,
+  reorderable = false,
+  dragging = false,
+  dropTarget = false,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  selectionMode = false,
+  selectedForBulk = false,
+  onToggleBulk,
+  interactionDisabled = false,
+  subtaskProgress,
+  onAskAgent,
 }: {
   task: Task;
   selected: boolean;
@@ -936,6 +1966,19 @@ function TaskRow({
   ) => void;
   moveUp?: () => void;
   moveDown?: () => void;
+  reorderable?: boolean;
+  dragging?: boolean;
+  dropTarget?: boolean;
+  onDragStart?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: (event: ReactDragEvent<HTMLButtonElement>) => void;
+  onDragOver?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  onDrop?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  selectionMode?: boolean;
+  selectedForBulk?: boolean;
+  onToggleBulk?: (event?: ReactMouseEvent<HTMLElement>) => void;
+  interactionDisabled?: boolean;
+  subtaskProgress?: SubtaskProgress;
+  onAskAgent: (prompt: string) => void;
 }) {
   const canComplete = canToggleTaskCompletion(task);
   const completionVerb = needsFeishuForCosignCompletion(task)
@@ -943,42 +1986,70 @@ function TaskRow({
     : "完成";
   const toggle = async () => {
     if (!canComplete) return;
+    await toggleTaskCompletionWithFeedback(task, controller, notify);
+  };
+  const toggleFlag = async (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (interactionDisabled) return;
     try {
-      const operationId = await controller.toggleComplete(task);
-      notify(
-        task.status === "completed"
-          ? "任务已恢复"
-          : task.source.type === "feishu"
-            ? `${completionVerb} · 正在同步飞书`
-            : "任务已完成",
-        "success",
-        operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
-          : undefined,
-      );
+      await controller.update(task.id, { flagged: task.flagged !== true });
+      notify(task.flagged === true ? "已取消重点标记" : "已标记为重点任务", "success");
     } catch (reason) {
-      notify(
-        reason instanceof Error ? reason.message : "暂时无法更新完成状态",
-        "error",
-      );
+      notify(reason instanceof Error ? reason.message : "暂时无法更新重点标记", "error");
     }
   };
-  const overdue =
-    task.dueAt && task.dueAt.slice(0, 10) < dateKey() && task.status === "open";
+  const overdue = isOpenTaskOverdue(task);
+  const reason = task.status === "open" ? priorityReason(task) : undefined;
+  const subtaskLabel = subtaskProgressLabel(subtaskProgress);
   const classes = [
     "task-row",
+    reorderable ? "is-reorderable" : "",
+    selectionMode ? "bulk-mode" : "",
+    selectedForBulk ? "bulk-selected" : "",
     selected ? "selected" : "",
     task.status === "completed" ? "completed" : "",
     task.sync.status === "pending" ? "pending" : "",
     task.sync.status === "conflict" ? "conflict" : "",
+    taskSyncVisualState(task.sync.status) === "error" ? "sync-error" : "",
+    dragging ? "is-dragging" : "",
+    dropTarget ? "is-drop-target" : "",
   ].join(" ");
   return (
-    <div className={classes} data-task-id={task.id}>
+    <div
+      className={classes}
+      data-task-id={task.id}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      {reorderable && !selectionMode && (
+        <button
+          type="button"
+          className="task-drag-handle"
+          draggable={!interactionDisabled}
+          disabled={interactionDisabled}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          aria-label={`拖动调整${task.title}的今日顺序`}
+          title="拖动调整今日顺序"
+        >
+          <GripVertical size={16} aria-hidden="true" />
+        </button>
+      )}
+      {selectionMode && onToggleBulk && (
+        <input
+          className="bulk-select-checkbox"
+          type="checkbox"
+          checked={selectedForBulk}
+          disabled={interactionDisabled}
+          onChange={() => onToggleBulk()}
+          aria-label={`${selectedForBulk ? "取消选择" : "选择"}${task.title}`}
+        />
+      )}
       <input
         className="task-checkbox"
         type="checkbox"
         checked={task.status === "completed"}
-        disabled={!canComplete}
+        disabled={!canComplete || interactionDisabled}
         title={
           needsFeishuForCosignCompletion(task)
             ? "飞书开放接口不能完成会签中的个人部分，请在飞书中操作"
@@ -990,7 +2061,23 @@ function TaskRow({
       <button
         type="button"
         className="task-body"
-        onClick={() => controller.select(task.id)}
+        aria-pressed={selectionMode ? selectedForBulk : undefined}
+        disabled={interactionDisabled}
+        title={
+          onToggleBulk
+            ? selectionMode
+              ? "点击选择；按住 Shift 选择范围，⌘/Ctrl 点选不连续任务"
+              : "按住 Shift 选择范围，⌘/Ctrl 点选任务"
+            : undefined
+        }
+        onClick={(event) =>
+          interactionDisabled
+            ? undefined
+            : onToggleBulk &&
+                (selectionMode || event.shiftKey || event.metaKey || event.ctrlKey)
+            ? onToggleBulk(event)
+            : controller.select(task.id)
+        }
       >
         <span className="task-title">{task.title}</span>
         <span className="task-meta">
@@ -998,6 +2085,16 @@ function TaskRow({
             <span className="private">
               私人计划{" "}
               {task.plannedDate === dateKey() ? "今天" : task.plannedDate}
+            </span>
+          )}
+          {task.deferUntil && (
+            <span className="private">
+              稍后至 {task.deferUntil === dateKey() ? "今天" : task.deferUntil}
+            </span>
+          )}
+          {task.sectionId && (
+            <span className="task-section-pill" title={`分组标题：${task.sectionId}`}>
+              {task.sectionId}
             </span>
           )}
           {task.dueAt && (
@@ -1009,9 +2106,32 @@ function TaskRow({
           {task.estimatedMinutes && (
             <span>预计 {task.estimatedMinutes} 分钟</span>
           )}
+          {subtaskLabel && <span className="subtask-progress-label">{subtaskLabel}</span>}
+          {(task.contexts ?? []).slice(0, 3).map((context) => (
+            <span className="task-context-pill" key={context}>
+              {context}
+            </span>
+          ))}
+          {(task.contexts ?? []).length > 3 && (
+            <span className="task-context-pill">+{(task.contexts ?? []).length - 3}</span>
+          )}
           {task.sync.status === "pending" && <span>待同步</span>}
           {task.sync.status === "conflict" && (
             <span className="overdue">同步冲突</span>
+          )}
+          {taskSyncVisualState(task.sync.status) === "error" && (
+            <span className="overdue">
+              {taskSyncLabel(task.sync.status) ?? "同步异常"}
+            </span>
+          )}
+          {reason && (
+            <span
+              className="task-reason"
+              title={`推荐依据：${reason}`}
+              aria-label={`推荐依据：${reason}`}
+            >
+              <Sparkles size={11} aria-hidden="true" /> {reason}
+            </span>
           )}
         </span>
       </button>
@@ -1020,6 +2140,7 @@ function TaskRow({
           <button
             type="button"
             className="row-icon-button"
+            disabled={interactionDisabled}
             onClick={moveUp}
             aria-label={`上移${task.title}`}
           >
@@ -1030,10 +2151,36 @@ function TaskRow({
           <button
             type="button"
             className="row-icon-button"
+            disabled={interactionDisabled}
             onClick={moveDown}
             aria-label={`下移${task.title}`}
           >
             <ChevronDown size={15} />
+          </button>
+        )}
+        {!selectionMode && (
+          <button
+            type="button"
+            className={`row-icon-button task-flag-button ${task.flagged === true ? "is-active" : ""}`}
+            disabled={interactionDisabled}
+            onClick={toggleFlag}
+            aria-label={`${task.flagged === true ? "取消" : "添加"}重点标记${task.title}`}
+            aria-pressed={task.flagged === true}
+            title={task.flagged === true ? "取消重点标记" : "标记为重点任务"}
+          >
+            <Star size={14} fill={task.flagged === true ? "currentColor" : "none"} aria-hidden="true" />
+          </button>
+        )}
+        {!selectionMode && (
+          <button
+            type="button"
+            className="row-icon-button task-agent-button"
+            disabled={interactionDisabled}
+            onClick={() => onAskAgent(buildTaskAgentPrompt(task))}
+            aria-label={`让 Agent 处理${task.title}`}
+            title="让 Agent 处理此任务"
+          >
+            <MessageCircle size={14} aria-hidden="true" />
           </button>
         )}
         <SourcePill source={task.source.type} />
@@ -1045,17 +2192,42 @@ function TaskRow({
 function TaskListPage({
   route,
   controller,
+  planningTasks,
   search,
   navigationKey,
+  focusTaskId,
+  onTaskFocused,
+  inboxTriageRequest,
+  onInboxTriageRequestHandled,
+  inboxTriageOpen,
+  onInboxTriageOpenChange,
+  wideDesktop,
+  sourceFilter,
   notify,
   onNew,
   onClearSearch,
   onAskAgent,
+  onPlanToday,
+  onSourceChange,
+  projects = [],
+  lists = [],
+  calendarEvents = [],
+  onOpenTimeline,
+  onOpenAll,
 }: {
   route: TaskView;
   controller: TaskController;
+  planningTasks?: Task[];
   search: string;
   navigationKey: string;
+  focusTaskId?: TaskId;
+  onTaskFocused?: (taskId: TaskId) => void;
+  inboxTriageRequest?: number;
+  onInboxTriageRequestHandled?: (request: number) => void;
+  inboxTriageOpen: boolean;
+  onInboxTriageOpenChange: (open: boolean) => void;
+  wideDesktop: boolean;
+  sourceFilter?: TaskSourceType;
   notify: (
     message: string,
     kind?: ToastKind,
@@ -1064,21 +2236,267 @@ function TaskListPage({
   onNew: () => void;
   onClearSearch: () => void;
   onAskAgent: (prompt: string) => void;
+  onPlanToday: (preset?: MorningKickoffPreset) => void;
+  onSourceChange: (source?: TaskSourceType) => void;
+  projects?: readonly TaskProject[];
+  lists?: readonly TaskList[];
+  calendarEvents?: readonly CalendarEvent[];
+  onOpenTimeline?: () => void;
+  onOpenAll?: () => void;
 }) {
   const [filterOpen, setFilterOpen] = useState(false);
+  const [listViewMode, setListViewMode] = useState<TaskTableViewMode>(() =>
+    readTaskListViewMode(),
+  );
+  const inboxTriageRequestRef = useRef(0);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelection, setBulkSelection] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkPreview, setBulkPreview] = useState<BulkTaskAction>();
+  const [bulkAutomationRuleId, setBulkAutomationRuleId] = useState("");
+  const [bulkAutomationPreview, setBulkAutomationPreview] = useState<{
+    rule: TaskAutomationRule;
+    tasks: Task[];
+  }>();
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [draggingTaskId, setDraggingTaskId] = useState<string>();
+  const [dropTargetTaskId, setDropTargetTaskId] = useState<string>();
+  const [reorderBusy, setReorderBusy] = useState(false);
+  const [inlineInsertAfterTaskId, setInlineInsertAfterTaskId] =
+    useState<TaskId>();
+  const keyboardCompletionBusyRef = useRef(false);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">(
     "all",
   );
+  const [flaggedFilter, setFlaggedFilter] = useState(false);
   const [projectFilter, setProjectFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
+  const [sectionFilter, setSectionFilter] = useState("all");
+  const [contextFilter, setContextFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState<SmartViewDateFilter>("any");
+  const [sortFilter, setSortFilter] = useState<SmartViewSort>("manual");
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
+  const [tagOptions, setTagOptions] = useState<string[]>([]);
+  const [sectionOptions, setSectionOptions] = useState<string[]>([]);
+  const [contextOptions, setContextOptions] = useState<string[]>([]);
+  const [taskSnapshot, setTaskSnapshot] = useState<Task[]>([]);
+  const [smartViews, setSmartViews] = useState<SmartViewDefinition[]>(() => readSmartViews());
+  const [activeSmartViewId, setActiveSmartViewId] = useState<string>();
+  const [smartViewName, setSmartViewName] = useState("");
+  const [smartViewQuery, setSmartViewQuery] = useState("");
+  const [smartViewQueryResult, setSmartViewQueryResult] =
+    useState<SmartViewQueryResult>();
+  const [collapsedSectionGroups, setCollapsedSectionGroups] =
+    useState<TaskSectionCollapseState>(() => readTaskSectionCollapseState());
+  const [manualAutomations, setManualAutomations] = useState<
+    readonly TaskAutomationRule[]
+  >([]);
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
+  const filterDialogRef = useRef<HTMLDivElement>(null);
+  const filterQueryRef = useRef<HTMLInputElement>(null);
+  const bulkModeToggleRef = useRef<HTMLButtonElement>(null);
+  const inboxTriageTriggerRef = useRef<HTMLButtonElement>(null);
+  const bulkToolbarRef = useRef<HTMLElement>(null);
+  const bulkAnchorTaskIdRef = useRef<string | undefined>(undefined);
+  const bulkReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const bulkPreviewDialogRef = useRef<HTMLDivElement>(null);
+  const bulkPreviewCancelRef = useRef<HTMLButtonElement>(null);
+  const bulkAutomationPreviewDialogRef = useRef<HTMLDivElement>(null);
+  const bulkAutomationPreviewCancelRef = useRef<HTMLButtonElement>(null);
+  const focusAfterDismiss = (element: HTMLElement | null | undefined) => {
+    if (!element) return;
+    window.requestAnimationFrame(() => {
+      if (!element.isConnected || element.hasAttribute("disabled")) return;
+      element.focus({ preventScroll: true });
+    });
+  };
+  const closeFilter = () => {
+    setFilterOpen(false);
+    focusAfterDismiss(filterTriggerRef.current);
+  };
+  const closeBulkPreviews = () => {
+    setBulkPreview(undefined);
+    setBulkAutomationPreview(undefined);
+    const returnFocus =
+      bulkReturnFocusRef.current ?? bulkModeToggleRef.current;
+    bulkReturnFocusRef.current = undefined;
+    focusAfterDismiss(returnFocus);
+  };
+  useDialogFocus(filterDialogRef, filterQueryRef, closeFilter, filterOpen);
+  useDialogFocus(
+    bulkPreviewDialogRef,
+    bulkPreviewCancelRef,
+    closeBulkPreviews,
+    Boolean(bulkPreview),
+  );
+  useDialogFocus(
+    bulkAutomationPreviewDialogRef,
+    bulkAutomationPreviewCancelRef,
+    closeBulkPreviews,
+    Boolean(bulkAutomationPreview),
+  );
+  useEffect(() => {
+    if (!window.desktopApi) {
+      setManualAutomations([]);
+      return undefined;
+    }
+    const apply = (settings: AppSettings): void => {
+      setManualAutomations(
+        settings.automations.filter(
+          (rule) => rule.enabled && rule.trigger === "manual",
+        ),
+      );
+    };
+    void window.desktopApi.settings.get().then(apply).catch(() => undefined);
+    return window.desktopApi.events.onSettingsChanged(apply);
+  }, []);
+  useEffect(() => {
+    if (manualAutomations.some((rule) => rule.id === bulkAutomationRuleId)) return;
+    setBulkAutomationRuleId(manualAutomations[0]?.id ?? "");
+  }, [bulkAutomationRuleId, manualAutomations]);
   // A sidebar destination represents a different collection, not a compound
   // search. Secondary filters belong to the current collection so they cannot
   // make the next page look empty while its sidebar count is non-zero.
   useEffect(() => {
     setFilterOpen(false);
     setPriorityFilter("all");
+    setFlaggedFilter(false);
     setProjectFilter("all");
+    setTagFilter("all");
+    setSectionFilter("all");
+    setContextFilter("all");
+    setDateFilter("any");
+    setSortFilter("manual");
+    setActiveSmartViewId(undefined);
+    setBulkMode(false);
+    setBulkSelection(new Set());
+    bulkAnchorTaskIdRef.current = undefined;
+    bulkReturnFocusRef.current = undefined;
+    setBulkPreview(undefined);
+    setBulkAutomationPreview(undefined);
+    setBulkEditOpen(false);
+    setDraggingTaskId(undefined);
+    setDropTargetTaskId(undefined);
+    setReorderBusy(false);
+    setInlineInsertAfterTaskId(undefined);
+    onInboxTriageOpenChange(false);
+    setSmartViewQuery("");
+    setSmartViewQueryResult(undefined);
   }, [navigationKey]);
+  useEffect(() => {
+    writeTaskSectionCollapseState(collapsedSectionGroups);
+  }, [collapsedSectionGroups]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(taskListViewStorageKey, listViewMode);
+    } catch {
+      // A restricted storage area should not make the list unusable.
+    }
+  }, [listViewMode]);
+  const sectionCollapseScope = `${route}:${sourceFilter ?? "all"}`;
+  const isSectionGroupCollapsed = (sectionId: string, groupId: string) =>
+    collapsedSectionGroups[sectionCollapseScope]?.includes(
+      taskSectionGroupKey(sectionId, groupId),
+    ) ?? false;
+  const toggleSectionGroup = (
+    sectionId: string,
+    groupId: string,
+    collapsed: boolean,
+  ) => {
+    const key = taskSectionGroupKey(sectionId, groupId);
+    setCollapsedSectionGroups((current) =>
+      toggleTaskSectionCollapse(current, sectionCollapseScope, key, collapsed),
+    );
+  };
+  const applySmartView = (view: SmartViewDefinition) => {
+    setPriorityFilter(view.priority);
+    setFlaggedFilter(view.flagged === true);
+    setProjectFilter(view.projectId);
+    setTagFilter(view.tag);
+    setSectionFilter(view.sectionId ?? "all");
+    setContextFilter(view.context);
+    setDateFilter(view.dateFilter);
+    setSortFilter(view.sort);
+    onSourceChange(view.sourceType);
+    setActiveSmartViewId(view.id);
+    closeFilter();
+  };
+  const clearTaskFilters = () => {
+    setPriorityFilter("all");
+    setFlaggedFilter(false);
+    setProjectFilter("all");
+    setTagFilter("all");
+    setSectionFilter("all");
+    setContextFilter("all");
+    setDateFilter("any");
+    setSortFilter("manual");
+    setActiveSmartViewId(undefined);
+  };
+  const saveSmartView = () => {
+    const created = createSmartView({
+      name: smartViewName,
+      route,
+      priority: priorityFilter,
+      flagged: flaggedFilter,
+      projectId: projectFilter,
+      tag: tagFilter,
+      sectionId: sectionFilter,
+      context: contextFilter,
+      dateFilter,
+      sort: sortFilter,
+      sourceType: sourceFilter,
+    });
+    if (!created) {
+      notify("请给这个视图起一个 1–60 字的名字", "error");
+      return;
+    }
+    const next = [
+      created,
+      ...smartViews.filter((view) => view.name !== created.name),
+    ].slice(0, 24);
+    setSmartViews(next);
+    writeSmartViews(next);
+    setSmartViewName("");
+    setActiveSmartViewId(created.id);
+    notify(`已保存视图“${created.name}”`, "success");
+  };
+  const removeSmartView = (id: string) => {
+    const next = smartViews.filter((view) => view.id !== id);
+    setSmartViews(next);
+    writeSmartViews(next);
+    if (activeSmartViewId === id) setActiveSmartViewId(undefined);
+    notify("已删除保存的视图", "info");
+  };
+  const parseSmartViewQueryForPreview = () => {
+    const result = parseSmartViewQuery(smartViewQuery, {
+      projects: projectOptions,
+      tags: tagOptions,
+      sections: sectionOptions,
+      contexts: contextOptions,
+    });
+    setSmartViewQueryResult(result);
+    if (result.kind === "error") notify(result.value.message, "error");
+  };
+  const applySmartViewQuery = () => {
+    if (smartViewQueryResult?.kind !== "suggestion") return;
+    const { filters } = smartViewQueryResult.value;
+    setPriorityFilter(filters.priority);
+    setFlaggedFilter(filters.flagged === true);
+    setProjectFilter(filters.projectId);
+    setTagFilter(filters.tag);
+    setSectionFilter(filters.sectionId);
+    setContextFilter(filters.context);
+    setDateFilter(filters.dateFilter);
+    setSortFilter(filters.sort);
+    onSourceChange(filters.sourceType);
+    setActiveSmartViewId(undefined);
+    setSmartViewQuery("");
+    setSmartViewQueryResult(undefined);
+    closeFilter();
+    notify(`已套用筛选：${smartViewQueryResult.value.summary.join(" · ")}`, "success");
+  };
   const dateLabel = new Intl.DateTimeFormat("zh-CN", {
     weekday: "long",
     month: "long",
@@ -1091,42 +2509,692 @@ function TaskListPage({
       controller.sections
         .map((section) => ({
           ...section,
-          tasks: section.tasks.filter(
-            (task) =>
-              (priorityFilter === "all" || task.priority === priorityFilter) &&
-              (projectFilter === "all" || task.projectId === projectFilter),
+          tasks: sortSmartViewTasks(
+            section.tasks.filter(
+              (task) =>
+                (priorityFilter === "all" || task.priority === priorityFilter) &&
+                (!flaggedFilter || task.flagged === true) &&
+                (projectFilter === "all" || task.projectId === projectFilter) &&
+                (tagFilter === "all" || task.tags.includes(tagFilter)) &&
+                (sectionFilter === "all" || task.sectionId === sectionFilter) &&
+                (contextFilter === "all" ||
+                  (task.contexts ?? []).some(
+                    (context) =>
+                      context.toLocaleLowerCase() ===
+                      contextFilter.toLocaleLowerCase(),
+                  )) &&
+                smartViewMatchesDate(task, dateFilter),
+            ),
+            sortFilter,
           ),
         }))
         .filter((section) => section.tasks.length > 0),
-    [controller.sections, priorityFilter, projectFilter],
+    [
+      controller.sections,
+      priorityFilter,
+      flaggedFilter,
+      projectFilter,
+      tagFilter,
+      sectionFilter,
+      contextFilter,
+      dateFilter,
+      sortFilter,
+    ],
   );
   useEffect(() => {
-    if (!window.desktopApi) {
-      setProjectOptions(
-        [
-          ...new Set(
-            controller.tasks
-              .map((task) => task.projectId)
-              .filter((value): value is string => Boolean(value)),
-          ),
-        ].sort((a, b) => a.localeCompare(b, "zh-CN")),
+    setBulkSelection((current) => {
+      const visibleIds = new Set(
+        visibleSections.flatMap((section) => section.tasks.map((task) => task.id)),
       );
+      const next = new Set([...current].filter((id) => visibleIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleSections]);
+  const visibleTasks = useMemo(
+    () => visibleSections.flatMap((section) => section.tasks),
+    [visibleSections],
+  );
+  const inlineComposerRoute: InlineTaskComposerRoute | undefined =
+    route === "today" || route === "inbox" || route === "all"
+      ? route
+      : undefined;
+  const inlineComposerVisible =
+    inlineComposerRoute !== undefined &&
+    !search.trim() &&
+    sourceFilter !== "feishu" &&
+    priorityFilter === "all" &&
+    !flaggedFilter &&
+    projectFilter === "all" &&
+    tagFilter === "all" &&
+    sectionFilter === "all" &&
+    contextFilter === "all" &&
+    dateFilter === "any" &&
+    sortFilter === "manual" &&
+    !bulkMode;
+  const plannedTodayTasks = useMemo(
+    () =>
+      visibleSections
+        .find((section) => section.id === "planned-today")
+        ?.tasks.filter((task) => task.status === "open") ?? [],
+    [visibleSections],
+  );
+  const canInsertAfterSelected =
+    wideDesktop &&
+    route === "today" &&
+    listViewMode === "list" &&
+    inlineComposerVisible &&
+    Boolean(
+      controller.selectedId &&
+        plannedTodayTasks.some((task) => task.id === controller.selectedId),
+    );
+  useEffect(() => {
+    if (
+      inlineInsertAfterTaskId &&
+      (!canInsertAfterSelected ||
+        inlineInsertAfterTaskId !== controller.selectedId)
+    ) {
+      setInlineInsertAfterTaskId(undefined);
+    }
+  }, [
+    canInsertAfterSelected,
+    controller.selectedId,
+    inlineInsertAfterTaskId,
+  ]);
+  const taskListRef = useRef<HTMLElement>(null);
+  const pendingKeyboardFocusRef = useRef<string | undefined>(undefined);
+  const focusTask = useCallback((taskId: string): boolean => {
+    const taskListElement = taskListRef.current;
+    if (!taskListElement) return false;
+    const nextRow = Array.from(
+      taskListElement.querySelectorAll<HTMLElement>("[data-task-id]"),
+    ).find((element) => element.dataset.taskId === taskId);
+    const hiddenContainer = nextRow?.closest<HTMLElement>("[hidden]");
+    if (hiddenContainer) {
+      hiddenContainer
+        .closest<HTMLElement>(".task-section-group")
+        ?.querySelector<HTMLButtonElement>(".task-section-heading")
+        ?.click();
+      return false;
+    }
+    const nextTarget = nextRow?.querySelector<HTMLElement>(
+      ".task-body, .task-table-title",
+    );
+    nextTarget?.focus({ preventScroll: true });
+    nextTarget?.scrollIntoView?.({ block: "nearest" });
+    if (nextRow && nextTarget) {
+      // Chromium's `nearest` alignment can place a focused row behind the
+      // content column's padding when the inspector is open. Reconcile the
+      // final geometry against the actual padded viewport so a search jump
+      // always leaves the whole row readable and actionable.
+      const contentRect = taskListElement.getBoundingClientRect();
+      const styles = window.getComputedStyle(taskListElement);
+      const viewportTop =
+        contentRect.top + (Number.parseFloat(styles.paddingTop) || 0);
+      const viewportBottom =
+        contentRect.bottom - (Number.parseFloat(styles.paddingBottom) || 0);
+      const rowRect = nextRow.getBoundingClientRect();
+      if (rowRect.top < viewportTop) {
+        taskListElement.scrollTop -= viewportTop - rowRect.top;
+      } else if (rowRect.bottom > viewportBottom) {
+        taskListElement.scrollTop += rowRect.bottom - viewportBottom;
+      }
+    }
+    return Boolean(nextTarget && document.activeElement === nextTarget);
+  }, []);
+  useEffect(() => {
+    const taskId = pendingKeyboardFocusRef.current;
+    if (!taskId) return;
+    if (
+      controller.selectedId !== taskId ||
+      !visibleTasks.some((task) => task.id === taskId)
+    ) {
+      pendingKeyboardFocusRef.current = undefined;
       return;
+    }
+    let attempts = 0;
+    let frame = 0;
+    const retry = () => {
+      if (pendingKeyboardFocusRef.current !== taskId) return;
+      const focused = focusTask(taskId);
+      attempts += 1;
+      if (focused || attempts >= 60) {
+        pendingKeyboardFocusRef.current = undefined;
+        return;
+      }
+      frame = window.requestAnimationFrame(retry);
+    };
+    const retryAfterWindowFocus = () => {
+      if (pendingKeyboardFocusRef.current !== taskId) return;
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(retry);
+    };
+    window.addEventListener("focus", retryAfterWindowFocus);
+    document.addEventListener("visibilitychange", retryAfterWindowFocus);
+    frame = window.requestAnimationFrame(retry);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("focus", retryAfterWindowFocus);
+      document.removeEventListener("visibilitychange", retryAfterWindowFocus);
+    };
+  }, [controller.selectedId, focusTask, visibleTasks]);
+  useEffect(() => {
+    if (!focusTaskId || controller.loading) return undefined;
+    if (
+      controller.error ||
+      !controller.selectedId ||
+      controller.selectedId !== focusTaskId ||
+      !visibleTasks.some((task) => task.id === focusTaskId)
+    ) {
+      if (controller.error) onTaskFocused?.(focusTaskId);
+      return undefined;
+    }
+    let attempts = 0;
+    let stableFrames = 0;
+    let frame = 0;
+    let retryTimer = 0;
+    const retry = () => {
+      frame = 0;
+      retryTimer = 0;
+      const focused = focusTask(focusTaskId);
+      attempts += 1;
+      stableFrames = focused ? stableFrames + 1 : 0;
+      if (stableFrames >= 3) {
+        onTaskFocused?.(focusTaskId);
+        return;
+      }
+      // Chromium can render the destination before the Electron window is
+      // active again. Keep the request alive after the first render window so
+      // a modal-to-list jump can finish when window focus returns.
+      if (attempts < 60) {
+        frame = window.requestAnimationFrame(retry);
+      } else {
+        retryTimer = window.setTimeout(() => {
+          attempts = 0;
+          stableFrames = 0;
+          retry();
+        }, 160);
+      }
+    };
+    const retryAfterWindowFocus = () => {
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+        retryTimer = 0;
+      }
+      if (!frame) frame = window.requestAnimationFrame(retry);
+    };
+    window.addEventListener("focus", retryAfterWindowFocus);
+    document.addEventListener("visibilitychange", retryAfterWindowFocus);
+    frame = window.requestAnimationFrame(retry);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      if (retryTimer) window.clearTimeout(retryTimer);
+      window.removeEventListener("focus", retryAfterWindowFocus);
+      document.removeEventListener("visibilitychange", retryAfterWindowFocus);
+    };
+  }, [
+    controller.error,
+    controller.loading,
+    controller.selectedId,
+    focusTask,
+    focusTaskId,
+    onTaskFocused,
+    visibleTasks,
+  ]);
+  const renderedTaskOrder = (): Task[] => {
+    const taskListElement = taskListRef.current;
+    if (!taskListElement) return visibleTasks;
+    const renderedIds = new Set(
+      Array.from(
+        taskListElement.querySelectorAll<HTMLElement>("[data-task-id]"),
+      )
+        .filter((element) => !element.closest("[hidden]"))
+        .map((element) => element.dataset.taskId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    return visibleTasks.filter((task) => renderedIds.has(task.id));
+  };
+  const handleTaskListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+      if (bulkBusy || reorderBusy) {
+        event.preventDefault();
+        return;
+      }
+      if (filterOpen) {
+        event.preventDefault();
+        closeFilter();
+        return;
+      }
+      if (bulkEditOpen) {
+        event.preventDefault();
+        setBulkEditOpen(false);
+        focusAfterDismiss(
+          bulkReturnFocusRef.current ?? bulkModeToggleRef.current,
+        );
+        return;
+      }
+      if (bulkPreview || bulkAutomationPreview) {
+        event.preventDefault();
+        closeBulkPreviews();
+        return;
+      }
+      if (bulkMode) {
+        event.preventDefault();
+        setBulkMode(false);
+        setBulkSelection(new Set());
+        bulkAnchorTaskIdRef.current = undefined;
+        bulkReturnFocusRef.current = undefined;
+        focusAfterDismiss(bulkModeToggleRef.current);
+      }
+      return;
+    }
+    if (bulkBusy || reorderBusy || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : undefined;
+    if (target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog'], [role='menu']")) {
+      return;
+    }
+    const taskListElement = event.currentTarget;
+    if (target?.closest(".task-list, .task-table-wrap") === null && event.target !== taskListElement) {
+      return;
+    }
+    const key = event.key.toLocaleLowerCase();
+    const navigableTasks = renderedTaskOrder();
+    const currentIndex = navigableTasks.findIndex(
+      (task) => task.id === controller.selectedId,
+    );
+    if (
+      (event.code === "Space" || event.key === " ") &&
+      !event.nativeEvent.isComposing &&
+      canInsertAfterSelected &&
+      controller.selectedId
+    ) {
+      event.preventDefault();
+      setInlineInsertAfterTaskId(controller.selectedId);
+      return;
+    }
+    if (key === "," && bulkMode) {
+      const firstAction = bulkToolbarRef.current?.querySelector<HTMLElement>(
+        "button:not(:disabled), select:not(:disabled)",
+      );
+      if (!firstAction) return;
+      event.preventDefault();
+      firstAction.focus({ preventScroll: true });
+      return;
+    }
+    if (key === "x") {
+      const selectionTask = navigableTasks[currentIndex >= 0 ? currentIndex : 0];
+      if (!selectionTask) return;
+      event.preventDefault();
+      if (currentIndex < 0) {
+        controller.select(selectionTask.id);
+        focusTask(selectionTask.id);
+      }
+      if (!bulkMode) {
+        setBulkMode(true);
+        setBulkPreview(undefined);
+        setBulkAutomationPreview(undefined);
+        setBulkEditOpen(false);
+      }
+      toggleBulkSelection(selectionTask.id);
+      return;
+    }
+    if (key === "e") {
+      if (bulkMode || keyboardCompletionBusyRef.current) return;
+      const selectedTask = navigableTasks[currentIndex];
+      if (!selectedTask || !canToggleTaskCompletion(selectedTask)) {
+        return;
+      }
+      const nextTask =
+        navigableTasks[currentIndex + 1] ?? navigableTasks[currentIndex - 1];
+      event.preventDefault();
+      keyboardCompletionBusyRef.current = true;
+      void toggleTaskCompletionWithFeedback(selectedTask, controller, notify)
+        .then((changed) => {
+          if (!changed || !nextTask) return;
+          pendingKeyboardFocusRef.current = nextTask.id;
+          controller.select(nextTask.id);
+        })
+        .finally(() => {
+          keyboardCompletionBusyRef.current = false;
+        });
+      return;
+    }
+    const direction = key === "arrowdown" || key === "j"
+      ? 1
+      : key === "arrowup" || key === "k"
+        ? -1
+        : 0;
+    if (direction === 0) return;
+    if (navigableTasks.length === 0) return;
+    const nextIndex = currentIndex < 0
+      ? direction > 0 ? 0 : navigableTasks.length - 1
+      : Math.max(0, Math.min(navigableTasks.length - 1, currentIndex + direction));
+    event.preventDefault();
+    const nextTask = navigableTasks[nextIndex];
+    if (!nextTask) return;
+    controller.select(nextTask.id);
+    focusTask(nextTask.id);
+  };
+  const inboxTriageTasks = useMemo(
+    () =>
+      controller.tasks.filter(
+        (task) =>
+          isInboxTask(task),
+      ),
+    [controller.tasks],
+  );
+  useEffect(() => {
+    if (
+      !inboxTriageRequest ||
+      inboxTriageRequestRef.current === inboxTriageRequest
+    ) {
+      return;
+    }
+    if (route !== "inbox") return;
+    if (inboxTriageTasks.length === 0) return;
+    inboxTriageRequestRef.current = inboxTriageRequest;
+    onInboxTriageOpenChange(true);
+    onInboxTriageRequestHandled?.(inboxTriageRequest);
+  }, [
+    inboxTriageRequest,
+    inboxTriageTasks.length,
+    onInboxTriageOpenChange,
+    onInboxTriageRequestHandled,
+    route,
+  ]);
+  const selectedBulkTasks = useMemo(
+    () => visibleTasks.filter((task) => bulkSelection.has(task.id)),
+    [bulkSelection, visibleTasks],
+  );
+  const selectedManualAutomation = manualAutomations.find(
+    (rule) => rule.id === bulkAutomationRuleId,
+  );
+  const selectedManualAutomationTasks = useMemo(
+    () =>
+      selectedManualAutomation
+        ? selectedBulkTasks.filter(
+            (task) =>
+              matchesTaskAutomation(selectedManualAutomation, task) &&
+              taskAutomationPatch(selectedManualAutomation, task) !== undefined,
+          )
+        : [],
+    [selectedBulkTasks, selectedManualAutomation],
+  );
+  const allSelectedAreOpen =
+    selectedBulkTasks.length > 0 &&
+    selectedBulkTasks.every(
+      (task) => task.status === "open" && task.deletedAt === undefined,
+    );
+  const allSelectedAreCompleted =
+    selectedBulkTasks.length > 0 &&
+    selectedBulkTasks.every(
+      (task) => task.status === "completed" && task.deletedAt === undefined,
+    );
+  const allSelectedCanComplete =
+    allSelectedAreOpen && selectedBulkTasks.every(canToggleTaskCompletion);
+  const allSelectedCanMoveToToday =
+    allSelectedAreOpen &&
+    selectedBulkTasks.some((task) => task.plannedDate !== dateKey());
+  const allSelectedCanTrash =
+    selectedBulkTasks.length > 0 &&
+    selectedBulkTasks.every((task) => task.deletedAt === undefined);
+  const allSelectedCanRestore =
+    selectedBulkTasks.length > 0 &&
+    selectedBulkTasks.every((task) => task.deletedAt !== undefined);
+  const allSelectedCanEdit =
+    selectedBulkTasks.length > 0 &&
+    selectedBulkTasks.every((task) => task.deletedAt === undefined);
+  const bulkActionLabel = (action: BulkTaskAction): string => {
+    if (action.kind === "complete") return "完成任务";
+    if (action.kind === "reopen") return "恢复任务";
+    if (action.kind === "move-to-today") return "安排到今天";
+    if (action.kind === "trash") return "移入回收站";
+    if (action.kind === "restore") return "恢复出回收站";
+    return "编辑任务属性";
+  };
+  const bulkEditSummary = (action: BulkTaskAction): string[] => {
+    if (action.kind !== "edit") return [];
+    const summary: string[] = [];
+    if (action.patch.priority !== undefined) {
+      summary.push(`优先级 → ${{ none: "无", low: "低", medium: "中", high: "高", urgent: "紧急" }[action.patch.priority]}`);
+    }
+    if (action.patch.flagged !== undefined) {
+      summary.push(action.patch.flagged ? "添加重点标记" : "取消重点标记");
+    }
+    if (action.patch.projectId !== undefined) {
+      const label = action.patch.projectId === null
+        ? "无项目"
+        : projects.find((project) => project.id === action.patch.projectId)?.name ?? action.patch.projectId;
+      summary.push(`项目 → ${label}`);
+    }
+    if (action.patch.listId !== undefined) {
+      const label = action.patch.listId === null
+        ? "无清单"
+        : lists.find((list) => list.id === action.patch.listId)?.name ?? action.patch.listId;
+      summary.push(`清单 → ${label}`);
+    }
+    if (action.patch.tags !== undefined) {
+      const values = action.patch.tags.values.length > 0 ? action.patch.tags.values.join("、") : "无标签";
+      summary.push(`标签${action.patch.tags.mode === "replace" ? "替换" : action.patch.tags.mode === "add" ? "追加" : "移除"} → ${values}`);
+    }
+    return summary;
+  };
+  const requestBulkPreview = (
+    action: BulkTaskAction,
+    trigger?: HTMLElement,
+  ) => {
+    if (selectedBulkTasks.length === 0) return;
+    if (trigger) bulkReturnFocusRef.current = trigger;
+    setBulkAutomationPreview(undefined);
+    setBulkPreview(action);
+  };
+  const requestBulkAutomationPreview = (trigger?: HTMLElement) => {
+    if (!selectedManualAutomation || selectedManualAutomationTasks.length === 0) {
+      notify("当前选择没有符合条件且需要变化的任务", "info");
+      return;
+    }
+    if (trigger) bulkReturnFocusRef.current = trigger;
+    setBulkPreview(undefined);
+    setBulkAutomationPreview({
+      rule: selectedManualAutomation,
+      tasks: selectedManualAutomationTasks,
+    });
+  };
+  const runBulkAction = async () => {
+    if (!bulkPreview || selectedBulkTasks.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      const operationId = await controller.applyBulkTaskAction({
+        ids: selectedBulkTasks.map((task) => task.id),
+        action: bulkPreview,
+        baselines: selectedBulkTasks.map((task) => ({
+          id: task.id,
+          updatedAt: task.updatedAt,
+        })),
+      });
+      const label = bulkActionLabel(bulkPreview);
+      const returnFocus = bulkModeToggleRef.current;
+      setBulkPreview(undefined);
+      setBulkSelection(new Set());
+      setBulkMode(false);
+      bulkAnchorTaskIdRef.current = undefined;
+      bulkReturnFocusRef.current = undefined;
+      focusAfterDismiss(returnFocus);
+      notify(
+        `${selectedBulkTasks.length} 项任务已${label.replace("任务", "")}`,
+        "success",
+        operationId
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
+          : undefined,
+      );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "批量操作未完成",
+        "error",
+      );
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+  const runBulkAutomation = async () => {
+    if (!bulkAutomationPreview || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      const operationId = await controller.applyTaskAutomation({
+        ids: bulkAutomationPreview.tasks.map((task) => task.id),
+        ruleId: bulkAutomationPreview.rule.id,
+        baselines: bulkAutomationPreview.tasks.map((task) => ({
+          id: task.id,
+          updatedAt: task.updatedAt,
+        })),
+      });
+      const count = bulkAutomationPreview.tasks.length;
+      const name = bulkAutomationPreview.rule.name;
+      const returnFocus = bulkModeToggleRef.current;
+      setBulkAutomationPreview(undefined);
+      setBulkSelection(new Set());
+      setBulkMode(false);
+      bulkAnchorTaskIdRef.current = undefined;
+      bulkReturnFocusRef.current = undefined;
+      focusAfterDismiss(returnFocus);
+      notify(
+        `${count} 项任务已应用“${name}”`,
+        "success",
+        operationId
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
+          : undefined,
+      );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "批量自动化未完成",
+        "error",
+      );
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+  const toggleBulkMode = () => {
+    setBulkMode((current) => {
+      if (current) {
+        setBulkSelection(new Set());
+        setBulkPreview(undefined);
+        setBulkAutomationPreview(undefined);
+        setBulkEditOpen(false);
+        bulkAnchorTaskIdRef.current = undefined;
+        bulkReturnFocusRef.current = undefined;
+      }
+      return !current;
+    });
+  };
+  const selectAllVisible = () => {
+    setBulkPreview(undefined);
+    setBulkAutomationPreview(undefined);
+    bulkAnchorTaskIdRef.current = controller.selectedId ?? visibleTasks[0]?.id;
+    setBulkSelection(new Set(visibleTasks.map((task) => task.id)));
+  };
+  const toggleBulkSelection = (
+    taskId: string,
+    event?: ReactMouseEvent<HTMLElement>,
+  ) => {
+    setBulkPreview(undefined);
+    setBulkAutomationPreview(undefined);
+    setBulkEditOpen(false);
+    const taskOrder = renderedTaskOrder();
+    const anchorTaskId = bulkAnchorTaskIdRef.current ?? controller.selectedId;
+    const selectedIdBeforeClick = controller.selectedId;
+    const modifierClick = Boolean(
+      event &&
+        !event.shiftKey &&
+        (event.metaKey || event.ctrlKey),
+    );
+    const seedCurrentSelection = Boolean(
+      modifierClick &&
+        !bulkMode &&
+        selectedIdBeforeClick &&
+        selectedIdBeforeClick !== taskId &&
+        taskOrder.some((task) => task.id === selectedIdBeforeClick),
+    );
+    const anchorIndex = anchorTaskId
+      ? taskOrder.findIndex((task) => task.id === anchorTaskId)
+      : -1;
+    const taskIndex = taskOrder.findIndex((task) => task.id === taskId);
+    if (event?.shiftKey && anchorIndex >= 0 && taskIndex >= 0) {
+      const start = Math.min(anchorIndex, taskIndex);
+      const end = Math.max(anchorIndex, taskIndex);
+      bulkAnchorTaskIdRef.current = anchorTaskId;
+      if (!bulkMode) setBulkMode(true);
+      controller.select(taskId);
+      setBulkSelection((current) => {
+        const next = new Set(current);
+        taskOrder.slice(start, end + 1).forEach((task) => next.add(task.id));
+        return next;
+      });
+      return;
+    }
+    if (!bulkMode) setBulkMode(true);
+    if (event) controller.select(taskId);
+    bulkAnchorTaskIdRef.current = taskId;
+    setBulkSelection((current) => {
+      const next = new Set(current);
+      if (seedCurrentSelection && selectedIdBeforeClick) {
+        next.add(selectedIdBeforeClick);
+      }
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+  useEffect(() => {
+    let active = true;
+    const applyOptions = (tasks: readonly Task[]) => {
+      if (!active) return;
+      setTaskSnapshot([...tasks]);
+      setProjectOptions(
+        [...new Set(tasks.map((task) => task.projectId).filter((value): value is string => Boolean(value)))]
+          .sort((a, b) => a.localeCompare(b, "zh-CN")),
+      );
+      setTagOptions(
+        [...new Set(tasks.flatMap((task) => task.tags))]
+          .sort((a, b) => a.localeCompare(b, "zh-CN")),
+      );
+      setSectionOptions(
+        [...new Set(tasks.map((task) => task.sectionId).filter((value): value is string => Boolean(value?.trim())))]
+          .sort((a, b) => a.localeCompare(b, "zh-CN")),
+      );
+      setContextOptions(
+        [...new Set(tasks.flatMap((task) => task.contexts ?? []))]
+          .sort((a, b) => a.localeCompare(b, "zh-CN")),
+      );
+    };
+    if (!window.desktopApi) {
+      applyOptions(controller.tasks);
+      return () => {
+        active = false;
+      };
     }
     void window.desktopApi.tasks
       .list({ includeDeleted: false })
-      .then((tasks) =>
-        setProjectOptions(
-          [
-            ...new Set(
-              tasks
-                .map((task) => task.projectId)
-                .filter((value): value is string => Boolean(value)),
-            ),
-          ].sort((a, b) => a.localeCompare(b, "zh-CN")),
-        ),
-      );
+      .then((tasks) => applyOptions(tasks))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, [controller.tasks]);
+  const subtaskProgress = useMemo(
+    () => buildSubtaskProgress(taskSnapshot),
+    [taskSnapshot],
+  );
   const orderedTodayIds = useMemo(
     () =>
       visibleSections
@@ -1135,27 +3203,176 @@ function TaskListPage({
         .map((task) => task.id),
     [visibleSections],
   );
+  const handleInlineTaskCreated = async (
+    result: TaskMutationResult,
+  ): Promise<boolean> => {
+    const anchorId = inlineInsertAfterTaskId;
+    if (
+      !anchorId ||
+      !canInsertAfterSelected ||
+      route !== "today"
+    ) {
+      return false;
+    }
+    const anchorIndex = orderedTodayIds.indexOf(anchorId);
+    if (anchorIndex < 0 || orderedTodayIds.includes(result.task.id)) {
+      return false;
+    }
+
+    const nextOrder = [...orderedTodayIds];
+    nextOrder.splice(anchorIndex + 1, 0, result.task.id);
+    setReorderBusy(true);
+    try {
+      const reorderOperationId = await controller.reorderToday(nextOrder);
+      setInlineInsertAfterTaskId(undefined);
+      pendingKeyboardFocusRef.current = result.task.id;
+      controller.select(result.task.id);
+      const undoInsert =
+        reorderOperationId && result.operationId
+          ? {
+              label: "撤销",
+              run: () => {
+                void (async () => {
+                  try {
+                    await controller.undo(reorderOperationId);
+                    await controller.undo(result.operationId);
+                    notify("已撤销新增任务", "success");
+                  } catch (reason) {
+                    notify(
+                      taskUndoFailureMessage(reason, "新增任务暂时无法撤销"),
+                      "error",
+                    );
+                  }
+                })();
+              },
+            }
+          : undefined;
+      notify("已添加到当前任务后", "success", undoInsert);
+    } catch (reason) {
+      setInlineInsertAfterTaskId(undefined);
+      pendingKeyboardFocusRef.current = result.task.id;
+      controller.select(result.task.id);
+      notify(
+        "任务已创建，但暂时无法放到当前任务后",
+        "info",
+      );
+    } finally {
+      setReorderBusy(false);
+    }
+    return true;
+  };
   const moveTodayTask = async (taskId: string, targetTaskId: string) => {
     const index = orderedTodayIds.indexOf(taskId);
     const target = orderedTodayIds.indexOf(targetTaskId);
     if (index < 0 || target < 0) return;
     const next = [...orderedTodayIds];
     [next[index], next[target]] = [next[target], next[index]];
-    const operationId = await controller.reorderToday(next);
-    notify(
-      "Today 顺序已更新",
-      "success",
-      operationId
-        ? { label: "撤销", run: () => void controller.undo(operationId) }
-        : undefined,
-    );
+    try {
+      const operationId = await controller.reorderToday(next);
+      notify(
+        "Today 顺序已更新",
+        "success",
+        operationId
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
+          : undefined,
+      );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "暂时无法调整 Today 顺序",
+        "error",
+      );
+    }
+  };
+  const beginTodayDrag = (
+    taskId: string,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => {
+    if (reorderBusy || !orderedTodayIds.includes(taskId)) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", taskId);
+    setDraggingTaskId(taskId);
+    setDropTargetTaskId(undefined);
+  };
+  const endTodayDrag = () => {
+    if (reorderBusy) return;
+    setDraggingTaskId(undefined);
+    setDropTargetTaskId(undefined);
+  };
+  const dragOverTodayTask = (
+    taskId: string,
+    event: ReactDragEvent<HTMLDivElement>,
+  ) => {
+    if (
+      reorderBusy ||
+      !draggingTaskId ||
+      draggingTaskId === taskId ||
+      !orderedTodayIds.includes(taskId)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dropTargetTaskId !== taskId) setDropTargetTaskId(taskId);
+  };
+  const dropTodayTask = async (
+    targetTaskId: string,
+    event: ReactDragEvent<HTMLDivElement>,
+  ) => {
+    if (reorderBusy || !orderedTodayIds.includes(targetTaskId)) return;
+    event.preventDefault();
+    const draggedId = event.dataTransfer.getData("text/plain") || draggingTaskId;
+    if (!draggedId || draggedId === targetTaskId) {
+      endTodayDrag();
+      return;
+    }
+    const next = moveTaskBefore(orderedTodayIds, draggedId, targetTaskId);
+    if (next.every((id, index) => id === orderedTodayIds[index])) {
+      endTodayDrag();
+      return;
+    }
+    setReorderBusy(true);
+    try {
+      const operationId = await controller.reorderToday(next);
+      notify(
+        "Today 顺序已更新",
+        "success",
+        operationId
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
+          : undefined,
+      );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "暂时无法调整 Today 顺序",
+        "error",
+      );
+    } finally {
+      setReorderBusy(false);
+      setDraggingTaskId(undefined);
+      setDropTargetTaskId(undefined);
+    }
   };
   const askToReplan = () =>
     onAskAgent(
       `请分析我当前“${routeTitles[route]}”中的 ${controller.tasks.filter((task) => task.status === "open").length} 项未完成任务，结合优先级和截止时间给出可执行的重新规划；先展示方案，未经我确认不要批量修改。`,
     );
   return (
-    <main className="content-column">
+    <main
+      ref={taskListRef}
+      className="content-column"
+      tabIndex={-1}
+      aria-keyshortcuts="E X Space Escape , ArrowDown ArrowUp J K ? Meta+Z Control+Z Meta+Shift+Z Control+Shift+Z"
+      onKeyDown={handleTaskListKeyDown}
+    >
       <div className="page-heading">
         <div>
           <h1>
@@ -1172,27 +3389,142 @@ function TaskListPage({
           </p>
         </div>
         <div className="page-actions">
-          <button type="button" className="soft-button" onClick={askToReplan}>
-            <WandSparkles size={16} />
-            重新规划
+          <div className="task-view-toggle" role="group" aria-label="任务视图">
+            <button
+              type="button"
+              className={listViewMode === "list" ? "active" : ""}
+              aria-pressed={listViewMode === "list"}
+              onClick={() => setListViewMode("list")}
+              title="列表视图"
+            >
+              <LayoutList size={15} aria-hidden="true" />
+              列表
+            </button>
+            <button
+              type="button"
+              className={listViewMode === "table" ? "active" : ""}
+              aria-pressed={listViewMode === "table"}
+              onClick={() => setListViewMode("table")}
+              title="表格视图"
+            >
+              <Table2 size={15} aria-hidden="true" />
+              表格
+            </button>
+          </div>
+          <button
+            type="button"
+            className={`soft-button bulk-mode-toggle ${bulkMode ? "active" : ""}`}
+            aria-pressed={bulkMode}
+            ref={bulkModeToggleRef}
+            title={bulkMode ? "退出选择（Esc）" : "批量选择"}
+            onClick={toggleBulkMode}
+          >
+            <ListChecks size={16} />
+            {bulkMode ? "退出选择" : "批量选择"}
+          </button>
+          {route === "inbox" && inboxTriageTasks.length > 0 && (
+            <button
+              type="button"
+              className="soft-button"
+              ref={inboxTriageTriggerRef}
+              onClick={() => onInboxTriageOpenChange(true)}
+            >
+              <Inbox size={16} />
+              整理暂存
+            </button>
+          )}
+          <button
+            type="button"
+            className="soft-button"
+            onClick={route === "today" ? () => onPlanToday() : askToReplan}
+          >
+            {route === "today" ? (
+              <CalendarDays size={16} />
+            ) : (
+              <WandSparkles size={16} />
+            )}
+            {route === "today" ? "帮我选今天" : "重新规划"}
           </button>
           <div className="filter-anchor">
             <button
               type="button"
-              className={`icon-button ${priorityFilter !== "all" || projectFilter !== "all" ? "active" : ""}`}
+              ref={filterTriggerRef}
+              className={`icon-button ${priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? "active" : ""}`}
               aria-label="筛选"
               aria-expanded={filterOpen}
-              onClick={() => setFilterOpen((value) => !value)}
+              aria-controls="task-filter-popover"
+              title={filterOpen ? "关闭筛选（Esc）" : "打开筛选"}
+              onClick={() => {
+                if (filterOpen) closeFilter();
+                else setFilterOpen(true);
+              }}
             >
               <Filter size={17} />
             </button>
             {filterOpen && (
               <div
+                id="task-filter-popover"
+                ref={filterDialogRef}
                 className="filter-popover"
                 role="dialog"
                 aria-label="任务筛选"
+                tabIndex={-1}
               >
                 <strong>按优先级筛选</strong>
+                <div className="filter-assist">
+                  <label htmlFor="smart-view-query">一句话筛选</label>
+                  <div className="filter-assist-row">
+                    <input
+                      id="smart-view-query"
+                      ref={filterQueryRef}
+                      className="settings-input"
+                      value={smartViewQuery}
+                      onChange={(event) => {
+                        setSmartViewQuery(event.target.value);
+                        setSmartViewQueryResult(undefined);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          parseSmartViewQueryForPreview();
+                        }
+                      }}
+                      placeholder="例如：本周高优先级的飞书任务"
+                      maxLength={120}
+                      aria-describedby="smart-view-query-hint"
+                    />
+                    <button
+                      type="button"
+                      className="soft-button"
+                      disabled={!smartViewQuery.trim()}
+                      onClick={parseSmartViewQueryForPreview}
+                    >
+                      解析
+                    </button>
+                  </div>
+                  <small id="smart-view-query-hint">
+                    只生成筛选预览，不修改任务；支持重点标记、日期、优先级、来源、项目、分组标题、标签和情境。
+                  </small>
+                  {smartViewQueryResult?.kind === "suggestion" && (
+                    <div className="filter-assist-preview" role="status">
+                      <span>
+                        将筛选：{smartViewQueryResult.value.summary.join(" · ")}
+                      </span>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={applySmartViewQuery}
+                      >
+                        套用
+                      </button>
+                    </div>
+                  )}
+                  {smartViewQueryResult?.kind === "error" && (
+                    <p className="filter-assist-error" role="alert">
+                      {smartViewQueryResult.value.message}
+                    </p>
+                  )}
+                </div>
                 <div className="filter-options">
                   {(
                     ["all", "urgent", "high", "medium", "low", "none"] as const
@@ -1201,18 +3533,36 @@ function TaskListPage({
                       key={value}
                       type="button"
                       className={priorityFilter === value ? "active" : ""}
-                      onClick={() => setPriorityFilter(value)}
+                      onClick={() => {
+                        setPriorityFilter(value);
+                        setActiveSmartViewId(undefined);
+                      }}
                     >
                       {value === "all" ? "全部" : priorityLabels[value]}
                     </button>
                   ))}
                 </div>
+                <label className="filter-check-label">
+                  <input
+                    type="checkbox"
+                    checked={flaggedFilter}
+                    onChange={(event) => {
+                      setFlaggedFilter(event.target.checked);
+                      setActiveSmartViewId(undefined);
+                    }}
+                  />
+                  <Star size={14} aria-hidden="true" />
+                  只看重点标记
+                </label>
                 <label className="filter-select-label">
                   项目
                   <select
                     className="field-select"
                     value={projectFilter}
-                    onChange={(event) => setProjectFilter(event.target.value)}
+                    onChange={(event) => {
+                      setProjectFilter(event.target.value);
+                      setActiveSmartViewId(undefined);
+                    }}
                   >
                     <option value="all">全部项目</option>
                     {projectOptions.map((project) => (
@@ -1222,21 +3572,144 @@ function TaskListPage({
                     ))}
                   </select>
                 </label>
+                <label className="filter-select-label">
+                  标签
+                  <select
+                    className="field-select"
+                    value={tagFilter}
+                    onChange={(event) => {
+                      setTagFilter(event.target.value);
+                      setActiveSmartViewId(undefined);
+                    }}
+                  >
+                    <option value="all">全部标签</option>
+                    {tagOptions.map((tag) => (
+                      <option key={tag} value={tag}>
+                        {tag}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="filter-select-label">
+                  分组标题
+                  <select
+                    className="field-select"
+                    value={sectionFilter}
+                    onChange={(event) => {
+                      setSectionFilter(event.target.value);
+                      setActiveSmartViewId(undefined);
+                    }}
+                  >
+                    <option value="all">全部分组</option>
+                    {sectionOptions.map((section) => (
+                      <option key={section} value={section}>
+                        {section}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="filter-select-label">
+                  情境
+                  <select
+                    className="field-select"
+                    value={contextFilter}
+                    onChange={(event) => {
+                      setContextFilter(event.target.value);
+                      setActiveSmartViewId(undefined);
+                    }}
+                  >
+                    <option value="all">全部情境</option>
+                    {contextOptions.map((context) => (
+                      <option key={context} value={context}>
+                        {context}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="filter-select-label">
+                  日期
+                  <select
+                    className="field-select"
+                    value={dateFilter}
+                    onChange={(event) => {
+                      setDateFilter(event.target.value as SmartViewDateFilter);
+                      setActiveSmartViewId(undefined);
+                    }}
+                  >
+                    {(Object.keys(smartViewDateLabels) as SmartViewDateFilter[]).map((value) => (
+                      <option key={value} value={value}>
+                        {smartViewDateLabels[value]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="filter-select-label">
+                  排序
+                  <select
+                    className="field-select"
+                    value={sortFilter}
+                    onChange={(event) => {
+                      setSortFilter(event.target.value as SmartViewSort);
+                      setActiveSmartViewId(undefined);
+                    }}
+                  >
+                    {(Object.keys(smartViewSortLabels) as SmartViewSort[]).map((value) => (
+                      <option key={value} value={value}>
+                        {smartViewSortLabels[value]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="smart-view-save">
+                  <label htmlFor="smart-view-name">保存当前筛选</label>
+                  <div className="smart-view-save-row">
+                    <input
+                      id="smart-view-name"
+                      className="settings-input"
+                      value={smartViewName}
+                      onChange={(event) => setSmartViewName(event.target.value)}
+                      placeholder="例如：本周高优先级"
+                      maxLength={60}
+                    />
+                    <button
+                      type="button"
+                      className="soft-button"
+                      disabled={!smartViewName.trim()}
+                      onClick={saveSmartView}
+                    >
+                      保存
+                    </button>
+                  </div>
+                </div>
+                {smartViews.length > 0 && (
+                  <div className="smart-view-manage" aria-label="管理保存的视图">
+                    {smartViews.map((view) => (
+                      <div key={view.id} className="smart-view-row">
+                        <button type="button" onClick={() => applySmartView(view)}>{view.name}</button>
+                        <button
+                          type="button"
+                          className="row-icon-button"
+                          aria-label={`删除视图${view.name}`}
+                          onClick={() => removeSmartView(view.id)}
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="filter-footer">
                   <button
                     type="button"
                     className="ghost-button"
-                    onClick={() => {
-                      setPriorityFilter("all");
-                      setProjectFilter("all");
-                    }}
+                    onClick={clearTaskFilters}
                   >
                     清除
                   </button>
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={() => setFilterOpen(false)}
+                    onClick={closeFilter}
                   >
                     完成
                   </button>
@@ -1246,8 +3719,360 @@ function TaskListPage({
           </div>
         </div>
       </div>
+      {visibleTasks.length > 0 && !bulkMode && (
+        <p className="task-keyboard-hint" role="note">
+          <Command size={12} aria-hidden="true" />
+          <span>点击任务后，使用 ↑ ↓ 或 J K 浏览</span>
+          <kbd>E</kbd>
+          <span>完成/恢复</span>
+          <kbd>X</kbd>
+          <span>选择/取消，回车打开详情</span>
+          {canInsertAfterSelected && (
+            <>
+              <kbd>Space</kbd>
+              <span>在当前任务后新增</span>
+            </>
+          )}
+        </p>
+      )}
+      {smartViews.length > 0 && (
+        <div className="saved-view-strip" aria-label="已保存视图">
+          <span>已保存</span>
+          {smartViews.map((view) => (
+            <button
+              type="button"
+              key={view.id}
+              className={activeSmartViewId === view.id ? "active" : ""}
+              onClick={() => applySmartView(view)}
+              title={`应用视图：${view.name}`}
+            >
+              {view.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {listViewMode === "table" && route === "today" && (
+        <p className="task-view-hint">
+          表格视图适合比较字段；切回列表视图即可继续拖动调整今天的顺序。
+        </p>
+      )}
       {route === "today" && (
-        <MorningBrief controller={controller} notify={notify} />
+        <MorningBrief
+          controller={controller}
+          planningTasks={planningTasks}
+          notify={notify}
+          onPlanToday={onPlanToday}
+          calendarEvents={calendarEvents}
+          onOpenTimeline={onOpenTimeline}
+          onOpenAll={onOpenAll}
+        />
+      )}
+      {inlineComposerVisible && inlineComposerRoute && (
+        <InlineTaskComposer
+          route={inlineComposerRoute}
+          controller={controller}
+          notify={notify}
+        />
+      )}
+      {bulkMode && (
+        <section
+          ref={bulkToolbarRef}
+          className="bulk-toolbar"
+          aria-label="批量操作"
+        >
+          <div className="bulk-toolbar-heading">
+            <div>
+              <strong>批量处理</strong>
+              <span>
+                {selectedBulkTasks.length > 0
+                  ? `已选择 ${selectedBulkTasks.length} 项`
+                  : "选择任务后预览一次性操作"}
+              </span>
+            </div>
+            <small className="bulk-toolbar-keyboard-hint">
+              <kbd>↑↓</kbd> / <kbd>J K</kbd> 浏览，<kbd>X</kbd> 选择
+              <kbd>Shift</kbd> + 点击连续范围，<kbd>Esc</kbd> 退出当前层
+              <kbd>,</kbd> 聚焦操作
+            </small>
+            <div className="bulk-toolbar-selection-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={selectAllVisible}
+                disabled={bulkBusy || visibleTasks.length === 0}
+              >
+                全选当前列表
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  setBulkSelection(new Set());
+                  bulkAnchorTaskIdRef.current = controller.selectedId;
+                  setBulkPreview(undefined);
+                  setBulkAutomationPreview(undefined);
+                }}
+                disabled={bulkBusy || selectedBulkTasks.length === 0}
+              >
+                清除选择
+              </button>
+              <button
+                type="button"
+                className="ghost-button task-agent-bulk-button"
+                onClick={() =>
+                  onAskAgent(buildBulkTaskAgentPrompt(selectedBulkTasks))
+                }
+                disabled={bulkBusy || selectedBulkTasks.length === 0}
+                title="先让 Agent 查看所选任务并给出方案"
+              >
+                <MessageCircle size={14} aria-hidden="true" />
+                让 Agent 处理所选
+              </button>
+            </div>
+          </div>
+          <div className="bulk-action-buttons">
+            {allSelectedCanEdit && (
+              <button
+                type="button"
+                className="soft-button"
+                disabled={bulkBusy}
+                onClick={(event) => {
+                  bulkReturnFocusRef.current = event.currentTarget;
+                  setBulkPreview(undefined);
+                  setBulkAutomationPreview(undefined);
+                  setBulkEditOpen(true);
+                }}
+              >
+                <Pencil size={15} /> 编辑属性
+              </button>
+            )}
+            {allSelectedCanComplete && (
+              <button
+                type="button"
+                className="primary-button"
+                disabled={bulkBusy}
+                onClick={(event) =>
+                  requestBulkPreview({ kind: "complete" }, event.currentTarget)
+                }
+              >
+                <Check size={15} /> 完成
+              </button>
+            )}
+            {allSelectedAreCompleted && (
+              <button
+                type="button"
+                className="soft-button"
+                disabled={bulkBusy}
+                onClick={(event) =>
+                  requestBulkPreview({ kind: "reopen" }, event.currentTarget)
+                }
+              >
+                <RotateCcw size={15} /> 恢复
+              </button>
+            )}
+            {allSelectedCanMoveToToday && (
+              <button
+                type="button"
+                className="soft-button"
+                disabled={bulkBusy}
+                onClick={(event) =>
+                  requestBulkPreview(
+                    { kind: "move-to-today", date: dateKey() },
+                    event.currentTarget,
+                  )
+                }
+              >
+                <CalendarDays size={15} /> 安排到今天
+              </button>
+            )}
+            {allSelectedCanTrash && route !== "trash" && (
+              <button
+                type="button"
+                className="ghost-button danger-button"
+                disabled={bulkBusy}
+                onClick={(event) =>
+                  requestBulkPreview({ kind: "trash" }, event.currentTarget)
+                }
+              >
+                <Trash2 size={15} /> 移入回收站
+              </button>
+            )}
+            {allSelectedCanRestore && route === "trash" && (
+              <button
+                type="button"
+                className="soft-button"
+                disabled={bulkBusy}
+                onClick={(event) =>
+                  requestBulkPreview({ kind: "restore" }, event.currentTarget)
+                }
+              >
+                <RotateCcw size={15} /> 恢复任务
+              </button>
+            )}
+            {selectedBulkTasks.length > 0 && manualAutomations.length > 0 && (
+              <div className="bulk-automation-control">
+                <select
+                  className="field-select"
+                  aria-label="选择手动自动化"
+                  value={bulkAutomationRuleId}
+                  disabled={bulkBusy}
+                  onChange={(event) => {
+                    setBulkAutomationRuleId(event.target.value);
+                    setBulkAutomationPreview(undefined);
+                  }}
+                >
+                  {manualAutomations.map((rule) => {
+                    const eligibleCount = selectedBulkTasks.filter(
+                      (task) =>
+                        matchesTaskAutomation(rule, task) &&
+                        taskAutomationPatch(rule, task) !== undefined,
+                    ).length;
+                    return (
+                      <option value={rule.id} key={rule.id}>
+                        {rule.name} · {eligibleCount} 项可应用
+                      </option>
+                    );
+                  })}
+                </select>
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={bulkBusy || selectedManualAutomationTasks.length === 0}
+                  onClick={(event) =>
+                    requestBulkAutomationPreview(event.currentTarget)
+                  }
+                  title="只会应用到满足条件且仍有变化的任务"
+                >
+                  <WandSparkles size={15} /> 预览自动化
+                </button>
+              </div>
+            )}
+          </div>
+          {bulkPreview && (
+            <div
+              ref={bulkPreviewDialogRef}
+              className="bulk-preview"
+              role="dialog"
+              aria-label="批量操作预览"
+              tabIndex={-1}
+            >
+              <div>
+                <strong>
+                  将对 {selectedBulkTasks.length} 项任务执行“{bulkActionLabel(bulkPreview)}”
+                </strong>
+                <p>
+                  这会作为一次操作保存，可整体撤销。目标：{" "}
+                  {selectedBulkTasks
+                    .slice(0, 3)
+                    .map((task) => task.title)
+                    .join("、")}
+                  {selectedBulkTasks.length > 3
+                    ? ` 等 ${selectedBulkTasks.length} 项`
+                    : ""}
+                </p>
+                {bulkPreview.kind === "edit" && (
+                  <ul className="bulk-preview-summary">
+                    {bulkEditSummary(bulkPreview).map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+                {bulkPreview.kind === "trash" && (
+                  <small>飞书任务会进入本地同步队列，远端删除仍以同步结果为准。</small>
+                )}
+              </div>
+              <div className="bulk-preview-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={bulkBusy}
+                  ref={bulkPreviewCancelRef}
+                  onClick={closeBulkPreviews}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className={bulkPreview.kind === "trash" ? "danger-button" : "primary-button"}
+                  disabled={bulkBusy}
+                  onClick={() => void runBulkAction()}
+                >
+                  {bulkBusy ? "正在处理…" : "确认执行"}
+                </button>
+              </div>
+            </div>
+          )}
+          {bulkAutomationPreview && (
+            <div
+              ref={bulkAutomationPreviewDialogRef}
+              className="bulk-preview"
+              role="dialog"
+              aria-label="批量自动化预览"
+              tabIndex={-1}
+            >
+              <div>
+                <strong>
+                  将对 {bulkAutomationPreview.tasks.length} 项任务应用“{bulkAutomationPreview.rule.name}”
+                </strong>
+                <p>
+                  动作：{taskAutomationActionLabel(bulkAutomationPreview.rule.action)}。这会作为一次本地操作保存，可整体撤销。
+                </p>
+                <small>
+                  目标：{bulkAutomationPreview.tasks.slice(0, 3).map((task) => task.title).join("、")}
+                  {bulkAutomationPreview.tasks.length > 3
+                    ? ` 等 ${bulkAutomationPreview.tasks.length} 项`
+                    : ""}
+                </small>
+              </div>
+              <div className="bulk-preview-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={bulkBusy}
+                  ref={bulkAutomationPreviewCancelRef}
+                  onClick={closeBulkPreviews}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={bulkBusy}
+                  onClick={() => void runBulkAutomation()}
+                >
+                  {bulkBusy ? "正在处理…" : "确认应用"}
+                </button>
+              </div>
+            </div>
+          )}
+          {selectedBulkTasks.length > 0 &&
+            !allSelectedCanComplete &&
+            !allSelectedAreCompleted &&
+            !allSelectedCanMoveToToday &&
+            !allSelectedCanTrash &&
+            !allSelectedCanRestore && (
+              <p className="bulk-toolbar-hint">
+                当前选择包含不同状态或只读任务，请调整选择后再操作。
+              </p>
+            )}
+        </section>
+      )}
+      {bulkEditOpen && selectedBulkTasks.length > 0 && (
+        <BulkTaskEditSheet
+          count={selectedBulkTasks.length}
+          projects={projects}
+          lists={lists}
+          onClose={() => {
+            setBulkEditOpen(false);
+            focusAfterDismiss(
+              bulkReturnFocusRef.current ?? bulkModeToggleRef.current,
+            );
+          }}
+          onConfirm={(patch: BulkTaskEditPatch) => {
+            setBulkEditOpen(false);
+            setBulkPreview({ kind: "edit", patch });
+          }}
+        />
       )}
       {controller.loading ? (
         <div className="empty-state">
@@ -1280,7 +4105,7 @@ function TaskListPage({
             <h2>
               {search
                 ? `没有匹配“${search}”的任务`
-                : priorityFilter !== "all" || projectFilter !== "all"
+                : priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
                   ? "没有符合筛选的任务"
                   : route === "completed"
                     ? "还没有已完成任务"
@@ -1291,7 +4116,7 @@ function TaskListPage({
             <p>
               {search
                 ? "试试其他关键词，或清除搜索后查看这个列表中的全部任务。"
-                : priorityFilter !== "all" || projectFilter !== "all"
+                : priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual"
                   ? "调整或清除当前筛选后再看看。"
                   : route === "trash"
                     ? "删除的任务会先保留在这里。"
@@ -1299,17 +4124,16 @@ function TaskListPage({
                       ? "这里放尚未安排日期、项目或清单的任务；稍后再决定怎么处理。"
                       : "记录一件下一步要做的小事。"}
             </p>
-            {search || priorityFilter !== "all" || projectFilter !== "all" ? (
+            {search || priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? (
               <button
                 type="button"
                 className="soft-button"
                 onClick={() => {
                   onClearSearch();
-                  setPriorityFilter("all");
-                  setProjectFilter("all");
+                  clearTaskFilters();
                 }}
               >
-                {search && (priorityFilter !== "all" || projectFilter !== "all")
+                {search && (priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual")
                   ? "清除搜索和筛选"
                   : search
                     ? "清除搜索"
@@ -1330,49 +4154,161 @@ function TaskListPage({
           </div>
         </div>
       ) : (
-        visibleSections.map((section) => (
-          <section key={section.id}>
-            <div className="list-toolbar">
-              <span>{sectionTitles[section.id]}</span>
-              <span className="list-count">{section.tasks.length}</span>
-            </div>
-            <div className="task-list">
-              {section.tasks.map((task, sectionIndex) => {
-                const canReorder =
-                  route === "today" &&
-                  priorityFilter === "all" &&
-                  projectFilter === "all";
+        visibleSections.map((section) => {
+          const canReorder =
+            route === "today" &&
+            listViewMode === "list" &&
+            priorityFilter === "all" &&
+            !flaggedFilter &&
+            projectFilter === "all" &&
+            tagFilter === "all" &&
+            contextFilter === "all" &&
+            dateFilter === "any" &&
+            sortFilter === "manual";
+          const groups = canReorder
+            ? [{ id: "all", label: undefined, tasks: section.tasks }]
+            : groupTasksBySection(section.tasks);
+          return (
+            <section key={section.id}>
+              <div className="list-toolbar">
+                <span>{sectionTitles[section.id]}</span>
+                <span className="list-count">{section.tasks.length}</span>
+              </div>
+              {groups.map((group) => {
+                const groupCollapsed =
+                  Boolean(group.label) &&
+                  isSectionGroupCollapsed(section.id, group.id);
                 return (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    selected={controller.selectedId === task.id}
-                    controller={controller}
-                    notify={notify}
-                    moveUp={
-                      canReorder && sectionIndex > 0
-                        ? () =>
-                            void moveTodayTask(
-                              task.id,
-                              section.tasks[sectionIndex - 1].id,
-                            )
-                        : undefined
-                    }
-                    moveDown={
-                      canReorder && sectionIndex < section.tasks.length - 1
-                        ? () =>
-                            void moveTodayTask(
-                              task.id,
-                              section.tasks[sectionIndex + 1].id,
-                            )
-                        : undefined
-                    }
-                  />
+                  <div className="task-section-group" key={`${section.id}-${group.id}`}>
+                    {group.label && (
+                      <button
+                        type="button"
+                        className="task-section-heading"
+                        aria-expanded={!groupCollapsed}
+                        aria-controls={`task-section-${section.id}-${group.id}`}
+                        onClick={() =>
+                          toggleSectionGroup(
+                            section.id,
+                            group.id,
+                            !groupCollapsed,
+                          )
+                        }
+                        title={groupCollapsed ? "展开分组" : "收起分组"}
+                      >
+                        <ChevronDown
+                          size={14}
+                          aria-hidden="true"
+                          className={groupCollapsed ? "collapsed" : undefined}
+                        />
+                        <span>{group.label}</span>
+                        <span>{group.tasks.length}</span>
+                      </button>
+                    )}
+                    <div
+                      id={`task-section-${section.id}-${group.id}`}
+                      className={listViewMode === "table" ? "task-table-section" : "task-list"}
+                      hidden={groupCollapsed}
+                    >
+                      {listViewMode === "table" ? (
+                        <TaskTable
+                          tasks={group.tasks}
+                          selectedId={controller.selectedId}
+                          controller={controller}
+                          notify={notify}
+                          projects={projects}
+                          lists={lists}
+                          selectionMode={bulkMode}
+                          selectedIds={bulkSelection}
+                          onToggleBulk={toggleBulkSelection}
+                          interactionDisabled={bulkBusy || reorderBusy}
+                          subtaskProgress={subtaskProgress}
+                          onAskAgent={onAskAgent}
+                        />
+                      ) : group.tasks.map((task) => {
+                        const sectionIndex = section.tasks.findIndex(
+                          (candidate) => candidate.id === task.id,
+                        );
+                        return (
+                          <Fragment key={task.id}>
+                            <TaskRow
+                              task={task}
+                              selected={controller.selectedId === task.id}
+                              controller={controller}
+                              notify={notify}
+                              selectionMode={bulkMode}
+                              selectedForBulk={bulkSelection.has(task.id)}
+                              onToggleBulk={(event) => toggleBulkSelection(task.id, event)}
+                              interactionDisabled={bulkBusy || reorderBusy}
+                              subtaskProgress={subtaskProgress.get(task.id)}
+                              onAskAgent={onAskAgent}
+                              reorderable={canReorder && !bulkMode && task.status === "open"}
+                              dragging={draggingTaskId === task.id}
+                              dropTarget={dropTargetTaskId === task.id}
+                              onDragStart={(event) => beginTodayDrag(task.id, event)}
+                              onDragEnd={endTodayDrag}
+                              onDragOver={(event) => dragOverTodayTask(task.id, event)}
+                              onDrop={(event) => void dropTodayTask(task.id, event)}
+                              moveUp={
+                                canReorder && sectionIndex > 0
+                                  ? () =>
+                                      void moveTodayTask(
+                                        task.id,
+                                        section.tasks[sectionIndex - 1].id,
+                                      )
+                                  : undefined
+                              }
+                              moveDown={
+                                canReorder && sectionIndex < section.tasks.length - 1
+                                  ? () =>
+                                      void moveTodayTask(
+                                        task.id,
+                                        section.tasks[sectionIndex + 1].id,
+                                      )
+                                  : undefined
+                              }
+                            />
+                            {section.id === "planned-today" &&
+                              inlineComposerRoute === "today" &&
+                              canInsertAfterSelected &&
+                              inlineInsertAfterTaskId === task.id && (
+                                <InlineTaskComposer
+                                  route="today"
+                                  controller={controller}
+                                  notify={notify}
+                                  placement="after"
+                                  afterTaskTitle={task.title}
+                                  autoFocus
+                                  onCancel={() => {
+                                    setInlineInsertAfterTaskId(undefined);
+                                    window.requestAnimationFrame(() => {
+                                      focusTask(task.id);
+                                    });
+                                  }}
+                                  onCreated={handleInlineTaskCreated}
+                                />
+                              )}
+                          </Fragment>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
-            </div>
-          </section>
-        ))
+            </section>
+          );
+        })
+      )}
+      {inboxTriageOpen && route === "inbox" && (
+        <InboxTriageSheet
+          tasks={controller.tasks}
+          onUpdate={controller.update}
+          onComplete={controller.toggleComplete}
+          onOpenTask={(taskId) => controller.select(taskId)}
+          onClose={() => {
+            onInboxTriageOpenChange(false);
+            focusAfterDismiss(inboxTriageTriggerRef.current);
+          }}
+        />
       )}
     </main>
   );
@@ -1381,20 +4317,35 @@ function TaskListPage({
 function TaskInspector({
   task,
   controller,
+  projects = [],
+  lists = [],
   notify,
   onAskAgent,
   onClose,
+  onToggleCollapse,
 }: {
   task?: Task;
   controller: TaskController;
-  notify: (message: string, kind?: ToastKind) => void;
+  projects?: TaskProject[];
+  lists?: TaskList[];
+  notify: (
+    message: string,
+    kind?: ToastKind,
+    action?: ToastState["action"],
+  ) => void;
   onAskAgent: (prompt: string) => void;
   onClose?: () => void;
+  onToggleCollapse?: () => void;
 }) {
   const [title, setTitle] = useState(task?.title ?? "");
   const [notes, setNotes] = useState(task?.notes ?? "");
-  const [projectId, setProjectId] = useState(task?.projectId ?? "");
+  const [projectId, setProjectId] = useState(projectLabel(task?.projectId, projects));
+  const [listId, setListId] = useState(listLabel(task?.listId, lists));
+  const [sectionId, setSectionId] = useState(task?.sectionId ?? "");
   const [tagsText, setTagsText] = useState(task?.tags.join(", ") ?? "");
+  const [contextsText, setContextsText] = useState(
+    task?.contexts?.join(", ") ?? "",
+  );
   const [startAtInput, setStartAtInput] = useState(
     toLocalDateTimeInput(task?.startAt),
   );
@@ -1410,12 +4361,60 @@ function TaskInspector({
   const [plannedDateInput, setPlannedDateInput] = useState(
     task?.plannedDate ?? "",
   );
+  const [deferUntilInput, setDeferUntilInput] = useState(
+    task?.deferUntil ?? "",
+  );
   const [localReminderInput, setLocalReminderInput] = useState(
     toLocalDateTimeInput(
       task?.reminders.find((reminder) => reminder.source === "local")?.at,
     ),
   );
+  const [linkUrlInput, setLinkUrlInput] = useState("");
+  const [linkLabelInput, setLinkLabelInput] = useState("");
+  const [researchTitleInput, setResearchTitleInput] = useState("");
+  const [researchUrlInput, setResearchUrlInput] = useState("");
+  const [researchSummaryInput, setResearchSummaryInput] = useState("");
+  const [researchActionsInput, setResearchActionsInput] = useState("");
+  const [researchActionBusyKey, setResearchActionBusyKey] = useState<string>();
+  const [createdResearchActionKeys, setCreatedResearchActionKeys] = useState<
+    Set<string>
+  >(() => new Set());
+  const [customFieldKey, setCustomFieldKey] = useState("");
+  const [customFieldValue, setCustomFieldValue] = useState("");
+  const [customFieldType, setCustomFieldType] = useState<CustomFieldType>("text");
+  const customFieldsRef = useRef<Record<string, JsonValue>>(
+    task?.customFields ?? {},
+  );
+  const customFieldDraftRevisionRef = useRef(0);
+  const [attachmentName, setAttachmentName] = useState("");
+  const [attachmentUrl, setAttachmentUrl] = useState("");
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [attachmentPreview, setAttachmentPreview] = useState<TaskAttachmentPreview>();
+  const [attachmentPreviewSource, setAttachmentPreviewSource] = useState<TaskAttachment>();
+  const [previewBusyId, setPreviewBusyId] = useState<string>();
+  const [taskHistory, setTaskHistory] = useState<TaskHistoryEntry[]>([]);
+  const [taskHistoryLoading, setTaskHistoryLoading] = useState(false);
+  const [commentBody, setCommentBody] = useState("");
+  const [editingCommentId, setEditingCommentId] = useState<string>();
+  const [editingCommentBody, setEditingCommentBody] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [showTemplateSave, setShowTemplateSave] = useState(false);
+  const templateSaveReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const recurrenceDialogRef = useRef<HTMLDivElement>(null);
+  const recurrenceCancelRef = useRef<HTMLButtonElement>(null);
+  const pendingPatchReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const attachmentDialogRef = useRef<HTMLElement>(null);
+  const attachmentCloseRef = useRef<HTMLButtonElement>(null);
+  const attachmentPreviewReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const [skipRecurringBusy, setSkipRecurringBusy] = useState(false);
+  const [manualAutomations, setManualAutomations] = useState<
+    readonly TaskAutomationRule[]
+  >([]);
+  const [automationBusy, setAutomationBusy] = useState<string>();
   const editingTaskIdRef = useRef<string | undefined>(undefined);
+  const editorDraftRecoveryTaskRef = useRef<string | undefined>(undefined);
+  const [, setEditorStateRevision] = useState(0);
+  const [editorSaveCount, setEditorSaveCount] = useState(0);
   // A native input can emit a second blur save before the first IPC reply.
   // Per-field revisions stop the older completion from clearing a newer
   // local draft or letting a refreshed task prop overwrite it.
@@ -1427,6 +4426,7 @@ function TaskInspector({
     dirtyFieldsRef.current.add(field);
     const revision = (dirtyRevisionsRef.current[field] ?? 0) + 1;
     dirtyRevisionsRef.current[field] = revision;
+    setEditorStateRevision((value) => value + 1);
     return revision;
   };
   const currentDirtyRevision = (field: TaskEditorDirtyField): number =>
@@ -1434,21 +4434,45 @@ function TaskInspector({
   const clearDirtyIfCurrent = (
     field: TaskEditorDirtyField,
     revision: number,
-  ): void => {
-    if (dirtyRevisionsRef.current[field] === revision)
+  ): boolean => {
+    if (dirtyRevisionsRef.current[field] === revision) {
       dirtyFieldsRef.current.delete(field);
+      setEditorStateRevision((value) => value + 1);
+      return true;
+    }
+    return false;
   };
   const [showActions, setShowActions] = useState(false);
+  const [showDependencyGraph, setShowDependencyGraph] = useState(false);
   const [relatedTasks, setRelatedTasks] = useState<Task[]>([]);
   const [subtaskTitle, setSubtaskTitle] = useState("");
-  const [pendingPatch, setPendingPatch] =
-    useState<Parameters<TaskController["update"]>[1]>();
+  const [pendingPatch, setPendingPatch] = useState<PendingTaskPatch>();
   const [timeBlockStart, setTimeBlockStart] = useState(
     toLocalDateTimeInput(task?.timeBlock?.startAt),
   );
   const [timeBlockEnd, setTimeBlockEnd] = useState(
     toLocalDateTimeInput(task?.timeBlock?.endAt),
   );
+  const [workLogMinutes, setWorkLogMinutes] = useState("");
+  const [workLogBusy, setWorkLogBusy] = useState(false);
+  const [focusBusy, setFocusBusy] = useState(false);
+  const [subtaskBusyId, setSubtaskBusyId] = useState<string>();
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  useEffect(() => {
+    if (!window.desktopApi) {
+      setManualAutomations([]);
+      return undefined;
+    }
+    const apply = (settings: AppSettings): void => {
+      setManualAutomations(
+        settings.automations.filter(
+          (rule) => rule.enabled && rule.trigger === "manual",
+        ),
+      );
+    };
+    void window.desktopApi.settings.get().then(apply).catch(() => undefined);
+    return window.desktopApi.events.onSettingsChanged(apply);
+  }, []);
   useEffect(() => {
     let active = true;
     const taskChanged = editingTaskIdRef.current !== task?.id;
@@ -1456,9 +4480,15 @@ function TaskInspector({
       if (!dirtyFieldsRef.current.has("title")) setTitle(task.title);
       if (!dirtyFieldsRef.current.has("notes")) setNotes(task.notes);
       if (!dirtyFieldsRef.current.has("projectId"))
-        setProjectId(task.projectId ?? "");
+        setProjectId(projectLabel(task.projectId, projects));
+      if (!dirtyFieldsRef.current.has("listId"))
+        setListId(listLabel(task.listId, lists));
+      if (!dirtyFieldsRef.current.has("sectionId"))
+        setSectionId(task.sectionId ?? "");
       if (!dirtyFieldsRef.current.has("tags"))
         setTagsText(task.tags.join(", "));
+      if (!dirtyFieldsRef.current.has("contexts"))
+        setContextsText((task.contexts ?? []).join(", "));
       if (!dirtyFieldsRef.current.has("startAt"))
         setStartAtInput(toLocalDateTimeInput(task.startAt));
       if (!dirtyFieldsRef.current.has("startAtAllDay"))
@@ -1469,6 +4499,8 @@ function TaskInspector({
         setDueAtAllDay(task.dueAtIsAllDay === true);
       if (!dirtyFieldsRef.current.has("plannedDate"))
         setPlannedDateInput(task.plannedDate ?? "");
+      if (!dirtyFieldsRef.current.has("deferUntil"))
+        setDeferUntilInput(task.deferUntil ?? "");
       if (!dirtyFieldsRef.current.has("localReminder"))
         setLocalReminderInput(
           toLocalDateTimeInput(
@@ -1476,22 +4508,31 @@ function TaskInspector({
           ),
         );
     }
-    if (!taskChanged || !task || !window.desktopApi)
+    if (!taskChanged || !task)
       return () => {
         active = false;
       };
     editingTaskIdRef.current = task.id;
+    editorDraftRecoveryTaskRef.current = undefined;
     dirtyFieldsRef.current.clear();
     dirtyRevisionsRef.current = {};
+    setEditorSaveCount(0);
+    setEditorStateRevision((value) => value + 1);
+    customFieldsRef.current = { ...task.customFields };
+    customFieldDraftRevisionRef.current += 1;
     setTitle(task.title);
     setNotes(task.notes);
-    setProjectId(task.projectId ?? "");
+    setProjectId(projectLabel(task.projectId, projects));
+    setListId(listLabel(task.listId, lists));
+    setSectionId(task.sectionId ?? "");
     setTagsText(task.tags.join(", "));
+    setContextsText((task.contexts ?? []).join(", "));
     setStartAtInput(toLocalDateTimeInput(task.startAt));
     setStartAtAllDay(task.startAtIsAllDay === true);
     setDueAtInput(toLocalDateTimeInput(task.dueAt));
     setDueAtAllDay(task.dueAtIsAllDay === true);
     setPlannedDateInput(task.plannedDate ?? "");
+    setDeferUntilInput(task.deferUntil ?? "");
     setLocalReminderInput(
       toLocalDateTimeInput(
         task.reminders.find((reminder) => reminder.source === "local")?.at,
@@ -1499,17 +4540,52 @@ function TaskInspector({
     );
     setShowActions(false);
     setPendingPatch(undefined);
+    pendingPatchReturnFocusRef.current = undefined;
     setSubtaskTitle("");
+    setLinkUrlInput("");
+    setLinkLabelInput("");
+    setResearchTitleInput("");
+    setResearchUrlInput("");
+    setResearchSummaryInput("");
+    setResearchActionsInput("");
+    setResearchActionBusyKey(undefined);
+    setCreatedResearchActionKeys(new Set());
+    setCustomFieldKey("");
+    setCustomFieldValue("");
+    setCustomFieldType("text");
+    setAttachmentName("");
+    setAttachmentUrl("");
+    setAttachmentPreview(undefined);
+    setAttachmentPreviewSource(undefined);
+    attachmentPreviewReturnFocusRef.current = undefined;
+    setPreviewBusyId(undefined);
+    setTaskHistory([]);
+    setTaskHistoryLoading(false);
+    setCommentBody("");
+    setEditingCommentId(undefined);
+    setEditingCommentBody("");
+    setCommentBusy(false);
+    setShowTemplateSave(false);
+    setSkipRecurringBusy(false);
+    setAutomationBusy(undefined);
     setTimeBlockStart(toLocalDateTimeInput(task.timeBlock?.startAt));
     setTimeBlockEnd(toLocalDateTimeInput(task.timeBlock?.endAt));
+    setWorkLogMinutes("");
+    setWorkLogBusy(false);
+    setFocusBusy(false);
+    setSubtaskBusyId(undefined);
+    setRestoreBusy(false);
+    if (!window.desktopApi) {
+      return () => {
+        active = false;
+      };
+    }
     void window.desktopApi.tasks
       .getDraft(`task-editor:${task.id}`)
       .then((draft) => {
-        if (
-          !active ||
-          !draft ||
-          new Date(draft.updatedAt) <= new Date(task.updatedAt)
-        )
+        if (!active) return;
+        editorDraftRecoveryTaskRef.current = task.id;
+        if (!draft || new Date(draft.updatedAt) <= new Date(task.updatedAt))
           return;
         markDirty("title");
         setTitle(draft.text || task.title);
@@ -1519,7 +4595,8 @@ function TaskInspector({
           setNotes(data.notes);
         }
         notify("已恢复上次未保存的编辑草稿");
-      });
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -1529,7 +4606,10 @@ function TaskInspector({
     task?.id,
     task?.notes,
     task?.plannedDate,
+    task?.deferUntil,
     task?.projectId,
+    task?.listId,
+    task?.sectionId,
     task?.reminders,
     task?.startAt,
     task?.startAtIsAllDay,
@@ -1537,7 +4617,36 @@ function TaskInspector({
     task?.title,
     task?.updatedAt,
     task?.dueAtIsAllDay,
+    projects,
+    lists,
   ]);
+  useEffect(() => {
+    let active = true;
+    const historyApi = window.desktopApi?.tasks.history;
+    if (!task || !historyApi) {
+      setTaskHistory([]);
+      setTaskHistoryLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+    setTaskHistoryLoading(true);
+    void historyApi(task.id, 50)
+      .then((entries) => {
+        if (active) setTaskHistory(entries);
+      })
+      .catch(() => {
+        // History is an enhancement over the task itself. A failed optional
+        // read must not make editing or Feishu synchronization look broken.
+        if (active) setTaskHistory([]);
+      })
+      .finally(() => {
+        if (active) setTaskHistoryLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [task?.id, task?.updatedAt]);
   useEffect(() => {
     if (
       !task ||
@@ -1546,13 +4655,15 @@ function TaskInspector({
     )
       return undefined;
     const timer = window.setTimeout(() => {
-      void window.desktopApi?.tasks.saveDraft({
-        id: `task-editor:${task.id}`,
-        kind: "task-editor",
-        taskId: task.id,
-        text: title,
-        data: { notes },
-      });
+      void window.desktopApi?.tasks
+        .saveDraft({
+          id: `task-editor:${task.id}`,
+          kind: "task-editor",
+          taskId: task.id,
+          text: title,
+          data: { notes },
+        })
+        .catch(() => undefined);
     }, 300);
     return () => window.clearTimeout(timer);
   }, [notes, task, title]);
@@ -1569,6 +4680,9 @@ function TaskInspector({
         .list({ includeDeleted: false })
         .then((items) => {
           if (active) setRelatedTasks(items);
+        })
+        .catch(() => {
+          if (active) setRelatedTasks([]);
         });
     } else {
       setRelatedTasks(controller.tasks);
@@ -1577,6 +4691,47 @@ function TaskInspector({
       active = false;
     };
   }, [controller.tasks, task?.id]);
+  useEffect(() => {
+    setShowDependencyGraph(false);
+  }, [task?.id]);
+  const restoreTaskInspectorFocus = (returnFocus: HTMLElement | undefined): void => {
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (
+        !returnFocus.isConnected ||
+        returnFocus.hasAttribute("disabled") ||
+        returnFocus.getAttribute("aria-disabled") === "true"
+      ) {
+        return;
+      }
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  const closePendingPatch = (): void => {
+    setPendingPatch(undefined);
+    const returnFocus = pendingPatchReturnFocusRef.current;
+    pendingPatchReturnFocusRef.current = undefined;
+    restoreTaskInspectorFocus(returnFocus);
+  };
+  const closeAttachmentPreview = (): void => {
+    setAttachmentPreview(undefined);
+    setAttachmentPreviewSource(undefined);
+    const returnFocus = attachmentPreviewReturnFocusRef.current;
+    attachmentPreviewReturnFocusRef.current = undefined;
+    restoreTaskInspectorFocus(returnFocus);
+  };
+  useDialogFocus(
+    recurrenceDialogRef,
+    recurrenceCancelRef,
+    closePendingPatch,
+    Boolean(pendingPatch),
+  );
+  useDialogFocus(
+    attachmentDialogRef,
+    attachmentCloseRef,
+    closeAttachmentPreview,
+    Boolean(attachmentPreview),
+  );
   if (!task)
     return (
       <aside className="inspector inspector-empty" aria-label="任务详情">
@@ -1591,6 +4746,9 @@ function TaskInspector({
   const subtasks = relatedTasks.filter(
     (candidate) => candidate.parentId === task.id && !candidate.deletedAt,
   );
+  const completedSubtasks = subtasks.filter(
+    (candidate) => candidate.status === "completed",
+  ).length;
   const remoteReadOnly =
     task.source.type === "feishu" &&
     (task.currentUserRole === "follower" ||
@@ -1601,13 +4759,28 @@ function TaskInspector({
   const completionVerb = needsFeishuForCosignCompletion(task)
     ? "请在飞书完成"
     : "标记完成";
+  const clearEditorDraftIfSettled = (): void => {
+    if (
+      !task ||
+      !window.desktopApi ||
+      editorDraftRecoveryTaskRef.current !== task.id ||
+      dirtyFieldsRef.current.has("title") ||
+      dirtyFieldsRef.current.has("notes")
+    ) {
+      return;
+    }
+    void window.desktopApi.tasks
+      .deleteDraft(`task-editor:${task.id}`)
+      .catch(() => undefined);
+  };
   const applySave = async (
     patch: Parameters<TaskController["update"]>[1],
     recurrenceScope?: RecurrenceEditScope,
   ): Promise<boolean> => {
+    setEditorSaveCount((value) => value + 1);
     try {
       await controller.update(task.id, patch, recurrenceScope);
-      await window.desktopApi?.tasks.deleteDraft(`task-editor:${task.id}`);
+      clearEditorDraftIfSettled();
       notify(
         recurrenceScope && recurrenceScope !== "this"
           ? "循环系列已更新"
@@ -1618,16 +4791,209 @@ function TaskInspector({
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : "保存失败", "error");
       return false;
+    } finally {
+      setEditorSaveCount((value) => Math.max(0, value - 1));
     }
+  };
+  const applyPendingPatch = (scope: RecurrenceEditScope): void => {
+    if (!pendingPatch) return;
+    const { patch, dirtyRevisions } = pendingPatch;
+    closePendingPatch();
+    void applySave(patch, scope).then((saved) => {
+      if (!saved) return;
+      for (const [field, revision] of Object.entries(dirtyRevisions)) {
+        if (revision !== undefined)
+          clearDirtyIfCurrent(field as TaskEditorDirtyField, revision);
+      }
+      clearEditorDraftIfSettled();
+    });
+  };
+  const saveComments = async (next: TaskComment[]): Promise<boolean> => {
+    if (next.length > 100) {
+      notify("一项任务最多保留 100 条讨论", "error");
+      return false;
+    }
+    setCommentBusy(true);
+    try {
+      return await applySave({ comments: next });
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+  const addTaskComment = async (): Promise<void> => {
+    const body = commentBody.trim();
+    if (!body) return;
+    if (body.length > 10_000) {
+      notify("讨论内容不能超过 10000 个字符", "error");
+      return;
+    }
+    const now = new Date().toISOString();
+    const saved = await saveComments([
+      ...(task.comments ?? []),
+      {
+        id: crypto.randomUUID(),
+        body,
+        author: "user",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    if (saved) {
+      setCommentBody("");
+      notify("讨论已保存到本机", "success");
+    }
+  };
+  const beginCommentEdit = (comment: TaskComment): void => {
+    setEditingCommentId(comment.id);
+    setEditingCommentBody(comment.body);
+  };
+  const commitCommentEdit = async (): Promise<void> => {
+    if (!editingCommentId) return;
+    const body = editingCommentBody.trim();
+    if (!body) {
+      notify("讨论内容不能为空", "error");
+      return;
+    }
+    if (body.length > 10_000) {
+      notify("讨论内容不能超过 10000 个字符", "error");
+      return;
+    }
+    const now = new Date().toISOString();
+    const next = (task.comments ?? []).map((comment) =>
+      comment.id === editingCommentId
+        ? { ...comment, body, updatedAt: now }
+        : comment,
+    );
+    const saved = await saveComments(next);
+    if (saved) {
+      setEditingCommentId(undefined);
+      setEditingCommentBody("");
+      notify("讨论已更新", "success");
+    }
+  };
+  const removeTaskComment = async (commentId: string): Promise<void> => {
+    const saved = await saveComments(
+      (task.comments ?? []).filter((comment) => comment.id !== commentId),
+    );
+    if (saved) {
+      if (editingCommentId === commentId) {
+        setEditingCommentId(undefined);
+        setEditingCommentBody("");
+      }
+      notify("讨论已移除，可通过撤销恢复", "success");
+    }
+  };
+  const dirtyRevisionsForPatch = (
+    patch: Parameters<TaskController["update"]>[1],
+  ): Partial<Record<TaskEditorDirtyField, number>> => {
+    const patchFields: Array<[string, TaskEditorDirtyField]> = [
+      ["title", "title"],
+      ["notes", "notes"],
+      ["projectId", "projectId"],
+      ["listId", "listId"],
+      ["sectionId", "sectionId"],
+      ["tags", "tags"],
+      ["contexts", "contexts"],
+      ["plannedDate", "plannedDate"],
+      ["deferUntil", "deferUntil"],
+      ["startAt", "startAt"],
+      ["startAtIsAllDay", "startAtAllDay"],
+      ["dueAt", "dueAt"],
+      ["dueAtIsAllDay", "dueAtAllDay"],
+      ["reminders", "localReminder"],
+    ];
+    const revisions: Partial<Record<TaskEditorDirtyField, number>> = {};
+    for (const [patchField, dirtyField] of patchFields) {
+      if (
+        patchField in patch &&
+        dirtyFieldsRef.current.has(dirtyField)
+      ) {
+        revisions[dirtyField] = currentDirtyRevision(dirtyField);
+      }
+    }
+    return revisions;
   };
   const save = async (
     patch: Parameters<TaskController["update"]>[1],
   ): Promise<boolean> => {
     if (task.recurrenceSeriesId && task.recurrence) {
-      setPendingPatch(patch);
+      const activeElement = document.activeElement;
+      pendingPatchReturnFocusRef.current =
+        activeElement instanceof HTMLElement && activeElement !== document.body
+          ? activeElement
+          : undefined;
+      setPendingPatch({
+        patch,
+        dirtyRevisions: dirtyRevisionsForPatch(patch),
+      });
       return false;
     }
     return applySave(patch);
+  };
+  const recordWorkLog = async (): Promise<void> => {
+    const minutes = Number(workLogMinutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 720) {
+      notify("投入时长需要是 1–720 分钟的整数", "error");
+      return;
+    }
+    setWorkLogBusy(true);
+    try {
+      await controller.recordWorkLog(task.id, { minutes });
+      setWorkLogMinutes("");
+      notify(`已记录 ${minutes} 分钟投入`, "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "记录投入失败", "error");
+    } finally {
+      setWorkLogBusy(false);
+    }
+  };
+  const runFocusMutation = async (
+    operation: () => Promise<unknown>,
+    successMessage: string,
+  ): Promise<void> => {
+    if (focusBusy) return;
+    setFocusBusy(true);
+    try {
+      await operation();
+      notify(successMessage, "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "专注操作失败", "error");
+    } finally {
+      setFocusBusy(false);
+    }
+  };
+  const toggleSubtask = async (subtask: Task): Promise<void> => {
+    if (subtaskBusyId) return;
+    setSubtaskBusyId(subtask.id);
+    try {
+      await controller.toggleComplete(subtask, { selectUpdated: false });
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "暂时无法更新子任务状态",
+        "error",
+      );
+    } finally {
+      setSubtaskBusyId(undefined);
+    }
+  };
+  const skipRecurring = async (): Promise<void> => {
+    if (
+      task.source.type !== "local" ||
+      task.recurrence === undefined ||
+      task.status !== "open" ||
+      skipRecurringBusy
+    ) {
+      return;
+    }
+    setSkipRecurringBusy(true);
+    try {
+      await controller.skipRecurring(task.id);
+      notify("已跳过本次，下一个循环已安排", "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "跳过本次失败", "error");
+    } finally {
+      setSkipRecurringBusy(false);
+    }
   };
   const commitPlannedDate = async (value = plannedDateInput): Promise<void> => {
     if (!dirtyFieldsRef.current.has("plannedDate")) return;
@@ -1638,6 +5004,12 @@ function TaskInspector({
     // guarantees “change → change back” persists the user's last choice.
     const saved = await save({ plannedDate: value || null });
     if (saved) clearDirtyIfCurrent("plannedDate", revision);
+  };
+  const commitDeferUntil = async (value = deferUntilInput): Promise<void> => {
+    if (!dirtyFieldsRef.current.has("deferUntil")) return;
+    const revision = currentDirtyRevision("deferUntil");
+    const saved = await save({ deferUntil: value || null });
+    if (saved) clearDirtyIfCurrent("deferUntil", revision);
   };
   const commitTemporalFields = async (
     values: Partial<{ startAtInput: string; dueAtInput: string }> = {},
@@ -1735,43 +5107,91 @@ function TaskInspector({
       if (enabled) clearDirtyIfCurrent(temporalField, temporalRevision);
     }
   };
-  const duplicateAsLocal = async () => {
-    await controller.create({
-      title: `${task.title}（副本）`,
-      source: { type: "local" },
-      notes: task.notes,
-      privateNotes: task.privateNotes,
-      priority: task.priority,
-      tags: task.tags,
-      plannedDate: task.plannedDate,
-      startAt: task.startAt,
-      dueAt: task.dueAt,
-      estimatedMinutes: task.estimatedMinutes,
-    });
-    setShowActions(false);
-    notify("已创建本地副本", "success");
+  const duplicateAsLocal = async (): Promise<void> => {
+    try {
+      await controller.create({
+        title: `${task.title}（副本）`,
+        source: { type: "local" },
+        notes: task.notes,
+        privateNotes: task.privateNotes,
+        priority: task.priority,
+        tags: task.tags,
+        contexts: task.contexts,
+        sectionId: task.sectionId,
+        plannedDate: task.plannedDate,
+        deferUntil: task.deferUntil,
+        startAt: task.startAt,
+        dueAt: task.dueAt,
+        estimatedMinutes: task.estimatedMinutes,
+        comments: task.comments?.map((comment) => ({
+          ...comment,
+          id: crypto.randomUUID(),
+        })),
+      });
+      setShowActions(false);
+      notify("已创建本地副本", "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "创建本地副本失败", "error");
+    }
   };
-  const openInFeishu = async () => {
+  const closeTemplateSave = (): void => {
+    setShowTemplateSave(false);
+    const returnFocus = templateSaveReturnFocusRef.current;
+    templateSaveReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  const saveAsTaskTemplate = async (template: TaskTemplate): Promise<void> => {
+    installTaskTemplate(template);
+    closeTemplateSave();
+    setShowActions(false);
+    notify(`已保存模板「${template.name}」`, "success");
+  };
+  const openInFeishu = async (): Promise<void> => {
     const guid = task.source.externalId;
     if (!guid || !window.desktopApi) {
       notify("这项任务还没有可打开的飞书标识", "error");
       return;
     }
-    await window.desktopApi.shell.openExternal(
-      `https://applink.feishu.cn/client/todo/detail?guid=${encodeURIComponent(guid)}`,
-    );
+    try {
+      await window.desktopApi.shell.openExternal(
+        `https://applink.feishu.cn/client/todo/detail?guid=${encodeURIComponent(guid)}`,
+      );
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "无法打开飞书任务", "error");
+    }
   };
-  const purge = async () => {
+  const saveToPetDiary = async (): Promise<void> => {
+    if (!window.desktopApi?.pet.createDiaryFromTask) {
+      notify("当前环境暂不支持写入宠物日记", "error");
+      return;
+    }
+    try {
+      await window.desktopApi.pet.createDiaryFromTask(task.id);
+      setShowActions(false);
+      notify("已把这项任务写入宠物日记", "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "写入宠物日记失败", "error");
+    }
+  };
+  const purge = async (): Promise<void> => {
     if (
       !window.confirm(
         `永久删除“${task.title}”？此操作无法撤销，也不会删除飞书远端任务。${subtasks.length ? `它的 ${subtasks.length} 个子任务会保留为独立任务。` : ""}`,
       )
     )
       return;
-    await controller.purge(task.id);
-    notify("本地任务记录已永久删除", "success");
+    try {
+      await controller.purge(task.id);
+      notify("本地任务记录已永久删除", "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "永久删除失败", "error");
+    }
   };
-  const trashTask = async () => {
+  const trashTask = async (): Promise<void> => {
     if (remoteReadOnly) {
       notify("当前飞书角色没有删除这项任务的权限", "error");
       return;
@@ -1787,29 +5207,341 @@ function TaskInspector({
       .filter(Boolean)
       .join("；");
     if (!window.confirm(`删除“${task.title}”？${impact}。确认继续？`)) return;
-    await controller.trash(task.id);
-    notify(
-      task.source.type === "feishu" ? "删除请求已排队同步飞书" : "已移到回收站",
-      "success",
-    );
+    try {
+      await controller.trash(task.id);
+      notify(
+        task.source.type === "feishu" ? "删除请求已排队同步飞书" : "已移到回收站",
+        "success",
+      );
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "移入回收站失败", "error");
+    }
   };
-  const addSubtask = async () => {
+  const addSubtask = async (): Promise<void> => {
     const nextTitle = subtaskTitle.trim();
     if (!nextTitle) return;
-    await controller.create({
-      title: nextTitle,
-      source: { type: "local" },
-      parentId: task.id,
-      projectId: task.projectId,
-      plannedDate: task.plannedDate,
-      priority: task.priority,
+    const parentId = task.id;
+    try {
+      await controller.create({
+        title: nextTitle,
+        source: { type: "local" },
+        parentId,
+        projectId: task.projectId,
+        plannedDate: task.plannedDate,
+        priority: task.priority,
+      }, { selectCreated: false });
+      setSubtaskTitle("");
+      notify("本地子任务已创建", "success");
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "创建子任务失败", "error");
+    }
+  };
+  const addTaskLink = async (): Promise<void> => {
+    const url = linkUrlInput.trim();
+    if (!url) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      notify("请输入有效的链接地址", "error");
+      return;
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      notify("链接只支持 http 或 https 地址", "error");
+      return;
+    }
+    const link: TaskLink = {
+      id: crypto.randomUUID(),
+      url,
+      ...(linkLabelInput.trim() ? { label: linkLabelInput.trim() } : {}),
+    };
+    const saved = await save({ links: [...task.links, link] });
+    if (!saved) return;
+    setLinkUrlInput("");
+    setLinkLabelInput("");
+  };
+  const removeTaskLink = async (linkId: string): Promise<void> => {
+    await save({ links: task.links.filter((link) => link.id !== linkId) });
+  };
+  const addResearchCard = async (): Promise<void> => {
+    const title = researchTitleInput.trim();
+    const summary = researchSummaryInput.trim();
+    const actionItems = researchActionsInput
+      .split(/\r?\n/u)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!title) {
+      notify("请先填写研究卡标题", "error");
+      return;
+    }
+    if (title.length > 200 || summary.length > 5_000 || actionItems.some((item) => item.length > 500)) {
+      notify("标题最多 200 字，摘要最多 5000 字，每条行动项最多 500 字", "error");
+      return;
+    }
+    if (actionItems.length > 20) {
+      notify("一张研究卡最多保留 20 条行动项", "error");
+      return;
+    }
+    const rawUrl = researchUrlInput.trim();
+    let url: string | undefined;
+    if (rawUrl) {
+      let parsed: URL;
+      try {
+        parsed = new URL(rawUrl);
+      } catch {
+        notify("研究来源请输入有效的链接地址", "error");
+        return;
+      }
+      if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) {
+        notify("研究来源只支持不带账号密码的 http 或 https 地址", "error");
+        return;
+      }
+      if (rawUrl.length > 2_000) {
+        notify("研究来源链接不能超过 2000 个字符", "error");
+        return;
+      }
+      url = rawUrl;
+    }
+    if ((task.researchCards ?? []).length >= 20) {
+      notify("一项任务最多保留 20 张研究卡", "error");
+      return;
+    }
+    const card: TaskResearchCard = {
+      id: crypto.randomUUID(),
+      title,
+      ...(url === undefined ? {} : { url }),
+      summary,
+      actionItems,
+      capturedAt: new Date().toISOString(),
+    };
+    const saved = await save({ researchCards: [...(task.researchCards ?? []), card] });
+    if (!saved) return;
+    setResearchTitleInput("");
+    setResearchUrlInput("");
+    setResearchSummaryInput("");
+    setResearchActionsInput("");
+    notify("研究卡已保存到本机", "success");
+  };
+  const createResearchActionTask = async (
+    card: TaskResearchCard,
+    actionItem: string,
+    index: number,
+  ): Promise<void> => {
+    if (!task) return;
+    const key = researchCardActionKey(card.id, index);
+    if (researchActionBusyKey || createdResearchActionKeys.has(key)) return;
+    setResearchActionBusyKey(key);
+    try {
+      await controller.create(
+        buildResearchActionTaskInput(task, card, actionItem),
+        { selectCreated: false },
+      );
+      setCreatedResearchActionKeys((current) => {
+        const next = new Set(current);
+        next.add(key);
+        return next;
+      });
+      notify("已创建本地行动任务，不会写回飞书", "success");
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "创建行动任务失败",
+        "error",
+      );
+    } finally {
+      setResearchActionBusyKey(undefined);
+    }
+  };
+  const removeResearchCard = async (cardId: string): Promise<void> => {
+    const saved = await save({
+      researchCards: (task.researchCards ?? []).filter((card) => card.id !== cardId),
     });
-    setSubtaskTitle("");
-    const items = await window.desktopApi?.tasks.list({
-      includeDeleted: false,
+    if (saved) notify("研究卡已移除，可通过撤销恢复", "success");
+  };
+  const customFieldValueLabel = (value: JsonValue): string => {
+    if (typeof value === "boolean") return value ? "已勾选" : "未勾选";
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+  const addCustomField = async (): Promise<void> => {
+    const key = customFieldKey.trim();
+    const rawValue = customFieldValue.trim();
+    if (!key || (!rawValue && customFieldType !== "checkbox")) {
+      notify("请同时填写字段名称和值", "error");
+      return;
+    }
+    if (key.length > 40 || rawValue.length > 500) {
+      notify("字段名称最多 40 字，字段值最多 500 字", "error");
+      return;
+    }
+    let value: JsonValue;
+    if (customFieldType === "number") {
+      const parsed = Number(rawValue);
+      if (!Number.isFinite(parsed)) {
+        notify("数字字段请输入有效数字", "error");
+        return;
+      }
+      value = parsed;
+    } else if (customFieldType === "date") {
+      if (!/^\d{4}-\d{2}-\d{2}$/u.test(rawValue)) {
+        notify("日期字段请输入有效日期", "error");
+        return;
+      }
+      const parsed = new Date(`${rawValue}T00:00:00.000Z`);
+      if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== rawValue) {
+        notify("日期字段请输入有效日期", "error");
+        return;
+      }
+      value = rawValue;
+    } else if (customFieldType === "url") {
+      let parsed: URL;
+      try {
+        parsed = new URL(rawValue);
+      } catch {
+        notify("链接字段请输入有效地址", "error");
+        return;
+      }
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        notify("链接字段只支持 http 或 https 地址", "error");
+        return;
+      }
+      value = rawValue;
+    } else if (customFieldType === "checkbox") {
+      value = rawValue === "true";
+    } else {
+      value = rawValue;
+    }
+    const draftRevision = customFieldDraftRevisionRef.current;
+    const previousFields = customFieldsRef.current;
+    const nextFields = { ...previousFields, [key]: value };
+    // A save can finish after the user has already started the next field.
+    // Keep the latest field map for back-to-back additions, and only clear the
+    // composer if the response still belongs to the draft that was submitted.
+    customFieldsRef.current = nextFields;
+    const saved = await save({
+      customFields: nextFields,
     });
-    if (items) setRelatedTasks(items);
-    notify("本地子任务已创建", "success");
+    if (!saved && customFieldsRef.current === nextFields) {
+      customFieldsRef.current = previousFields;
+    }
+    if (saved && customFieldDraftRevisionRef.current === draftRevision) {
+      customFieldDraftRevisionRef.current += 1;
+      setCustomFieldKey("");
+      setCustomFieldValue("");
+      setCustomFieldType("text");
+    }
+  };
+  const removeCustomField = async (key: string): Promise<void> => {
+    const previousFields = customFieldsRef.current;
+    const next = { ...previousFields };
+    delete next[key];
+    customFieldsRef.current = next;
+    const saved = await save({ customFields: next });
+    if (!saved && customFieldsRef.current === next) {
+      customFieldsRef.current = previousFields;
+    }
+  };
+  const addTaskAttachment = async (): Promise<void> => {
+    const url = attachmentUrl.trim();
+    if (!url) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      notify("请输入有效的附件地址", "error");
+      return;
+    }
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      notify("附件只支持 http 或 https 地址", "error");
+      return;
+    }
+    const lastPathSegment = parsed.pathname.split("/").filter(Boolean).at(-1) ?? "附件";
+    let fallbackName = lastPathSegment;
+    try {
+      fallbackName = decodeURIComponent(lastPathSegment);
+    } catch {
+      // Keep the encoded segment as a safe display name for malformed URLs.
+    }
+    const name = (attachmentName.trim() || fallbackName || "附件").slice(0, 120);
+    const attachment: TaskAttachment = {
+      id: crypto.randomUUID(),
+      name,
+      url,
+    };
+    const saved = await save({ attachments: [...task.attachments, attachment] });
+    if (saved) {
+      setAttachmentName("");
+      setAttachmentUrl("");
+    }
+  };
+  const chooseTaskAttachments = async (): Promise<void> => {
+    const api = window.desktopApi?.tasks;
+    if (!api?.chooseAttachments) {
+      notify("当前环境不支持本地附件选择", "error");
+      return;
+    }
+    setAttachmentBusy(true);
+    try {
+      const picked = await api.chooseAttachments();
+      if (picked.length === 0) return;
+      const saved = await save({ attachments: [...task.attachments, ...picked] });
+      if (!saved) {
+        await Promise.all(
+          picked
+            .filter((attachment) => attachment.localPath)
+            .map((attachment) => api.deleteAttachment(attachment)),
+        );
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "添加本地附件失败", "error");
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+  const openTaskAttachment = async (attachment: TaskAttachment): Promise<void> => {
+    try {
+      if (attachment.localPath) {
+        await window.desktopApi?.tasks.openAttachment(attachment);
+      } else if (attachment.url) {
+        await window.desktopApi?.shell.openExternal(attachment.url);
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法打开附件", "error");
+    }
+  };
+  const previewTaskAttachment = async (
+    attachment: TaskAttachment,
+    trigger?: HTMLElement,
+  ): Promise<void> => {
+    if (!attachment.localPath || !window.desktopApi?.tasks.previewAttachment) return;
+    const activeElement = trigger ?? document.activeElement;
+    attachmentPreviewReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    setPreviewBusyId(attachment.id);
+    try {
+      setAttachmentPreview(await window.desktopApi.tasks.previewAttachment(attachment));
+      setAttachmentPreviewSource(attachment);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法预览附件", "error");
+    } finally {
+      setPreviewBusyId(undefined);
+    }
+  };
+  const removeTaskAttachment = async (attachmentId: string): Promise<void> => {
+    const removed = task.attachments.find((attachment) => attachment.id === attachmentId);
+    const saved = await save({ attachments: task.attachments.filter((attachment) => attachment.id !== attachmentId) });
+    if (saved && removed?.localPath && window.desktopApi?.tasks.deleteAttachment) {
+      try {
+        await window.desktopApi.tasks.deleteAttachment(removed);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : "附件已移除，但本地文件清理失败", "error");
+      }
+    }
   };
   const localReminder = task.reminders.find(
     (reminder) => reminder.source === "local",
@@ -1896,6 +5628,44 @@ function TaskInspector({
       },
     });
   };
+  const runManualAutomation = async (
+    rule: TaskAutomationRule,
+  ): Promise<void> => {
+    if (!task || automationBusy) return;
+    if (!matchesTaskAutomation(rule, task)) {
+      notify(`“${rule.name}”的条件不匹配当前任务`, "info");
+      return;
+    }
+    const patch = taskAutomationPatch(rule, task);
+    if (!patch) {
+      notify(`“${rule.name}”对当前任务没有需要改变的内容`, "info");
+      return;
+    }
+    setAutomationBusy(rule.id);
+    setShowActions(false);
+    try {
+      const operationId = await controller.update(task.id, patch);
+      notify(
+        `已应用“${rule.name}” · ${taskAutomationActionLabel(rule.action)}`,
+        "success",
+        operationId
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
+          : undefined,
+      );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "自动化应用失败",
+        "error",
+      );
+    } finally {
+      setAutomationBusy(undefined);
+    }
+  };
   const descendantIds = new Set<string>();
   let frontier = [task.id];
   while (frontier.length > 0) {
@@ -1914,59 +5684,159 @@ function TaskInspector({
       !descendantIds.has(candidate.id) &&
       !candidate.deletedAt,
   );
+  const dependencyOptions = relatedTasks
+    .filter((candidate) => candidate.id !== task.id && !candidate.deletedAt)
+    .sort((left, right) => left.title.localeCompare(right.title, "zh-CN"));
+  const knownDependencyIds = new Set(
+    dependencyOptions.map((candidate) => candidate.id),
+  );
+  const missingDependencyCount = task.dependencyIds.filter(
+    (dependencyId) => !knownDependencyIds.has(dependencyId),
+  ).length;
+  const incompleteDependencyCount = task.dependencyIds.filter(
+    (dependencyId) =>
+      relatedTasks.find((candidate) => candidate.id === dependencyId)?.status !==
+      "completed",
+  ).length;
+  const dependencyChain = buildDependencyChain(task, relatedTasks);
+  const dependencyGraph = buildDependencyGraph(task, relatedTasks);
+  const graphAncestors = dependencyGraph.nodes.filter(
+    (node) => node.kind === "ancestor" || node.kind === "missing",
+  );
+  const graphCurrent = dependencyGraph.nodes.filter(
+    (node) => node.kind === "current",
+  );
+  const graphDownstream = dependencyGraph.nodes.filter(
+    (node) => node.kind === "downstream",
+  );
   const pendingTemporalChange = Boolean(
     pendingPatch &&
       ["plannedDate", "startAt", "dueAt", "timeBlock", "reminders"].some(
-        (field) => field in pendingPatch,
+        (field) => field in pendingPatch.patch,
       ),
   );
+  const editorStatus =
+    editorSaveCount > 0
+      ? "saving"
+      : dirtyFieldsRef.current.size > 0
+        ? "dirty"
+        : "idle";
   return (
     <>
       <aside className="inspector" aria-label="任务详情">
         <div className="inspector-header">
           <span
-            className={`status-pill ${task.sync.status === "conflict" ? "warning" : task.sync.status === "synced" ? "success" : ""}`}
+            className={`status-pill ${taskSyncVisualState(task.sync.status) === "conflict" ? "warning" : taskSyncVisualState(task.sync.status) === "error" ? "danger" : taskSyncVisualState(task.sync.status) === "synced" ? "success" : ""}`}
           >
-            <CircleDot size={14} />
-            {task.status === "completed"
-              ? "已完成"
-              : task.sync.status === "synced"
-                ? "已同步"
-                : task.sync.status === "local"
-                  ? "本地"
-                  : task.sync.status}
+            {taskSyncVisualState(task.sync.status) === "error" ? (
+              <ShieldAlert size={14} />
+            ) : taskSyncVisualState(task.sync.status) === "conflict" ? (
+              <AlertTriangle size={14} />
+            ) : (
+              <CircleDot size={14} />
+            )}
+            {taskSyncVisualState(task.sync.status) === "error"
+              ? taskSyncLabel(task.sync.status) ?? "同步异常"
+              : taskSyncVisualState(task.sync.status) === "conflict"
+                ? "同步冲突"
+                : task.status === "completed"
+                  ? "已完成"
+                  : task.sync.status === "synced"
+                    ? "已同步"
+                    : task.sync.status === "local"
+                      ? "本地"
+              : task.sync.status}
           </span>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="更多任务操作"
-            aria-expanded={showActions}
-            onClick={() => setShowActions((value) => !value)}
-          >
-            <MoreHorizontal size={17} />
-          </button>
-          {onClose && (
+          {editorStatus !== "idle" && (
+            <span
+              className={`inspector-save-state ${editorStatus === "saving" ? "is-saving" : "is-dirty"}`}
+              role={editorStatus === "saving" ? "status" : undefined}
+              aria-live="polite"
+            >
+              <span className="inspector-save-dot" aria-hidden="true" />
+              {editorStatus === "saving" ? "正在保存…" : "有未保存编辑"}
+            </span>
+          )}
+          <div className="inspector-header-actions">
+            {onToggleCollapse && (
+              <button
+                type="button"
+                className="icon-button inspector-collapse"
+                aria-label="收起任务详情"
+                title="收起任务详情"
+                onClick={onToggleCollapse}
+              >
+                <PanelRightClose size={17} />
+              </button>
+            )}
             <button
               type="button"
-              className="icon-button inspector-close"
-              aria-label="关闭任务详情"
-              onClick={onClose}
+              className="icon-button"
+              aria-label="更多任务操作"
+              aria-expanded={showActions}
+              onClick={() => setShowActions((value) => !value)}
             >
-              <X size={17} />
+              <MoreHorizontal size={17} />
             </button>
-          )}
+            {onClose && (
+              <button
+                type="button"
+                className="icon-button inspector-close"
+                aria-label="关闭任务详情"
+                onClick={onClose}
+              >
+                <X size={17} />
+              </button>
+            )}
+          </div>
           {showActions && (
             <div className="inspector-menu">
               <button type="button" onClick={() => void duplicateAsLocal()}>
                 创建本地副本
               </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  templateSaveReturnFocusRef.current = event.currentTarget;
+                  setShowTemplateSave(true);
+                  setShowActions(false);
+                }}
+              >
+                保存为工作流模板
+              </button>
               {!task.deletedAt && (
                 <button
                   type="button"
                   onClick={() => {
-                    void controller.moveToToday(task.id);
                     setShowActions(false);
-                    notify("已移到今天", "success");
+                    void controller
+                      .moveToToday(task.id)
+                      .then((operationId) =>
+                        notify(
+                          "已移到今天",
+                          "success",
+                          operationId
+                            ? {
+                                label: "撤销",
+                                run: () => {
+                                  void undoTaskOperationWithFeedback(
+                                    controller,
+                                    operationId,
+                                    notify,
+                                  );
+                                },
+                              }
+                            : undefined,
+                        ),
+                      )
+                      .catch((reason) =>
+                        notify(
+                          reason instanceof Error
+                            ? reason.message
+                            : "暂时无法移到今天",
+                          "error",
+                        ),
+                      );
                   }}
                 >
                   移到今天
@@ -1991,6 +5861,36 @@ function TaskInspector({
               >
                 {task.status === "completed" ? "重新打开" : completionVerb}
               </button>
+              <button type="button" onClick={() => void saveToPetDiary()}>
+                写入宠物日记
+              </button>
+              {manualAutomations.length > 0 && (
+                <div className="inspector-menu-group" aria-label="手动自动化">
+                  <span className="inspector-menu-label">手动自动化</span>
+                  {manualAutomations.map((rule) => {
+                    const matches = matchesTaskAutomation(rule, task);
+                    const hasPatch = taskAutomationPatch(rule, task) !== undefined;
+                    return (
+                      <button
+                        type="button"
+                        key={rule.id}
+                        disabled={Boolean(automationBusy) || !matches || !hasPatch}
+                        title={
+                          !matches
+                            ? "当前任务不满足这条规则的条件"
+                            : !hasPatch
+                              ? "当前任务已经是目标状态"
+                              : undefined
+                        }
+                        onClick={() => void runManualAutomation(rule)}
+                      >
+                        <WandSparkles size={14} aria-hidden="true" />
+                        {automationBusy === rule.id ? "正在应用…" : rule.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {task.deletedAt && (
                 <button
                   type="button"
@@ -2018,11 +5918,15 @@ function TaskInspector({
               if (!next) {
                 setTitle(task.title);
                 clearDirtyIfCurrent("title", revision);
+                clearEditorDraftIfSettled();
                 notify("任务标题不能为空", "error");
                 return;
               }
               void save({ title: next }).then((saved) => {
-                if (saved) clearDirtyIfCurrent("title", revision);
+                if (saved) {
+                  clearDirtyIfCurrent("title", revision);
+                  clearEditorDraftIfSettled();
+                }
               });
             }}
             aria-label="任务标题"
@@ -2038,7 +5942,10 @@ function TaskInspector({
               if (!dirtyFieldsRef.current.has("notes")) return;
               const revision = currentDirtyRevision("notes");
               void save({ notes }).then((saved) => {
-                if (saved) clearDirtyIfCurrent("notes", revision);
+                if (saved) {
+                  clearDirtyIfCurrent("notes", revision);
+                  clearEditorDraftIfSettled();
+                }
               });
             }}
             placeholder="添加备注…"
@@ -2052,6 +5959,7 @@ function TaskInspector({
             <input
               id="project-id"
               className="field-input"
+              list="local-project-options"
               value={projectId}
               onChange={(event) => {
                 markDirty("projectId");
@@ -2060,16 +5968,85 @@ function TaskInspector({
               onBlur={() => {
                 if (!dirtyFieldsRef.current.has("projectId")) return;
                 const revision = currentDirtyRevision("projectId");
-                const next = projectId.trim();
+                const next = resolveProjectInput(projectId, projects);
                 void save({ projectId: next || null }).then((saved) => {
-                  if (saved) clearDirtyIfCurrent("projectId", revision);
+                  if (saved) {
+                    setProjectId(projectLabel(next, projects));
+                    clearDirtyIfCurrent("projectId", revision);
+                  }
                 });
               }}
               placeholder="未归类"
             />
+            <datalist id="local-project-options">
+              {projects.filter((project) => !project.archived).map((project) => (
+                <option key={project.id} value={project.name} label={project.id} />
+              ))}
+            </datalist>
             {task.source.type === "feishu" && (
               <small className="field-hint">仅本地，不同步飞书</small>
             )}
+          </div>
+          <div className="detail-field">
+            <label htmlFor="list-id">清单</label>
+            <input
+              id="list-id"
+              className="field-input"
+              list="local-list-options"
+              value={listId}
+              onChange={(event) => {
+                markDirty("listId");
+                setListId(event.target.value);
+              }}
+              onBlur={() => {
+                if (!dirtyFieldsRef.current.has("listId")) return;
+                const revision = currentDirtyRevision("listId");
+                const next = resolveListInput(listId, lists);
+                void save({ listId: next || null }).then((saved) => {
+                  if (saved) {
+                    setListId(listLabel(next, lists));
+                    clearDirtyIfCurrent("listId", revision);
+                  }
+                });
+              }}
+              placeholder="未归类"
+            />
+            <datalist id="local-list-options">
+              {lists.filter((list) => !list.archived).map((list) => (
+                <option key={list.id} value={list.name} label={list.id} />
+              ))}
+            </datalist>
+            {task.source.type === "feishu" && (
+              <small className="field-hint">仅本地，不同步飞书</small>
+            )}
+          </div>
+          <div className="detail-field">
+            <label htmlFor="section-id">分组标题</label>
+            <input
+              id="section-id"
+              className="field-input"
+              value={sectionId}
+              onChange={(event) => {
+                markDirty("sectionId");
+                setSectionId(event.target.value);
+              }}
+              onBlur={() => {
+                if (!dirtyFieldsRef.current.has("sectionId")) return;
+                const revision = currentDirtyRevision("sectionId");
+                const next = sectionId.trim();
+                void save({ sectionId: next || null }).then((saved) => {
+                  if (saved) {
+                    setSectionId(next);
+                    clearDirtyIfCurrent("sectionId", revision);
+                  }
+                });
+              }}
+              placeholder="例如：本周发布"
+              maxLength={80}
+            />
+            <small className="field-hint">
+              本地标题，用来把任务聚在一起；不写回飞书
+            </small>
           </div>
           <div className="detail-field">
             <label htmlFor="task-tags">标签</label>
@@ -2103,6 +6080,38 @@ function TaskInspector({
             )}
           </div>
           <div className="detail-field">
+            <label htmlFor="task-contexts">情境</label>
+            <input
+              id="task-contexts"
+              className="field-input"
+              value={contextsText}
+              onChange={(event) => {
+                markDirty("contexts");
+                setContextsText(event.target.value);
+              }}
+              onBlur={() => {
+                if (!dirtyFieldsRef.current.has("contexts")) return;
+                const revision = currentDirtyRevision("contexts");
+                const next = [
+                  ...new Map(
+                    contextsText
+                      .split(/[,，]/u)
+                      .map((context) => context.trim().replace(/\s+/gu, " "))
+                      .filter(Boolean)
+                      .map((context) => [context.toLocaleLowerCase(), context] as const),
+                  ).values(),
+                ];
+                void save({ contexts: next }).then((saved) => {
+                  if (saved) clearDirtyIfCurrent("contexts", revision);
+                });
+              }}
+              placeholder="办公室, 家, 出门"
+            />
+            <small className="field-hint">
+              手动情境，用于筛选和宠物建议；不申请定位，不同步飞书
+            </small>
+          </div>
+          <div className="detail-field">
             <label htmlFor="parent-task">父任务</label>
             <select
               id="parent-task"
@@ -2123,6 +6132,543 @@ function TaskInspector({
               <small className="field-hint">仅本地，不同步飞书</small>
             )}
           </div>
+          <div className="detail-field">
+            <label htmlFor="task-dependencies">依赖（先完成）</label>
+            <select
+              id="task-dependencies"
+              className="field-select dependency-select"
+              multiple
+              size={Math.min(6, Math.max(3, dependencyOptions.length))}
+              value={task.dependencyIds.filter((dependencyId) => knownDependencyIds.has(dependencyId))}
+              onChange={(event) => {
+                const selected = Array.from(event.currentTarget.selectedOptions).map(
+                  (option) => option.value,
+                );
+                const missing = task.dependencyIds.filter(
+                  (dependencyId) => !knownDependencyIds.has(dependencyId),
+                );
+                void save({ dependencyIds: [...new Set([...missing, ...selected])] });
+              }}
+              aria-label="任务依赖"
+            >
+              {dependencyOptions.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.title}{candidate.status === "completed" ? " · 已完成" : ""}
+                </option>
+              ))}
+            </select>
+            <small className="field-hint">
+              {incompleteDependencyCount
+                ? `还有 ${incompleteDependencyCount} 项前置任务未完成`
+                : "前置任务都已完成"}
+              {missingDependencyCount ? `；${missingDependencyCount} 项依赖暂时不可见` : ""}
+            </small>
+            {task.source.type === "feishu" && (
+              <small className="field-hint">仅本地，不同步飞书</small>
+            )}
+          </div>
+          {(dependencyChain.ancestors.length > 0 ||
+            dependencyChain.downstream.length > 0 ||
+            dependencyChain.missingDependencyIds.length > 0 ||
+            dependencyChain.cycleDetected) && (
+            <section className="dependency-chain-card" aria-label="任务依赖链">
+              <div className="dependency-chain-heading">
+                <span>
+                  <GitBranch size={14} aria-hidden="true" />
+                  执行关系
+                </span>
+                <div className="dependency-chain-heading-actions">
+                  <small>
+                    {dependencyChain.ancestors.length > 0
+                      ? `先做 ${dependencyChain.ancestors.length} 项`
+                      : dependencyChain.downstream.length > 0
+                        ? `后续 ${dependencyChain.downstream.length} 项`
+                        : "需要检查"}
+                  </small>
+                  <button
+                    type="button"
+                    className="dependency-graph-toggle"
+                    aria-expanded={showDependencyGraph}
+                    onClick={() => setShowDependencyGraph((value) => !value)}
+                  >
+                    {showDependencyGraph ? "收起关系图" : "查看关系图"}
+                  </button>
+                </div>
+              </div>
+              <div className="dependency-chain-track">
+                {dependencyChain.ancestors.map((item) => (
+                  <button
+                    key={`ancestor-${item.task.id}`}
+                    type="button"
+                    className={`dependency-chain-node ${item.task.status === "completed" ? "is-complete" : ""}`}
+                    onClick={() => controller.select(item.task.id)}
+                    title="打开前置任务"
+                  >
+                    <small>前置</small>
+                    <span>{item.task.title}</span>
+                  </button>
+                ))}
+                <span className="dependency-chain-current" aria-current="true">
+                  <small>当前</small>
+                  <span>{task.title}</span>
+                </span>
+                {dependencyChain.downstream.map((item) => (
+                  <button
+                    key={`downstream-${item.task.id}`}
+                    type="button"
+                    className={`dependency-chain-node ${item.task.status === "completed" ? "is-complete" : ""}`}
+                    onClick={() => controller.select(item.task.id)}
+                    title="打开后续任务"
+                  >
+                    <small>后续</small>
+                    <span>{item.task.title}</span>
+                  </button>
+                ))}
+              </div>
+              {showDependencyGraph && (
+                <div className="dependency-graph" aria-label="依赖关系图">
+                  <div className="dependency-graph-caption">
+                    <span>从左到右：先做 → 当前 → 解锁</span>
+                    <small>{dependencyGraph.edges.length} 条关系</small>
+                  </div>
+                  <div className="dependency-graph-lanes">
+                    <section className="dependency-graph-lane" aria-label="前置任务">
+                      <h4>先做 <small>{graphAncestors.length}</small></h4>
+                      {graphAncestors.length > 0 ? graphAncestors.map((node) =>
+                        node.kind === "missing" ? (
+                          <div
+                            className="dependency-graph-node is-missing"
+                            key={`graph-${node.id}`}
+                            role="status"
+                          >
+                            <small>缺失依赖</small>
+                            <span>{node.title}</span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`dependency-graph-node ${node.status === "completed" ? "is-complete" : ""}`}
+                            key={`graph-${node.id}`}
+                            onClick={() => controller.select(node.id)}
+                            title="打开前置任务"
+                          >
+                            <small>{node.depth > 1 ? `前置 · 第 ${node.depth} 层` : "前置"}</small>
+                            <span>{node.title}</span>
+                          </button>
+                        ),
+                      ) : <p className="dependency-graph-empty">没有可见前置</p>}
+                    </section>
+                    <span className="dependency-graph-arrow" aria-hidden="true">→</span>
+                    <section className="dependency-graph-lane" aria-label="当前任务">
+                      <h4>当前 <small>1</small></h4>
+                      {graphCurrent.map((node) => (
+                        <div className="dependency-graph-node is-current" key={`graph-${node.id}`}>
+                          <small>当前任务</small>
+                          <span>{node.title}</span>
+                        </div>
+                      ))}
+                    </section>
+                    <span className="dependency-graph-arrow" aria-hidden="true">→</span>
+                    <section className="dependency-graph-lane" aria-label="后续任务">
+                      <h4>解锁 <small>{graphDownstream.length}</small></h4>
+                      {graphDownstream.length > 0 ? graphDownstream.map((node) => (
+                        <button
+                          type="button"
+                          className={`dependency-graph-node ${node.status === "completed" ? "is-complete" : ""}`}
+                          key={`graph-${node.id}`}
+                          onClick={() => controller.select(node.id)}
+                          title="打开后续任务"
+                        >
+                          <small>{node.depth > 1 ? `后续 · 第 ${node.depth} 层` : "后续"}</small>
+                          <span>{node.title}</span>
+                        </button>
+                      )) : <p className="dependency-graph-empty">暂无后续任务</p>}
+                    </section>
+                  </div>
+                </div>
+              )}
+              {dependencyChain.missingDependencyIds.length > 0 && (
+                <p className="dependency-chain-warning">
+                  还有 {dependencyChain.missingDependencyIds.length} 项依赖暂时不可见，关系已保留。
+                </p>
+              )}
+              {dependencyChain.cycleDetected && (
+                <p className="dependency-chain-warning">
+                  检测到循环依赖；这里只展示事实，不会自动改写。
+                </p>
+              )}
+            </section>
+          )}
+        </div>
+        <div className="detail-group">
+          <h3>链接与上下文</h3>
+          {task.links.length > 0 && (
+            <div className="task-link-list" aria-label="任务链接">
+              {task.links.map((link) => (
+                <div className="task-link-row" key={link.id}>
+                  <button
+                    type="button"
+                    className="task-link-open"
+                    onClick={() =>
+                      void window.desktopApi?.shell
+                        .openExternal(link.url)
+                        .catch(() => undefined)
+                    }
+                    title={link.url}
+                  >
+                    <ExternalLink size={14} aria-hidden="true" />
+                    <span>{link.label || link.url}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="row-icon-button"
+                    aria-label={`移除链接${link.label || link.url}`}
+                    onClick={() => void removeTaskLink(link.id)}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="task-link-composer">
+            <input
+              id="task-link-url"
+              className="field-input"
+              value={linkUrlInput}
+              onChange={(event) => setLinkUrlInput(event.target.value)}
+              placeholder="https://…"
+              aria-label="链接地址"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void addTaskLink();
+                }
+              }}
+            />
+            <input
+              id="task-link-label"
+              className="field-input"
+              value={linkLabelInput}
+              onChange={(event) => setLinkLabelInput(event.target.value)}
+              placeholder="名称（可选）"
+              aria-label="链接名称"
+            />
+            <button
+              type="button"
+              className="soft-button"
+              disabled={!linkUrlInput.trim()}
+              onClick={() => void addTaskLink()}
+            >
+              <Plus size={14} aria-hidden="true" />
+              添加链接
+            </button>
+          </div>
+          <small className="field-hint">链接只作为任务上下文保存，不会写回飞书。</small>
+        </div>
+        <div className="detail-group">
+          <h3>
+            <FileText size={15} aria-hidden="true" />
+            研究卡 <span className="section-count">{task.researchCards?.length ?? 0}</span>
+          </h3>
+          {(task.researchCards ?? []).length > 0 ? (
+            <div className="research-card-list" aria-label="任务研究卡">
+              {(task.researchCards ?? []).map((card) => (
+                <details className="research-card" key={card.id}>
+                  <summary>
+                    <span className="research-card-summary-title">
+                      <FileText size={14} aria-hidden="true" />
+                      {card.title}
+                    </span>
+                    {card.actionItems.length > 0 && (
+                      <span className="research-card-count">{card.actionItems.length} 条行动项</span>
+                    )}
+                  </summary>
+                  <div className="research-card-body">
+                    {card.url && (
+                      <button
+                        type="button"
+                        className="research-card-source"
+                        onClick={() =>
+                          void window.desktopApi?.shell
+                            .openExternal(card.url!)
+                            .catch(() => undefined)
+                        }
+                        title={card.url}
+                      >
+                        <ExternalLink size={13} aria-hidden="true" />
+                        <span>{card.url}</span>
+                      </button>
+                    )}
+                    {card.summary && <ResearchCardMarkdown text={card.summary} />}
+                    {card.actionItems.length > 0 && (
+                      <ResearchCardActionList
+                        card={card}
+                        createdKeys={createdResearchActionKeys}
+                        busyKey={researchActionBusyKey}
+                        onCreate={(nextCard, item, index) => {
+                          void createResearchActionTask(nextCard, item, index);
+                        }}
+                      />
+                    )}
+                    <div className="research-card-footer">
+                      <time dateTime={card.capturedAt}>记录于 {formatDateTime(card.capturedAt)}</time>
+                      <button
+                        type="button"
+                        className="text-button danger-text"
+                        aria-label={`移除研究卡${card.title}`}
+                        onClick={() => void removeResearchCard(card.id)}
+                      >
+                        移除
+                      </button>
+                    </div>
+                  </div>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <small className="field-hint research-card-empty">
+              把资料来源、摘要和下一步收在任务里，Agent 才能围绕同一上下文继续工作。
+            </small>
+          )}
+          <div className="research-card-composer">
+            <input
+              className="field-input"
+              value={researchTitleInput}
+              onChange={(event) => setResearchTitleInput(event.target.value)}
+              placeholder="研究卡标题，例如：竞品定价摘要"
+              aria-label="研究卡标题"
+              maxLength={200}
+            />
+            <input
+              className="field-input"
+              value={researchUrlInput}
+              onChange={(event) => setResearchUrlInput(event.target.value)}
+              placeholder="来源链接（可选）"
+              aria-label="研究卡来源链接"
+              maxLength={2_000}
+            />
+            <textarea
+              className="field-input field-textarea"
+              value={researchSummaryInput}
+              onChange={(event) => setResearchSummaryInput(event.target.value)}
+              placeholder="摘要（可选）"
+              aria-label="研究卡摘要"
+              maxLength={5_000}
+            />
+            <textarea
+              className="field-input field-textarea"
+              value={researchActionsInput}
+              onChange={(event) => setResearchActionsInput(event.target.value)}
+              placeholder="行动项（每行一条，可选）"
+              aria-label="研究卡行动项"
+              maxLength={10_000}
+            />
+            <button
+              type="button"
+              className="soft-button"
+              disabled={!researchTitleInput.trim()}
+              onClick={() => void addResearchCard()}
+            >
+              <Plus size={14} aria-hidden="true" />
+              添加研究卡
+            </button>
+          </div>
+          <small className="field-hint research-card-hint">研究卡是本机私人上下文，不会写回飞书；导出时可选择是否包含。</small>
+        </div>
+        <div className="detail-group">
+          <h3>自定义字段</h3>
+          {Object.entries(task.customFields).length > 0 ? (
+            <div className="custom-field-list" aria-label="自定义字段列表">
+              {Object.entries(task.customFields).map(([key, value]) => (
+                <div className="custom-field-row" key={key}>
+                  <span className="custom-field-key" title={key}>{key}</span>
+                  <span className="custom-field-value" title={customFieldValueLabel(value)}>
+                    {customFieldValueLabel(value)}
+                  </span>
+                  <button
+                    type="button"
+                    className="row-icon-button"
+                    aria-label={`移除自定义字段${key}`}
+                    onClick={() => void removeCustomField(key)}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <small className="field-hint custom-field-empty">给任务加上客户、版本或其他私人上下文。</small>
+          )}
+          <div className="custom-field-composer">
+            <input
+              id="custom-field-key"
+              className="field-input"
+              value={customFieldKey}
+              onChange={(event) => {
+                customFieldDraftRevisionRef.current += 1;
+                setCustomFieldKey(event.target.value);
+              }}
+              placeholder="字段名称"
+              aria-label="自定义字段名称"
+              maxLength={40}
+            />
+            <select
+              id="custom-field-type"
+              className="field-select"
+              value={customFieldType}
+              onChange={(event) => {
+                customFieldDraftRevisionRef.current += 1;
+                const nextType = event.target.value as CustomFieldType;
+                setCustomFieldType(nextType);
+                if (nextType === "checkbox" && !customFieldValue) setCustomFieldValue("false");
+                if (nextType !== "checkbox" && (customFieldValue === "true" || customFieldValue === "false")) setCustomFieldValue("");
+              }}
+              aria-label="自定义字段类型"
+            >
+              {Object.entries(customFieldTypeLabels).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+            {customFieldType === "checkbox" ? (
+              <select
+                id="custom-field-value"
+                className="field-select"
+                value={customFieldValue || "false"}
+                onChange={(event) => {
+                  customFieldDraftRevisionRef.current += 1;
+                  setCustomFieldValue(event.target.value);
+                }}
+                aria-label="自定义字段值"
+              >
+                <option value="false">未勾选</option>
+                <option value="true">已勾选</option>
+              </select>
+            ) : (
+              <input
+                id="custom-field-value"
+                className="field-input"
+                type={customFieldType === "date" ? "date" : customFieldType === "number" ? "number" : "text"}
+                value={customFieldValue}
+                onChange={(event) => {
+                  customFieldDraftRevisionRef.current += 1;
+                  setCustomFieldValue(event.target.value);
+                }}
+                placeholder={customFieldType === "url" ? "https://…" : customFieldType === "number" ? "例如 30" : "字段值"}
+                aria-label="自定义字段值"
+                maxLength={500}
+                step={customFieldType === "number" ? "any" : undefined}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void addCustomField();
+                  }
+                }}
+              />
+            )}
+            <button
+              type="button"
+              className="soft-button"
+              disabled={!customFieldKey.trim() || (customFieldType !== "checkbox" && !customFieldValue.trim())}
+              onClick={() => void addCustomField()}
+            >
+              <Plus size={14} aria-hidden="true" />
+              添加字段
+            </button>
+          </div>
+          <small className="field-hint">仅保存在本地私人上下文，不会写回飞书。</small>
+        </div>
+        <div className="detail-group">
+          <h3>附件</h3>
+          {task.attachments.length > 0 ? (
+            <div className="task-attachment-list" aria-label="任务附件">
+              {task.attachments.map((attachment) => (
+                <div className="task-attachment-row" key={attachment.id}>
+                  <button
+                    type="button"
+                    className="task-attachment-open"
+                    disabled={!attachment.url && !attachment.localPath}
+                    onClick={() => void openTaskAttachment(attachment)}
+                    title={attachment.localPath ? "打开本地附件" : attachment.url ?? attachment.name}
+                  >
+                    <FileText size={14} aria-hidden="true" />
+                    <span>{attachment.name}</span>
+                  </button>
+                  {attachment.localPath && (
+                    <button
+                      type="button"
+                      className="row-icon-button task-attachment-preview"
+                      aria-label={`预览附件${attachment.name}`}
+                      title="预览附件"
+                      disabled={previewBusyId === attachment.id}
+                      onClick={(event) =>
+                        void previewTaskAttachment(attachment, event.currentTarget)
+                      }
+                    >
+                      <Eye size={14} aria-hidden="true" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="row-icon-button"
+                    aria-label={`移除附件${attachment.name}`}
+                    onClick={() => void removeTaskAttachment(attachment.id)}
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <small className="field-hint task-attachment-empty">添加本地文件，或保存一个文档、设计稿、研究页面的外部引用。</small>
+          )}
+          <div className="task-attachment-actions">
+            <button
+              type="button"
+              className="soft-button"
+              disabled={attachmentBusy}
+              onClick={() => void chooseTaskAttachments()}
+            >
+              <Upload size={14} aria-hidden="true" />
+              {attachmentBusy ? "正在添加…" : "选择本地文件"}
+            </button>
+            <small className="field-hint">文件只复制到本机应用数据目录，不会上传飞书。</small>
+          </div>
+          <div className="task-attachment-composer">
+            <input
+              id="task-attachment-name"
+              className="field-input"
+              value={attachmentName}
+              onChange={(event) => setAttachmentName(event.target.value)}
+              placeholder="名称（可选）"
+              aria-label="附件名称"
+              maxLength={120}
+            />
+            <input
+              id="task-attachment-url"
+              className="field-input"
+              value={attachmentUrl}
+              onChange={(event) => setAttachmentUrl(event.target.value)}
+              placeholder="https://…"
+              aria-label="附件地址"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void addTaskAttachment();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="soft-button"
+              disabled={!attachmentUrl.trim()}
+              onClick={() => void addTaskAttachment()}
+            >
+              <Plus size={14} aria-hidden="true" />
+              添加附件
+            </button>
+          </div>
+          <small className="field-hint">外部链接和本地附件都只保存在本地私人上下文，不会写回飞书。</small>
         </div>
         <div className="detail-group">
           <h3>计划与时间</h3>
@@ -2143,6 +6689,38 @@ function TaskInspector({
             />
             {task.source.type === "feishu" && (
               <small className="field-hint">仅本地，不同步飞书</small>
+            )}
+          </div>
+          <div className="detail-field">
+            <label htmlFor="defer-until">稍后安排</label>
+            <input
+              id="defer-until"
+              className="field-input"
+              type="date"
+              value={deferUntilInput}
+              onChange={(event) => {
+                markDirty("deferUntil");
+                setDeferUntilInput(event.target.value);
+              }}
+              onBlur={(event) =>
+                void commitDeferUntil(event.currentTarget.value)
+              }
+            />
+            <small className="field-hint">
+              到这一天前不会出现在“今天”；仅本地，不同步飞书
+            </small>
+            {deferUntilInput && (
+              <button
+                type="button"
+                className="ghost-button compact"
+                onClick={() => {
+                  markDirty("deferUntil");
+                  setDeferUntilInput("");
+                  void commitDeferUntil("");
+                }}
+              >
+                恢复可安排
+              </button>
             )}
           </div>
           <div className="detail-field">
@@ -2293,9 +6871,69 @@ function TaskInspector({
               <small className="field-hint">仅本地，不同步飞书</small>
             )}
           </div>
+          <div className="detail-field">
+            <label htmlFor="work-log-minutes">记录投入</label>
+            <div className="field-control-stack">
+              <div className="inline-number">
+                <input
+                  id="work-log-minutes"
+                  className="field-input"
+                  type="number"
+                  min={1}
+                  max={720}
+                  step={5}
+                  inputMode="numeric"
+                  placeholder="例如 25"
+                  value={workLogMinutes}
+                  disabled={workLogBusy}
+                  onChange={(event) => setWorkLogMinutes(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void recordWorkLog();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={workLogBusy || !workLogMinutes.trim()}
+                  onClick={() => void recordWorkLog()}
+                >
+                  {workLogBusy ? "记录中…" : "记录"}
+                </button>
+              </div>
+              <small className="field-hint">
+                已累计 {actualMinutesForTask(task)} 分钟；可补记没有启动专注计时的工作
+              </small>
+              {(task.focusSessions ?? []).length > 0 && (
+                <div className="task-work-log-list" aria-label="最近投入记录">
+                  {(task.focusSessions ?? []).slice(-4).reverse().map((session) => (
+                    <small key={session.id}>
+                      {session.source === "manual" ? "手动" : "专注"} · {Math.max(1, Math.round(session.elapsedSeconds / 60))} 分钟 · {new Date(session.endedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </small>
+                  ))}
+                </div>
+              )}
+            </div>
+            {task.source.type === "feishu" && (
+              <small className="field-hint">仅本地，不同步飞书</small>
+            )}
+          </div>
+          <label className="field-checkbox task-flag-detail">
+            <input
+              type="checkbox"
+              checked={task.flagged === true}
+              onChange={(event) => void save({ flagged: event.target.checked })}
+              aria-label="重点标记任务"
+            />
+            <Star size={14} aria-hidden="true" />
+            标记为重点任务
+            <small className="field-hint">仅本地，不同步飞书</small>
+          </label>
           <div className="private-note">
             <EyeOff size={14} />
-            项目、标签、父子任务、优先级、预计、私人计划、时间块、排序和专注不会回写飞书
+            项目、标签、重点标记、稍后安排、父子任务、优先级、预计、实际投入、私人计划、时间块、排序和专注不会回写飞书
           </div>
         </div>
         <div className="detail-group">
@@ -2366,6 +7004,40 @@ function TaskInspector({
               </div>
             </div>
           )}
+          {task.source.type === "local" && task.recurrence && (
+            <div className="recurrence-skip-card">
+              <div>
+                <strong>本次不做？</strong>
+                <small>
+                  跳过后会把日期、时间块和本地提醒一起移到下一次，不会新建重复任务。
+                </small>
+              </div>
+              <button
+                type="button"
+                className="soft-button"
+                disabled={
+                  skipRecurringBusy ||
+                  task.status !== "open" ||
+                  task.focusStartedAt !== undefined ||
+                  !(
+                    task.dueAt ||
+                    task.plannedDate ||
+                    task.startAt ||
+                    task.timeBlock?.startAt
+                  )
+                }
+                title={
+                  task.focusStartedAt !== undefined
+                    ? "请先暂停专注"
+                    : "将本次循环平移到下一次"
+                }
+                onClick={() => void skipRecurring()}
+              >
+                <SkipForward size={15} />
+                {skipRecurringBusy ? "正在跳过…" : "跳过本次"}
+              </button>
+            </div>
+          )}
           {task.source.type === "feishu" && (
             <div className="private-note">
               <EyeOff size={14} />
@@ -2375,8 +7047,24 @@ function TaskInspector({
         </div>
         <div className="detail-group">
           <h3>
-            子任务 <span className="section-count">{subtasks.length}</span>
+            子任务 <span className="section-count">{subtasks.length > 0 ? `${completedSubtasks}/${subtasks.length}` : 0}</span>
           </h3>
+          {subtasks.length > 0 && (
+            <div
+              className="subtask-progress"
+              role="progressbar"
+              aria-label="子任务完成进度"
+              aria-valuemin={0}
+              aria-valuemax={subtasks.length}
+              aria-valuenow={completedSubtasks}
+            >
+              <span
+                style={{
+                  width: `${Math.round((completedSubtasks / subtasks.length) * 100)}%`,
+                }}
+              />
+            </div>
+          )}
           <div className="subtask-list">
             {subtasks.map((subtask) => (
               <div className="subtask-row" key={subtask.id}>
@@ -2384,7 +7072,8 @@ function TaskInspector({
                   className="task-checkbox"
                   type="checkbox"
                   checked={subtask.status === "completed"}
-                  onChange={() => void controller.toggleComplete(subtask)}
+                  disabled={Boolean(subtaskBusyId)}
+                  onChange={() => void toggleSubtask(subtask)}
                   aria-label={`${subtask.status === "completed" ? "恢复" : "完成"}${subtask.title}`}
                 />
                 <span>{subtask.title}</span>
@@ -2479,24 +7168,188 @@ function TaskInspector({
           )}
         </div>
         <div className="detail-group">
+          <h3>
+            历史 <span className="section-count">{taskHistory.length}</span>
+          </h3>
+          {taskHistoryLoading ? (
+            <div className="task-history-empty" role="status">
+              正在读取任务历史…
+            </div>
+          ) : taskHistory.length === 0 ? (
+            <div className="task-history-empty">
+              这项任务还没有可显示的本地变更记录。
+            </div>
+          ) : (
+            <ol className="task-history-list" aria-label="任务历史记录">
+              {taskHistory.map((entry) => (
+                <li className="task-history-row" key={entry.operationId}>
+                  <span className="task-history-marker" aria-hidden="true" />
+                  <div className="task-history-content">
+                    <div className="task-history-heading">
+                      <strong>
+                        {taskHistoryOperationLabels[entry.kind] ?? entry.kind}
+                      </strong>
+                      <time dateTime={entry.createdAt}>
+                        {formatDateTime(entry.createdAt)}
+                      </time>
+                    </div>
+                    <div className="task-history-fields">
+                      {entry.changedFields.map((field) => (
+                        <span key={field}>
+                          {taskHistoryFieldLabels[field] ?? field}
+                        </span>
+                      ))}
+                    </div>
+                    {entry.undoneAt && (
+                      <small className="task-history-undone">
+                        已于 {formatDateTime(entry.undoneAt)} 撤销
+                      </small>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+          <small className="field-hint task-history-hint">
+            仅显示本机可撤销操作；飞书远端变化仍以同步状态和任务内容为准。
+          </small>
+        </div>
+        <div className="detail-group">
+          <h3>
+            <MessageCircle size={15} aria-hidden="true" />
+            讨论 <span className="section-count">{task.comments?.length ?? 0}</span>
+          </h3>
+          {(task.comments ?? []).length === 0 ? (
+            <div className="task-comments-empty">
+              给未来的自己留一句上下文，或让 Agent 接着这里继续工作。
+            </div>
+          ) : (
+            <div className="task-comments-list" aria-label="任务讨论">
+              {(task.comments ?? []).map((comment) => (
+                <article className="task-comment" key={comment.id}>
+                  <div className="task-comment-meta">
+                    <strong>{comment.author === "agent" ? "Agent" : "我"}</strong>
+                    <time dateTime={comment.updatedAt}>
+                      {formatDateTime(comment.updatedAt)}
+                    </time>
+                    <div className="task-comment-actions">
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={commentBusy}
+                        onClick={() => beginCommentEdit(comment)}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        className="text-button danger-text"
+                        disabled={commentBusy}
+                        onClick={() => void removeTaskComment(comment.id)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                  {editingCommentId === comment.id ? (
+                    <div className="task-comment-edit">
+                      <textarea
+                        className="field-input task-comment-input"
+                        value={editingCommentBody}
+                        maxLength={10_000}
+                        onChange={(event) => setEditingCommentBody(event.target.value)}
+                        aria-label="编辑讨论"
+                      />
+                      <div className="task-comment-edit-actions">
+                        <button
+                          type="button"
+                          className="soft-button"
+                          disabled={commentBusy || !editingCommentBody.trim()}
+                          onClick={() => void commitCommentEdit()}
+                        >
+                          保存
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          disabled={commentBusy}
+                          onClick={() => {
+                            setEditingCommentId(undefined);
+                            setEditingCommentBody("");
+                          }}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="task-comment-body">{comment.body}</p>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+          <div className="task-comment-composer">
+            <textarea
+              className="field-input task-comment-input"
+              value={commentBody}
+              maxLength={10_000}
+              disabled={commentBusy}
+              onChange={(event) => setCommentBody(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  event.preventDefault();
+                  void addTaskComment();
+                }
+              }}
+              placeholder="写下这项任务的上下文…"
+              aria-label="新增任务讨论"
+            />
+            <button
+              type="button"
+              className="soft-button"
+              disabled={commentBusy || !commentBody.trim()}
+              onClick={() => void addTaskComment()}
+            >
+              <Send size={14} aria-hidden="true" />
+              {commentBusy ? "保存中…" : "添加讨论"}
+            </button>
+          </div>
+          <small className="field-hint task-comments-hint">
+            仅保存在本机；不会写回飞书，也不会在未授权备注范围时提供给 Agent。
+          </small>
+        </div>
+        <div className="detail-group">
           <h3>专注</h3>
           {task.focusStartedAt ? (
             <button
               type="button"
               className="soft-button"
-              onClick={() => void controller.pauseFocus(task.id)}
+              disabled={focusBusy}
+              onClick={() =>
+                void runFocusMutation(
+                  () => controller.pauseFocus(task.id),
+                  "专注已暂停",
+                )
+              }
             >
               <Pause size={15} />
-              暂停本次计时
+              {focusBusy ? "处理中…" : "暂停本次计时"}
             </button>
           ) : (
             <button
               type="button"
               className="soft-button"
-              onClick={() => void controller.startFocus(task.id)}
+              disabled={focusBusy}
+              onClick={() =>
+                void runFocusMutation(
+                  () => controller.startFocus(task.id),
+                  "已开始专注",
+                )
+              }
             >
               <Play size={15} />
-              开始处理
+              {focusBusy ? "处理中…" : "开始处理"}
             </button>
           )}
         </div>
@@ -2521,10 +7374,23 @@ function TaskInspector({
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => void controller.restore(task.id)}
+                disabled={restoreBusy}
+                onClick={() => {
+                  setRestoreBusy(true);
+                  void controller
+                    .restore(task.id)
+                    .then(() => notify("任务已恢复", "success"))
+                    .catch((reason) =>
+                      notify(
+                        reason instanceof Error ? reason.message : "恢复任务失败",
+                        "error",
+                      ),
+                    )
+                    .finally(() => setRestoreBusy(false));
+                }}
               >
                 <RotateCcw size={15} />
-                恢复任务
+                {restoreBusy ? "恢复中…" : "恢复任务"}
               </button>
               <button
                 type="button"
@@ -2551,10 +7417,12 @@ function TaskInspector({
       {pendingPatch && (
         <div className="modal-backdrop">
           <div
+            ref={recurrenceDialogRef}
             className="modal-sheet compact-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="recurrence-scope-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -2573,7 +7441,8 @@ function TaskInspector({
               <button
                 type="button"
                 className="soft-button"
-                onClick={() => setPendingPatch(undefined)}
+                ref={recurrenceCancelRef}
+                onClick={closePendingPatch}
               >
                 取消
               </button>
@@ -2581,11 +7450,7 @@ function TaskInspector({
               <button
                 type="button"
                 className="soft-button"
-                onClick={() => {
-                  const patch = pendingPatch;
-                  setPendingPatch(undefined);
-                  void applySave(patch, "this");
-                }}
+                onClick={() => applyPendingPatch("this")}
               >
                 仅本次
               </button>
@@ -2593,11 +7458,7 @@ function TaskInspector({
                 type="button"
                 className="soft-button"
                 disabled={pendingTemporalChange}
-                onClick={() => {
-                  const patch = pendingPatch;
-                  setPendingPatch(undefined);
-                  void applySave(patch, "future");
-                }}
+                onClick={() => applyPendingPatch("future")}
               >
                 本次及以后
               </button>
@@ -2605,17 +7466,94 @@ function TaskInspector({
                 type="button"
                 className="primary-button"
                 disabled={pendingTemporalChange}
-                onClick={() => {
-                  const patch = pendingPatch;
-                  setPendingPatch(undefined);
-                  void applySave(patch, "series");
-                }}
+                onClick={() => applyPendingPatch("series")}
               >
                 整个系列
               </button>
             </div>
           </div>
         </div>
+      )}
+      {attachmentPreview && (
+        <div
+          className="modal-backdrop attachment-preview-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeAttachmentPreview();
+            }
+          }}
+        >
+          <section
+            ref={attachmentDialogRef}
+            className="modal-sheet attachment-preview-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="attachment-preview-title"
+            tabIndex={-1}
+          >
+            <div className="modal-header">
+              <span className="feature-icon"><Eye size={19} /></span>
+              <div>
+                <h2 id="attachment-preview-title">{attachmentPreview.name}</h2>
+                <p>
+                  {attachmentPreview.kind === "text"
+                    ? `${attachmentPreview.mimeType} · ${attachmentPreview.bytes.toLocaleString()} bytes`
+                    : attachmentPreview.kind === "image"
+                      ? `${attachmentPreview.mimeType} · ${attachmentPreview.bytes.toLocaleString()} bytes`
+                      : attachmentPreview.reason === "too-large"
+                        ? "文件超过预览大小限制"
+                        : "此文件类型暂不支持内置预览"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                ref={attachmentCloseRef}
+                aria-label="关闭附件预览"
+                onClick={closeAttachmentPreview}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="attachment-preview-body">
+              {attachmentPreview.kind === "text" ? (
+                <pre className="attachment-preview-text">{attachmentPreview.content}</pre>
+              ) : attachmentPreview.kind === "image" ? (
+                <img className="attachment-preview-image" src={attachmentPreview.dataUrl} alt={attachmentPreview.name} />
+              ) : (
+                <div className="attachment-preview-empty" role="status">
+                  <FileText size={30} aria-hidden="true" />
+                  <strong>暂时不能在这里预览</strong>
+                  <span>你仍然可以打开原文件查看完整内容。</span>
+                </div>
+              )}
+            </div>
+            <div className="modal-actions attachment-preview-actions">
+              {attachmentPreviewSource && (
+                <button type="button" className="soft-button" onClick={() => void openTaskAttachment(attachmentPreviewSource)}>
+                  <ExternalLink size={14} /> 打开原文件
+                </button>
+              )}
+              <span className="action-spacer" />
+              <button
+                type="button"
+                className="primary-button"
+                onClick={closeAttachmentPreview}
+              >
+                完成
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {showTemplateSave && (
+        <TaskTemplateSaveSheet
+          task={task}
+          subtasks={subtasks}
+          onClose={closeTemplateSave}
+          onConfirm={saveAsTaskTemplate}
+        />
       )}
     </>
   );
@@ -2624,21 +7562,35 @@ function TaskInspector({
 function NewTaskSheet({
   onClose,
   controller,
+  projects = [],
+  lists = [],
   notify,
+  initialTitle = "",
+  initialNotes = "",
+  initialPlannedDate,
 }: {
   onClose: () => void;
   controller: TaskController;
+  projects?: TaskProject[];
+  lists?: TaskList[];
   notify: (message: string, kind?: ToastKind) => void;
+  initialTitle?: string;
+  initialNotes?: string;
+  initialPlannedDate?: string;
 }) {
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
+  const [title, setTitle] = useState(initialTitle);
+  const [notes, setNotes] = useState(initialNotes);
   const [source, setSource] = useState<TaskSourceType>("local");
-  const [plannedDate, setPlannedDate] = useState(dateKey());
+  const [plannedDate, setPlannedDate] = useState(initialPlannedDate ?? dateKey());
+  const [deferUntil, setDeferUntil] = useState("");
   const [startAt, setStartAt] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [reminderAt, setReminderAt] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [listId, setListId] = useState("");
+  const [sectionId, setSectionId] = useState("");
   const [tags, setTags] = useState("");
+  const [contexts, setContexts] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [estimatedMinutes, setEstimatedMinutes] = useState("");
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<
@@ -2647,8 +7599,16 @@ function NewTaskSheet({
   const [recurrenceInterval, setRecurrenceInterval] = useState(1);
   const [feishuStatus, setFeishuStatus] = useState<FeishuStatusView>();
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  useDialogFocus(dialogRef, titleInputRef, () => {
+    if (!submitting) onClose();
+  });
   useEffect(() => {
-    void window.desktopApi?.feishu.status().then(setFeishuStatus);
+    void window.desktopApi?.feishu
+      .status()
+      .then(setFeishuStatus)
+      .catch(() => undefined);
     return window.desktopApi?.events.onFeishuStatus(setFeishuStatus);
   }, []);
   const submit = async (event: FormEvent) => {
@@ -2686,9 +7646,12 @@ function NewTaskSheet({
             ? { type: "feishu", accountId: feishuStatus?.accountId }
             : { type: "local" },
         plannedDate: plannedDate || undefined,
+        deferUntil: deferUntil || undefined,
         startAt: startAtIso,
         dueAt: dueAtIso,
-        projectId: projectId.trim() || undefined,
+        projectId: resolveProjectInput(projectId, projects) || undefined,
+        listId: resolveListInput(listId, lists) || undefined,
+        sectionId: sectionId.trim() || undefined,
         tags: [
           ...new Set(
             tags
@@ -2696,6 +7659,15 @@ function NewTaskSheet({
               .map((tag) => tag.trim())
               .filter(Boolean),
           ),
+        ],
+        contexts: [
+          ...new Map(
+            contexts
+              .split(/[,，]/u)
+              .map((context) => context.trim().replace(/\s+/gu, " "))
+              .filter(Boolean)
+              .map((context) => [context.toLocaleLowerCase(), context] as const),
+          ).values(),
         ],
         priority,
         estimatedMinutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
@@ -2740,13 +7712,14 @@ function NewTaskSheet({
     <div
       className="modal-backdrop"
       role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <form
+        ref={dialogRef}
         className="modal-sheet new-task-sheet"
         onSubmit={(event) => void submit(event)}
         aria-label="新建任务"
         aria-busy={submitting}
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -2761,6 +7734,7 @@ function NewTaskSheet({
           <div className="detail-field">
             <label htmlFor="new-title">标题</label>
             <input
+              ref={titleInputRef}
               id="new-title"
               className="field-input"
               autoFocus
@@ -2799,10 +7773,46 @@ function NewTaskSheet({
             <input
               id="new-project"
               className="field-input"
+              list="new-local-project-options"
               value={projectId}
               onChange={(event) => setProjectId(event.target.value)}
               placeholder="未归类"
             />
+            <datalist id="new-local-project-options">
+              {projects.filter((project) => !project.archived).map((project) => (
+                <option key={project.id} value={project.name} label={project.id} />
+              ))}
+            </datalist>
+          </div>
+          <div className="detail-field">
+            <label htmlFor="new-list">清单</label>
+            <input
+              id="new-list"
+              className="field-input"
+              list="new-local-list-options"
+              value={listId}
+              onChange={(event) => setListId(event.target.value)}
+              placeholder="未归类"
+            />
+            <datalist id="new-local-list-options">
+              {lists.filter((list) => !list.archived).map((list) => (
+                <option key={list.id} value={list.name} label={list.id} />
+              ))}
+            </datalist>
+          </div>
+          <div className="detail-field">
+            <label htmlFor="new-section">分组标题</label>
+            <input
+              id="new-section"
+              className="field-input"
+              value={sectionId}
+              onChange={(event) => setSectionId(event.target.value)}
+              placeholder="例如：本周发布"
+              maxLength={80}
+            />
+            <small className="field-hint">
+              可选的本地标题，方便在列表中分组；不写回飞书
+            </small>
           </div>
           <div className="detail-field">
             <label htmlFor="new-tags">标签</label>
@@ -2813,6 +7823,19 @@ function NewTaskSheet({
               onChange={(event) => setTags(event.target.value)}
               placeholder="工作, 深度"
             />
+          </div>
+          <div className="detail-field">
+            <label htmlFor="new-contexts">情境</label>
+            <input
+              id="new-contexts"
+              className="field-input"
+              value={contexts}
+              onChange={(event) => setContexts(event.target.value)}
+              placeholder="办公室, 家, 出门"
+            />
+            <small className="field-hint">
+              手动情境，用于筛选和宠物建议；不申请定位，不同步飞书
+            </small>
           </div>
           <div className="detail-field">
             <label htmlFor="new-priority">优先级</label>
@@ -2840,6 +7863,17 @@ function NewTaskSheet({
               value={plannedDate}
               onChange={(event) => setPlannedDate(event.target.value)}
             />
+          </div>
+          <div className="detail-field">
+            <label htmlFor="new-defer-until">稍后安排</label>
+            <input
+              id="new-defer-until"
+              className="field-input"
+              type="date"
+              value={deferUntil}
+              onChange={(event) => setDeferUntil(event.target.value)}
+            />
+            <small className="field-hint">到这一天前不会出现在“今天”，仅本地</small>
           </div>
           <div className="detail-field">
             <label htmlFor="new-start">开始时间</label>
@@ -2968,14 +8002,43 @@ function AgentPage({
   notify,
   initialPrompt,
   onPromptConsumed,
+  initialConversationId,
+  onConversationConsumed,
 }: {
   controller: TaskController;
   notify: (message: string, kind?: ToastKind) => void;
   initialPrompt?: string;
   onPromptConsumed: () => void;
+  initialConversationId?: string;
+  onConversationConsumed: () => void;
 }) {
   const [proposal, setProposal] = useState(false);
   const [permission, setPermission] = useState(false);
+  const [agentActionItems, setAgentActionItems] = useState<{
+    sourceText: string;
+    drafts: CalendarActionItemDraft[];
+  }>();
+  const agentActionItemsReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const [agentResearchCard, setAgentResearchCard] = useState<{
+    taskId: string;
+    taskTitle: string;
+    sourceText: string;
+    draft: ReturnType<typeof buildAgentResearchCardDraft>;
+  }>();
+  const agentResearchCardReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const [agentCapabilities, setAgentCapabilities] = useState(
+    defaultSettings.agentCapabilities,
+  );
+  useEffect(() => {
+    if (!window.desktopApi) return undefined;
+    void window.desktopApi.settings
+      .get()
+      .then((settings) => setAgentCapabilities(settings.agentCapabilities))
+      .catch(() => undefined);
+    return window.desktopApi.events.onSettingsChanged((settings) =>
+      setAgentCapabilities(settings.agentCapabilities),
+    );
+  }, []);
   const fallback = async (text: string): Promise<string> => {
     if (/移到明天|改到明天|批量/u.test(text)) {
       setProposal(true);
@@ -2989,8 +8052,14 @@ function AgentPage({
     return `模型未启用。今天这个视图有 ${controller.tasks.filter((task) => task.status === "open").length} 项未完成；启用模型后可用自然语言查询、创建和整理任务。`;
   };
   const chat = useAgentChat({
-    initialMessage: `我可以查询、创建和整理任务。当前有 ${controller.tasks.length} 项任务在这个视图里。`,
+    // The Agent page stays mounted while navigation changes. Reflect the
+    // loading state first, then refresh the generated welcome when the task
+    // snapshot arrives so it cannot permanently show the loading-time count.
+    initialMessage: controller.loading
+      ? "我可以查询、创建和整理任务。正在读取当前视图的任务…"
+      : `我可以查询、创建和整理任务。当前有 ${controller.tasks.length} 项任务在这个视图里。`,
     onFallback: fallback,
+    persistConversation: true,
   });
   const {
     messages,
@@ -2999,6 +8068,7 @@ function AgentPage({
     isSending,
     runState,
     agentStatus,
+    toolActivity,
     approval,
     activeRunId,
     send,
@@ -3006,9 +8076,55 @@ function AgentPage({
     respondToApproval,
     appendAssistant,
     refreshStatus,
+    conversationId,
+    conversationSessions,
+    hasStoredConversation,
+    newConversation,
+    clearConversation,
+    switchConversation,
+    removeConversation,
+    renameConversation,
+    toggleConversationPinned,
+    exportConversation,
   } = chat;
+  useEffect(() => {
+    if (!initialConversationId) return;
+    if (!conversationSessions.some((session) => session.conversationId === initialConversationId)) {
+      return;
+    }
+    if (switchConversation(initialConversationId)) {
+      onConversationConsumed();
+    }
+  }, [conversationSessions, initialConversationId, onConversationConsumed, switchConversation]);
   const agentThreadRef = useRef<HTMLElement>(null);
   const chatFollowsOutputRef = useRef(true);
+  const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
+  const [conversationSearch, setConversationSearch] = useState("");
+  const [editingConversationId, setEditingConversationId] = useState<string>();
+  const [conversationTitleDraft, setConversationTitleDraft] = useState("");
+  const visibleConversationSessions = filterStoredAgentConversations(
+    conversationSessions,
+    conversationSearch,
+  );
+  const [recentContexts, setRecentContexts] = useState<ContextCaptureHistoryItem[]>(
+    () => readContextCaptureHistory(),
+  );
+  useEffect(() => {
+    const refreshRecentContexts = () =>
+      setRecentContexts(readContextCaptureHistory());
+    window.addEventListener(
+      CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+      refreshRecentContexts,
+    );
+    window.addEventListener("storage", refreshRecentContexts);
+    return () => {
+      window.removeEventListener(
+        CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+        refreshRecentContexts,
+      );
+      window.removeEventListener("storage", refreshRecentContexts);
+    };
+  }, []);
   useEffect(() => {
     if (!chatFollowsOutputRef.current) return;
     const frame = window.requestAnimationFrame(() => {
@@ -3021,6 +8137,105 @@ function AgentPage({
     chatFollowsOutputRef.current = true;
     void send();
   };
+  const submitAgentSuggestion = (prompt: string): void => {
+    chatFollowsOutputRef.current = true;
+    void send(prompt);
+  };
+  const downloadConversation = (): void => {
+    const content = exportConversation();
+    if (typeof URL.createObjectURL !== "function") {
+      notify("当前环境暂不支持导出文件", "error");
+      return;
+    }
+    const url = URL.createObjectURL(
+      new Blob([content], { type: "text/markdown;charset=utf-8" }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `todo-agent-conversation-${dateKey()}.md`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    notify("对话已导出为 Markdown", "success");
+  };
+  const openAgentActionItems = (text: string, trigger?: HTMLElement): void => {
+    const drafts = extractActionItemsFromText({
+      id: `agent-reply-${crypto.randomUUID()}`,
+      label: "Agent 研究回复",
+      text,
+      plannedDate: dateKey(),
+    });
+    if (!drafts.length) {
+      notify("回复中没有识别到明确行动项", "info");
+      return;
+    }
+    agentActionItemsReturnFocusRef.current = trigger;
+    setAgentActionItems({ sourceText: text, drafts });
+  };
+  const closeAgentActionItems = (): void => {
+    setAgentActionItems(undefined);
+    const returnFocus = agentActionItemsReturnFocusRef.current;
+    agentActionItemsReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  const openAgentResearchCard = (text: string, trigger?: HTMLElement): void => {
+    const task = controller.selected;
+    if (!task) {
+      notify("请先在任务页选中要关联的任务", "info");
+      return;
+    }
+    if ((task.researchCards ?? []).length >= 20) {
+      notify("当前任务最多保留 20 张研究卡", "error");
+      return;
+    }
+    agentResearchCardReturnFocusRef.current = trigger;
+    setAgentResearchCard({
+      taskId: task.id,
+      taskTitle: task.title,
+      sourceText: text,
+      draft: buildAgentResearchCardDraft(text, dateKey()),
+    });
+  };
+  const closeAgentResearchCard = (): void => {
+    setAgentResearchCard(undefined);
+    const returnFocus = agentResearchCardReturnFocusRef.current;
+    agentResearchCardReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  const saveAgentResearchCard = async (
+    input: AgentResearchCardInput,
+  ): Promise<void> => {
+    const capture = agentResearchCard;
+    if (!capture) return;
+    const task =
+      controller.selected?.id === capture.taskId
+        ? controller.selected
+        : controller.tasks.find((candidate) => candidate.id === capture.taskId);
+    if (!task) throw new Error("关联任务已不存在，请重新选择任务后再试");
+    const existingCards = task.researchCards ?? [];
+    if (existingCards.length >= 20)
+      throw new Error("当前任务最多保留 20 张研究卡");
+    const card: TaskResearchCard = {
+      id: crypto.randomUUID(),
+      title: input.title,
+      ...(input.url ? { url: input.url } : {}),
+      summary: input.summary,
+      actionItems: input.actionItems,
+      capturedAt: new Date().toISOString(),
+    };
+    await controller.update(task.id, {
+      researchCards: [...existingCards, card],
+    });
+    notify(`研究卡已保存到“${task.title}”`, "success");
+    closeAgentResearchCard();
+  };
   useEffect(() => {
     if (!initialPrompt) return;
     setInput(initialPrompt);
@@ -3029,6 +8244,7 @@ function AgentPage({
   const affected = controller.tasks
     .filter((task) => task.source.type === "feishu" && task.status === "open")
     .slice(0, 3);
+  const agentQuickSuggestions = buildAgentQuickSuggestions(controller.tasks);
   const execute = async () => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -3081,7 +8297,197 @@ function AgentPage({
             <h1>任务助理</h1>
             <p>任务优先；所有工具调用都经过权限引擎 · {runState}</p>
           </div>
+          <div className="agent-heading-actions">
+            {hasStoredConversation && (
+              <span className="agent-history-badge">已恢复本机对话</span>
+            )}
+            <button
+              type="button"
+              className="soft-button"
+              aria-expanded={conversationMenuOpen}
+              aria-controls="agent-conversation-panel"
+              disabled={isSending}
+              onClick={() => {
+                setConversationMenuOpen((value) => !value);
+                setConversationSearch("");
+                setEditingConversationId(undefined);
+              }}
+              title="切换本机保存的 Agent 会话"
+            >
+              <History size={14} /> 会话
+            </button>
+            <button
+              type="button"
+              className="soft-button"
+              disabled={isSending}
+              onClick={() => {
+                setConversationMenuOpen(false);
+                setConversationSearch("");
+                setEditingConversationId(undefined);
+                newConversation();
+              }}
+              title="开始新的本机会话；当前会话会保留在本机历史中"
+            >
+              <Plus size={14} /> 新对话
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="导出当前 Agent 对话"
+              title="导出当前 Agent 对话为 Markdown"
+              disabled={isSending}
+              onClick={downloadConversation}
+            >
+              <Download size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="清除当前本机会话并开始新会话"
+              title="清除当前本机会话并开始新会话"
+              disabled={isSending}
+              onClick={() => {
+                clearConversation();
+                notify("当前本机会话已清除", "success");
+              }}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
         </div>
+        {conversationMenuOpen && (
+          <section
+            id="agent-conversation-panel"
+            className="agent-session-panel"
+            aria-label="本机 Agent 会话"
+          >
+            <div className="agent-session-panel-heading">
+              <div>
+                <strong>本机会话</strong>
+                <small>最多保留 8 个；不会上传或进入飞书</small>
+              </div>
+              <span>
+                {conversationSearch
+                  ? `${visibleConversationSessions.length}/${conversationSessions.length}`
+                  : `${conversationSessions.length}/8`}
+              </span>
+            </div>
+            {conversationSessions.length > 0 && (
+              <label className="agent-session-search">
+                <Search size={14} aria-hidden="true" />
+                <input
+                  type="search"
+                  value={conversationSearch}
+                  onChange={(event) => setConversationSearch(event.target.value)}
+                  placeholder="搜索本机会话…"
+                  aria-label="搜索本机会话"
+                />
+              </label>
+            )}
+            {conversationSessions.length === 0 ? (
+              <p className="agent-session-empty">发送一条消息后，这里会保留可切换的会话。</p>
+            ) : visibleConversationSessions.length === 0 ? (
+              <p className="agent-session-empty">没有找到匹配的本机会话。</p>
+            ) : (
+              <div className="agent-session-list">
+                {visibleConversationSessions.map((session) => (
+                  <div className="agent-session-row" key={session.conversationId}>
+                    {editingConversationId === session.conversationId ? (
+                      <form
+                        className="agent-session-rename"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          if (renameConversation(session.conversationId, conversationTitleDraft.trim())) {
+                            notify("会话名称已更新", "success");
+                            setEditingConversationId(undefined);
+                          }
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          value={conversationTitleDraft}
+                          maxLength={80}
+                          aria-label="会话名称"
+                          onChange={(event) => setConversationTitleDraft(event.target.value)}
+                        />
+                        <button type="submit" className="icon-button" aria-label="保存会话名称" disabled={!conversationTitleDraft.trim()}>
+                          <Check size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label="取消重命名"
+                          onClick={() => setEditingConversationId(undefined)}
+                        >
+                          <X size={14} />
+                        </button>
+                      </form>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`agent-session-select ${session.conversationId === conversationId ? "is-active" : ""}`}
+                        disabled={isSending || session.conversationId === conversationId}
+                        onClick={() => {
+                          if (switchConversation(session.conversationId)) {
+                            setConversationMenuOpen(false);
+                            setConversationSearch("");
+                            setEditingConversationId(undefined);
+                          }
+                        }}
+                      >
+                        <strong>{session.pinnedAt && <Pin size={12} aria-label="已置顶" />}{conversationTitle(session)}</strong>
+                        <small>{formatDateTime(session.updatedAt)}</small>
+                      </button>
+                    )}
+                    <div className="agent-session-actions">
+                      <button
+                        type="button"
+                        className={`icon-button agent-session-pin ${session.pinnedAt ? "is-active" : ""}`}
+                        aria-label={session.pinnedAt ? `取消置顶：${conversationTitle(session)}` : `置顶会话：${conversationTitle(session)}`}
+                        title={session.pinnedAt ? "取消置顶" : "置顶会话"}
+                        disabled={isSending || editingConversationId === session.conversationId}
+                        onClick={() => {
+                          if (toggleConversationPinned(session.conversationId)) {
+                            notify(session.pinnedAt ? "会话已取消置顶" : "会话已置顶", "success");
+                          }
+                        }}
+                      >
+                        {session.pinnedAt ? <PinOff size={14} /> : <Pin size={14} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button agent-session-rename-trigger"
+                        aria-label={`重命名会话：${conversationTitle(session)}`}
+                        title="重命名会话"
+                        disabled={isSending || editingConversationId !== undefined}
+                        onClick={() => {
+                          setEditingConversationId(session.conversationId);
+                          setConversationTitleDraft(conversationTitle(session));
+                        }}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-button agent-session-delete"
+                      aria-label={`删除会话：${conversationTitle(session)}`}
+                      title="删除本机会话"
+                      disabled={isSending}
+                      onClick={() => {
+                        if (removeConversation(session.conversationId)) {
+                          notify("本机会话已删除", "success");
+                        }
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
         {messages.map((message, index) => (
           <div
             key={message.id ?? `${message.role}-${index}`}
@@ -3091,7 +8497,14 @@ function AgentPage({
           >
             {message.role === "assistant" ? (
               message.text ? (
-                <AgentMarkdown text={message.text} />
+                <AgentMarkdown
+                  text={message.text}
+                  streaming={message.streaming}
+                  onExtractActionItems={openAgentActionItems}
+                  onSaveResearchCard={
+                    controller.selected ? openAgentResearchCard : undefined
+                  }
+                />
               ) : (
                 <span className="streaming-indicator" role="status">
                   <i />
@@ -3105,6 +8518,24 @@ function AgentPage({
             )}
           </div>
         ))}
+        {!isSending && !input.trim() && messages.at(-1)?.role === "assistant" && (
+          <div className="agent-quick-suggestions" role="group" aria-label="快捷提问">
+            <span>可以先从这里开始</span>
+            <div>
+              {agentQuickSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.label}
+                  type="button"
+                  className="agent-quick-suggestion"
+                  onClick={() => submitAgentSuggestion(suggestion.prompt)}
+                >
+                  {suggestion.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <AgentRunActivity activities={toolActivity} active={isSending} />
         {proposal && (
           <div className="action-preview">
             <div className="preview-header">
@@ -3151,6 +8582,21 @@ function AgentPage({
             </div>
           </div>
         )}
+        {!input.trim() && !isSending && recentContexts.length > 0 && (
+          <ContextCaptureHistory
+            items={recentContexts}
+            onSelect={(item) =>
+              setInput((current) =>
+                current.trim() ? `${current}\n\n${item.text}` : item.text,
+              )
+            }
+            onClear={() => {
+              clearContextCaptureHistory();
+              setRecentContexts([]);
+            }}
+          />
+        )}
+        <AgentContextControls chat={chat} />
         <div className="composer">
           <textarea
             value={input}
@@ -3211,16 +8657,32 @@ function AgentPage({
             <EyeOff size={15} />
             默认不包含附件内容
           </div>
+          <div className="context-line context-line-muted">
+            <Info size={15} />
+            对话仅保存在本机；是否发送历史由“聊天历史”范围控制
+          </div>
         </div>
         <div className="context-block">
           <h3>能力</h3>
           <div className="chip-row">
-            <span className="chip">任务读写</span>
-            <span className="chip">飞书同步</span>
-            <span className="chip">网页研究</span>
-            <span className="chip">文件与终端</span>
-            <span className="chip">剪贴板与屏幕</span>
+            {AGENT_CAPABILITY_DESCRIPTORS.map((descriptor) => (
+              <span
+                className={`chip ${agentCapabilities[descriptor.key] ? "is-enabled" : "is-disabled"}`}
+                key={descriptor.key}
+                title={
+                  agentCapabilities[descriptor.key]
+                    ? descriptor.description
+                    : `${descriptor.label}已关闭，请在权限中心重新开启`
+                }
+              >
+                {descriptor.label}
+                {!agentCapabilities[descriptor.key] && " · 已关"}
+              </span>
+            ))}
           </div>
+          <small className="context-line-muted">
+            能力关闭会从下一次运行的工具列表中移除；数据范围仍按隐私设置执行。
+          </small>
         </div>
         <div className="context-block">
           <h3>运行</h3>
@@ -3244,6 +8706,50 @@ function AgentPage({
           title={`允许 Agent 更新 ${affected.length} 个任务？`}
           onDeny={() => setPermission(false)}
           onAllow={() => void execute()}
+        />
+      )}
+      {agentActionItems && (
+        <AgentActionItemsSheet
+          sourceLabel="Agent 研究回复"
+          sourceText={agentActionItems.sourceText}
+          drafts={agentActionItems.drafts}
+          onClose={closeAgentActionItems}
+          onConfirm={async (items) => {
+            let created = 0;
+            try {
+              for (const item of items) {
+                await controller.create(
+                  {
+                    title: item.title,
+                    notes: item.notes,
+                    plannedDate: item.plannedDate || undefined,
+                    source: { type: "local" },
+                    sync: { status: "local" },
+                  },
+                  { selectCreated: false },
+                );
+                created += 1;
+              }
+            } catch (reason) {
+              const detail = reason instanceof Error ? reason.message : "未知错误";
+              throw new Error(
+                created > 0
+                  ? `已创建 ${created}/${items.length} 项，剩余行动项未创建：${detail}`
+                  : detail,
+              );
+            }
+            notify(`已创建 ${created} 项本地行动任务`, "success");
+            closeAgentActionItems();
+          }}
+        />
+      )}
+      {agentResearchCard && (
+        <AgentResearchCardSheet
+          taskTitle={agentResearchCard.taskTitle}
+          sourceText={agentResearchCard.sourceText}
+          draft={agentResearchCard.draft}
+          onClose={closeAgentResearchCard}
+          onConfirm={saveAgentResearchCard}
         />
       )}
       {approval && (
@@ -3303,6 +8809,31 @@ function PermissionSheet({
   onAllow: () => void;
   onAllowForHour?: () => void | Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const denyButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  useEffect(() => {
+    const activeElement = document.activeElement;
+    returnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    return () => {
+      const returnFocus = returnFocusRef.current;
+      if (!returnFocus) return;
+      window.requestAnimationFrame(() => {
+        if (
+          !returnFocus.isConnected ||
+          returnFocus.hasAttribute("disabled") ||
+          returnFocus.getAttribute("aria-disabled") === "true"
+        ) {
+          return;
+        }
+        returnFocus.focus({ preventScroll: true });
+      });
+    };
+  }, []);
+  useDialogFocus(dialogRef, denyButtonRef, onDeny);
   const reviewDescription = !approval
     ? "这是批量操作；请确认精确目标与可逆性。"
     : approval.toolName.startsWith("task_bulk_")
@@ -3314,10 +8845,12 @@ function PermissionSheet({
   return (
     <div className="modal-backdrop">
       <div
+        ref={dialogRef}
         className="modal-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="permission-title"
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -3380,7 +8913,12 @@ function PermissionSheet({
           标准模式下，批量、删除或外部修改不会自动记住授权。
         </div>
         <div className="modal-actions">
-          <button type="button" className="soft-button" onClick={onDeny}>
+          <button
+            ref={denyButtonRef}
+            type="button"
+            className="soft-button"
+            onClick={onDeny}
+          >
             拒绝
           </button>
           <span className="action-spacer" />
@@ -3411,14 +8949,44 @@ function ActivityPage({
 }) {
   const [records, setRecords] = useState<AuditRecord[]>([]);
   const [selected, setSelected] = useState<AuditRecord>();
+  const auditDialogRef = useRef<HTMLDivElement>(null);
+  const auditDoneButtonRef = useRef<HTMLButtonElement>(null);
+  const auditReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const rememberAuditTrigger = (trigger: HTMLElement): void => {
+    auditReturnFocusRef.current = trigger;
+  };
+  const closeAuditDetail = (): void => {
+    setSelected(undefined);
+    const returnFocus = auditReturnFocusRef.current;
+    auditReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (
+        !returnFocus.isConnected ||
+        returnFocus.hasAttribute("disabled") ||
+        returnFocus.getAttribute("aria-disabled") === "true"
+      ) {
+        return;
+      }
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  useDialogFocus(
+    auditDialogRef,
+    auditDoneButtonRef,
+    closeAuditDetail,
+    Boolean(selected),
+  );
   useEffect(() => {
     void window.desktopApi?.agent
       .audit(300)
-      .then((value) => setRecords(value.toReversed()));
+      .then((value) => setRecords(value.toReversed()))
+      .catch(() => undefined);
     return window.desktopApi?.events.onAgentEvent(() => {
       void window.desktopApi?.agent
         .audit(300)
-        .then((value) => setRecords(value.toReversed()));
+        .then((value) => setRecords(value.toReversed()))
+        .catch(() => undefined);
     });
   }, []);
   const exportAudit = async () => {
@@ -3471,6 +9039,14 @@ function ActivityPage({
           </button>
         </div>
       </div>
+      <ExternalAgentSessionsPanel notify={notify} />
+      <div className="activity-section-heading">
+        <div>
+          <span>本机操作记录</span>
+          <p>Agent 工具调用经过脱敏，并由哈希链防篡改</p>
+        </div>
+        <small>{items.length} 条</small>
+      </div>
       <div className="task-list">
         {items.map((item) => (
           <div key={`${item.sequence}-${item.eventHash}`} className="task-row">
@@ -3499,7 +9075,10 @@ function ActivityPage({
             <button
               type="button"
               className="ghost-button"
-              onClick={() => setSelected(item)}
+              onClick={(event) => {
+                rememberAuditTrigger(event.currentTarget);
+                setSelected(item);
+              }}
             >
               详情
             </button>
@@ -3509,10 +9088,12 @@ function ActivityPage({
       {selected && (
         <div className="modal-backdrop">
           <div
+            ref={auditDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="audit-detail-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -3559,7 +9140,8 @@ function ActivityPage({
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => setSelected(undefined)}
+                ref={auditDoneButtonRef}
+                onClick={closeAuditDetail}
               >
                 完成
               </button>
@@ -3571,6 +9153,107 @@ function ActivityPage({
   );
 }
 
+function activityAgeLabel(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "时间未知";
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1_000));
+  if (seconds < 5) return "刚刚";
+  if (seconds < 60) return `${seconds} 秒前`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} 小时前` : `${Math.floor(hours / 24)} 天前`;
+}
+
+function ExternalAgentSessionsPanel({
+  notify,
+}: {
+  notify: (message: string, kind?: ToastKind) => void;
+}) {
+  const [snapshot, setSnapshot] = useState<AgentActivitySnapshot>();
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = useCallback(async () => {
+    const bridge = window.desktopApi?.agentActivity;
+    if (!bridge) return;
+    setRefreshing(true);
+    try {
+      setSnapshot(await bridge.snapshot());
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "读取外部 Agent 状态失败", "error");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [notify]);
+  useEffect(() => {
+    void refresh();
+    const off = window.desktopApi?.events.onAgentActivity((next) => setSnapshot(next));
+    return () => off?.();
+  }, [refresh]);
+  const sessions = snapshot?.sessions ?? [];
+  return (
+    <section className="activity-agent-panel" aria-labelledby="external-agent-sessions-title">
+      <div className="activity-agent-panel-header">
+        <div>
+          <span className="activity-panel-kicker"><Activity size={13} /> 实时活动</span>
+          <h2 id="external-agent-sessions-title">外部 Agent 会话</h2>
+          <p>
+            {snapshot?.activeSessionCount
+              ? `${snapshot.activeSessionCount} 个会话正在被 Todo Pet 观察`
+              : "连接 Claude、Codex、OpenClaw 等 Agent 后，它们会在这里出现"}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="ghost-button activity-agent-refresh"
+          onClick={() => void refresh()}
+          disabled={refreshing}
+          aria-label="刷新外部 Agent 会话"
+        >
+          <RefreshCw size={14} className={refreshing ? "spin" : undefined} />
+          刷新
+        </button>
+      </div>
+      {sessions.length === 0 ? (
+        <div className="activity-agent-empty">
+          <Sparkles size={20} />
+          <div>
+            <strong>还没有实时会话</strong>
+            <p>在设置 → 模型与 Agent 中开启桥接，并把 hook 指向本机接入示例。</p>
+          </div>
+        </div>
+      ) : (
+        <div className="activity-agent-session-grid">
+          {sessions.map((session) => (
+            <article
+              className={`activity-agent-session is-${session.state}`}
+              key={`${session.agentId}:${session.sessionId}`}
+            >
+              <div className="activity-agent-session-heading">
+                <span className="activity-agent-state-dot" aria-hidden="true" />
+                <div>
+                  <strong>{session.sessionTitle || session.sessionId}</strong>
+                  <small>{session.agentName} · {externalAgentStateLabels[session.state]}</small>
+                </div>
+                <time dateTime={session.lastEventAt}>{activityAgeLabel(session.lastEventAt)}</time>
+              </div>
+              <div className="activity-agent-session-meta">
+                {session.toolName && <span>工具 · {session.toolName}</span>}
+                {session.model && <span>模型 · {session.model}</span>}
+                {session.workspace && <span>工作区 · {session.workspace}</span>}
+                {session.subagentCount > 0 && <span>子任务 · {session.subagentCount}</span>}
+              </div>
+              <small className="activity-agent-session-event">最近事件：{session.event}</small>
+            </article>
+          ))}
+        </div>
+      )}
+      <p className="activity-agent-boundary">
+        只显示状态、会话和工具名称；Todo Agent 不会替外部 Agent 批准权限，也不会保存其提示词或文件内容。
+      </p>
+    </section>
+  );
+}
+
 function SyncPage({
   notify,
 }: {
@@ -3578,6 +9261,7 @@ function SyncPage({
 }) {
   const [status, setStatus] = useState<FeishuStatusView>();
   const [conflicts, setConflicts] = useState<FeishuConflictView[]>([]);
+  const [lastReport, setLastReport] = useState<FeishuSyncReportView>();
   const [busy, setBusy] = useState(false);
   const refresh = useCallback(async () => {
     if (!window.desktopApi) return;
@@ -3628,6 +9312,7 @@ function SyncPage({
     setBusy(true);
     try {
       const report = await window.desktopApi.feishu.syncNow(forceFull);
+      setLastReport(report);
       if (report.issue) {
         notify(
           feishuSyncIssueCopy(report.issue),
@@ -3696,8 +9381,12 @@ function SyncPage({
     }
     return value || "—";
   };
-  const statusLabel =
-    status?.state === "connected"
+  const statusVisualState = feishuSyncVisualState(status);
+  const statusLabel = status?.lastError
+    ? statusVisualState === "pending"
+      ? "同步等待处理"
+      : "同步异常"
+    : status?.state === "connected"
       ? "已连接"
       : status?.state === "syncing"
         ? "同步中"
@@ -3715,9 +9404,17 @@ function SyncPage({
         </div>
         <div className="page-actions">
           <span
-            className={`status-pill ${status?.connected ? "success" : status?.lastError ? "warning" : ""}`}
+            className={`status-pill ${statusVisualState === "error" ? "danger" : statusVisualState === "pending" ? "warning" : status?.connected ? "success" : ""}`}
           >
-            {status?.connected ? <CloudCheck size={15} /> : <Cloud size={15} />}
+            {statusVisualState === "error" ? (
+              <ShieldAlert size={15} />
+            ) : statusVisualState === "pending" ? (
+              <RefreshCw size={15} />
+            ) : status?.connected ? (
+              <CloudCheck size={15} />
+            ) : (
+              <Cloud size={15} />
+            )}
             {statusLabel}
           </span>
           {status?.connected ? (
@@ -3755,6 +9452,31 @@ function SyncPage({
           <small>上次同步：{formatDateTime(status.lastSyncAt)}</small>
         )}
       </section>
+      {lastReport && (() => {
+        const summary = summarizeFeishuSyncReport(lastReport);
+        return (
+          <section
+            className={`sync-run-summary is-${summary.tone}`}
+            aria-label="最近一次同步摘要"
+            aria-live="polite"
+          >
+            <div className="sync-run-summary-heading">
+              <div>
+                <strong>{summary.statusLabel}</strong>
+                <span>{summary.modeLabel}</span>
+              </div>
+              <span className="sync-run-summary-time">刚刚完成</span>
+            </div>
+            <div className="sync-run-summary-metrics">
+              <span><b>{lastReport.pushed}</b> 上传</span>
+              <span><b>{lastReport.pulled}</b> 拉取</span>
+              <span><b>{lastReport.deleted}</b> 删除</span>
+              <span><b>{lastReport.conflicts.length}</b> 冲突</span>
+            </div>
+            <p>{summary.detail}</p>
+          </section>
+        );
+      })()}
       {status?.lastError && (
         <div className="conflict-banner">
           <AlertTriangle size={19} />
@@ -3852,10 +9574,39 @@ type SettingsSection =
   | "general"
   | "floating"
   | "notifications"
+  | "automations"
   | "integrations"
   | "ai"
   | "permissions"
   | "privacy";
+
+const externalAgentOptions: Array<{ id: ExternalAgentId; label: string; hint: string }> = [
+  { id: "claude-code", label: "Claude Code", hint: "Claude Code hooks" },
+  { id: "codex", label: "Codex CLI", hint: "Codex session hooks" },
+  { id: "copilot-cli", label: "Copilot CLI", hint: "GitHub Copilot CLI" },
+  { id: "gemini-cli", label: "Gemini CLI", hint: "Gemini CLI hooks" },
+  { id: "antigravity-cli", label: "Antigravity", hint: "agy 状态事件" },
+  { id: "cursor-agent", label: "Cursor Agent", hint: "Cursor hooks" },
+  { id: "codebuddy", label: "CodeBuddy", hint: "Claude-compatible hooks" },
+  { id: "workbuddy", label: "WorkBuddy", hint: "WorkBuddy hooks" },
+  { id: "kiro-cli", label: "Kiro CLI", hint: "Kiro agent hooks" },
+  { id: "kimi-cli", label: "Kimi Code", hint: "Kimi-CLI hooks" },
+  { id: "qwen-code", label: "Qwen Code", hint: "Qwen hooks" },
+  { id: "zcode", label: "ZCode", hint: "ZCode hooks" },
+  { id: "codewhale", label: "CodeWhale", hint: "CodeWhale hooks" },
+  { id: "openclaw", label: "OpenClaw", hint: "OpenClaw events" },
+  { id: "hermes", label: "Hermes", hint: "Hermes events" },
+  { id: "opencode", label: "opencode", hint: "opencode events" },
+  { id: "mimocode", label: "MiMo Code", hint: "MiMo plugin events" },
+  { id: "pi", label: "Pi", hint: "Pi extension events" },
+  { id: "qoder", label: "Qoder", hint: "Qoder hooks" },
+  { id: "qoderwork", label: "QoderWork", hint: "QoderWork hooks" },
+  { id: "qwenwork", label: "QwenWork", hint: "QwenWork hooks" },
+  { id: "reasonix-cli", label: "Reasonix", hint: "Reasonix hooks" },
+  { id: "traecode", label: "TraeCode", hint: "Trae hooks" },
+  { id: "deepseek-harness", label: "DeepSeek Harness", hint: "实验性适配" },
+  { id: "custom", label: "自定义 Agent", hint: "兼容 HTTP /state" },
+];
 
 function Switch({
   checked,
@@ -3883,13 +9634,14 @@ function usePetData() {
   const [snapshot, setSnapshot] = useState<PetSnapshot>();
   const [weather, setWeather] = useState<WeatherSnapshot>();
   const refresh = useCallback(async () => {
-    if (!window.desktopApi) return;
+    if (!window.desktopApi) return undefined;
     const [nextSnapshot, nextWeather] = await Promise.all([
       window.desktopApi.pet.snapshot(),
       window.desktopApi.pet.weather().catch(() => undefined),
     ]);
     setSnapshot(nextSnapshot);
     setWeather(nextWeather);
+    return nextSnapshot;
   }, []);
   useEffect(() => {
     void refresh();
@@ -3928,17 +9680,749 @@ function clockDuration(seconds: number): string {
     : `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
-function PetHomePage({
+function PetPlayground({
+  disabled,
+  onComplete,
+}: {
+  disabled: boolean;
+  onComplete: (
+    game: "breathing" | "star-catch",
+    score: number,
+    durationSeconds: number,
+  ) => void;
+}) {
+  const breathingLabels = ["吸气", "停留", "呼气", "停留"] as const;
+  const [breathingPhase, setBreathingPhase] = useState<number>();
+  const [starRunning, setStarRunning] = useState(false);
+  const [starScore, setStarScore] = useState(0);
+  const [starSeconds, setStarSeconds] = useState(20);
+  const [starPosition, setStarPosition] = useState({ x: 48, y: 48 });
+  useEffect(() => {
+    if (breathingPhase === undefined) return undefined;
+    const timer = window.setTimeout(() => {
+      if (breathingPhase >= breathingLabels.length - 1) {
+        setBreathingPhase(undefined);
+        onComplete("breathing", 4, 16);
+      } else {
+        setBreathingPhase((current) => (current ?? 0) + 1);
+      }
+    }, 4_000);
+    return () => window.clearTimeout(timer);
+  }, [breathingPhase]);
+  useEffect(() => {
+    if (!starRunning) return undefined;
+    const timer = window.setInterval(() => {
+      setStarSeconds((seconds) => {
+        if (seconds > 1) return seconds - 1;
+        window.clearInterval(timer);
+        setStarRunning(false);
+        setStarScore((score) => {
+          onComplete("star-catch", score, 20);
+          return score;
+        });
+        return 0;
+      });
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [starRunning]);
+  const startStars = () => {
+    setStarScore(0);
+    setStarSeconds(20);
+    setStarPosition({ x: 48, y: 48 });
+    setStarRunning(true);
+  };
+  return (
+    <div className="pet-games-grid">
+      <section className="pet-game-card breathing-game">
+        <span className="pet-game-kicker">安静小游戏</span>
+        <h2>和我呼吸 16 秒</h2>
+        <p>没有连胜和惩罚，只把注意力轻轻带回身体。</p>
+        <div
+          className={`pet-breathing-orb ${breathingPhase !== undefined ? "is-running" : ""}`}
+          data-phase={breathingPhase ?? "idle"}
+          aria-live="polite"
+        >
+          {breathingPhase === undefined ? "准备" : breathingLabels[breathingPhase]}
+        </div>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={disabled || breathingPhase !== undefined}
+          onClick={() => setBreathingPhase(0)}
+        >
+          <Play size={15} /> 开始呼吸
+        </button>
+      </section>
+      <section className="pet-game-card star-game">
+        <span className="pet-game-kicker">反应小游戏</span>
+        <h2>接住任务星</h2>
+        <p>20 秒轻松点一点，结束后就回到手头的事。</p>
+        <div className="pet-star-field" aria-label="接住任务星游戏区">
+          {starRunning ? (
+            <button
+              type="button"
+              className="pet-catch-star"
+              style={{
+                left: `${starPosition.x}%`,
+                top: `${starPosition.y}%`,
+              }}
+              aria-label="接住星星"
+              onClick={() => {
+                setStarScore((score) => score + 1);
+                setStarPosition({
+                  x: 10 + Math.round(Math.random() * 78),
+                  y: 12 + Math.round(Math.random() * 70),
+                });
+              }}
+            >
+              ✦
+            </button>
+          ) : (
+            <span>✦</span>
+          )}
+          <small>{starRunning ? `${starSeconds}s · ${starScore} 颗` : `最好：${starScore} 颗`}</small>
+        </div>
+        <button
+          type="button"
+          className="soft-button"
+          disabled={disabled || starRunning}
+          onClick={startStars}
+        >
+          <Sparkles size={15} /> 开始接星星
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function ElasticHabitsPanel({
+  habits,
+  refresh,
   notify,
 }: {
+  habits: PetSnapshot["habits"];
+  refresh: () => Promise<PetSnapshot | undefined>;
   notify: (message: string, kind?: ToastKind) => void;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  const [editingId, setEditingId] = useState<string>();
+  const [draft, setDraft] = useState({ label: "", hint: "", cadenceMinutes: 90 });
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const run = async (operation: () => Promise<unknown>, success: string): Promise<boolean> => {
+    setBusy(true);
+    try {
+      await operation();
+      await refresh();
+      notify(success, "success");
+      return true;
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "习惯操作失败", "error");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const beginEdit = (habit: PetSnapshot["habits"][number]) => {
+    setEditingId(habit.id);
+    setDraft({ label: habit.label, hint: habit.hint, cadenceMinutes: habit.cadenceMinutes });
+    setAdding(false);
+  };
+  const saveEdit = () => {
+    if (!editingId || !window.desktopApi) return;
+    void run(
+      () => window.desktopApi!.pet.updateHabit(editingId, draft),
+      "习惯已更新",
+    ).then((ok) => {
+      if (ok) setEditingId(undefined);
+    });
+  };
+  const add = () => {
+    if (!window.desktopApi) return;
+    void run(
+      () => window.desktopApi!.pet.addHabit(draft),
+      "已加入一个弹性习惯",
+    ).then((ok) => {
+      if (ok) {
+        setAdding(false);
+        setDraft({ label: "", hint: "", cadenceMinutes: 90 });
+      }
+    });
+  };
+  return (
+    <section className="pet-habits-card" aria-labelledby="elastic-habits-title">
+      <div className="pet-section-heading">
+        <div>
+          <h2 id="elastic-habits-title">弹性习惯</h2>
+          <p>在合适的空档轻轻提醒；可以自定义、暂停或移除，不追连续、不扣分。</p>
+        </div>
+        <button
+          type="button"
+          className="soft-button"
+          disabled={busy || habits.length >= 12}
+          onClick={() => {
+            setAdding(true);
+            setEditingId(undefined);
+            setDraft({ label: "", hint: "", cadenceMinutes: 90 });
+          }}
+        >
+          <Plus size={14} /> 新增
+        </button>
+      </div>
+      <div className="pet-habits-list">
+        {habits.map((habit) => {
+          const ready = habit.enabled && habitState(habit, now) === "ready";
+          return (
+            <article className={`pet-habit-row ${ready ? "is-ready" : "is-resting"} ${habit.enabled ? "" : "is-disabled"}`} key={habit.id}>
+              <span className="pet-habit-dot" aria-hidden="true" />
+              {editingId === habit.id ? (
+                <div className="pet-habit-editor">
+                  <input aria-label="习惯名称" value={draft.label} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} />
+                  <input aria-label="习惯提示" value={draft.hint} maxLength={240} onChange={(event) => setDraft((current) => ({ ...current, hint: event.target.value }))} />
+                  <label><span>间隔（分钟）</span><input type="number" min={15} max={1_440} step={15} value={draft.cadenceMinutes} onChange={(event) => setDraft((current) => ({ ...current, cadenceMinutes: Number(event.target.value) }))} /></label>
+                  <div className="pet-habit-actions">
+                    <button type="button" className="primary-button" disabled={busy} onClick={saveEdit}>保存</button>
+                    <button type="button" className="ghost-button" disabled={busy} onClick={() => setEditingId(undefined)}>取消</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <strong>{habit.label}</strong>
+                    <p>{habit.hint}</p>
+                    <small>{!habit.enabled ? "已暂停" : ready ? "现在是一个合适的空档" : formatHabitWait(habit, now)}</small>
+                  </div>
+                  <div className="pet-habit-actions">
+                    <button type="button" className="soft-button" disabled={busy || !ready} onClick={() => void run(() => window.desktopApi!.pet.completeHabit(habit.id), "已记下这次照顾自己")}>{ready ? "完成一次" : "已记下"}</button>
+                    {ready && <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.snoozeHabit(habit.id), "好，稍后再提醒")}>稍后</button>}
+                    <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.updateHabit(habit.id, { enabled: !habit.enabled }), habit.enabled ? "已暂停这个习惯" : "已恢复这个习惯")}>{habit.enabled ? "暂停" : "恢复"}</button>
+                    <button type="button" className="ghost-button" disabled={busy} onClick={() => beginEdit(habit)}>编辑</button>
+                    <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.deleteHabit(habit.id), "习惯已移除")}>移除</button>
+                  </div>
+                </>
+              )}
+            </article>
+          );
+        })}
+        {adding && (
+          <article className="pet-habit-row is-ready">
+            <span className="pet-habit-dot" aria-hidden="true" />
+            <div className="pet-habit-editor">
+              <input autoFocus aria-label="新习惯名称" placeholder="例如：看远处 20 秒" value={draft.label} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} />
+              <input aria-label="新习惯提示" placeholder="给自己一句温和提示" value={draft.hint} maxLength={240} onChange={(event) => setDraft((current) => ({ ...current, hint: event.target.value }))} />
+              <label><span>间隔（分钟）</span><input type="number" min={15} max={1_440} step={15} value={draft.cadenceMinutes} onChange={(event) => setDraft((current) => ({ ...current, cadenceMinutes: Number(event.target.value) }))} /></label>
+              <div className="pet-habit-actions">
+                <button type="button" className="primary-button" disabled={busy || !draft.label.trim()} onClick={add}>加入</button>
+                <button type="button" className="ghost-button" disabled={busy} onClick={() => setAdding(false)}>取消</button>
+              </div>
+            </div>
+          </article>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PetGoalsPanel({
+  goals,
+  tasks,
+  focusHistory,
+  habits,
+  refresh,
+  notify,
+}: {
+  goals: PetSnapshot["goals"];
+  tasks: readonly Task[];
+  focusHistory: PetSnapshot["focusHistory"];
+  habits: PetSnapshot["habits"];
+  refresh: () => Promise<PetSnapshot | undefined>;
+  notify: (message: string, kind?: ToastKind) => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<{
+    title: string;
+    metric: PetGoalMetric;
+    target: number;
+  }>({ title: defaultGoalTitle("tasks-completed"), metric: "tasks-completed", target: 5 });
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const run = async (operation: () => Promise<unknown>, success: string): Promise<boolean> => {
+    setBusy(true);
+    try {
+      await operation();
+      await refresh();
+      notify(success, "success");
+      return true;
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "目标操作失败", "error");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+  const facts = useMemo(
+    () => ({ tasks, focusHistory, habits }),
+    [focusHistory, habits, tasks],
+  );
+  const currentPeriod = useMemo(() => weekRangeFor(new Date(now)), [now]);
+  const beginAdd = () => {
+    setEditingId(undefined);
+    setAdding(true);
+    setDraft({ title: defaultGoalTitle("tasks-completed"), metric: "tasks-completed", target: 5 });
+  };
+  const beginEdit = (goal: PetGoal) => {
+    setAdding(false);
+    setEditingId(goal.id);
+    setDraft({ title: goal.title, metric: goal.metric, target: goal.target });
+  };
+  const save = () => {
+    if (!window.desktopApi) return;
+    if (editingId) {
+      void run(
+        () => window.desktopApi!.pet.updateGoal(editingId, draft),
+        "目标已更新",
+      ).then((ok) => {
+        if (ok) setEditingId(undefined);
+      });
+      return;
+    }
+    void run(
+      () =>
+        window.desktopApi!.pet.addGoal({
+          ...draft,
+          periodStart: currentPeriod.periodStart,
+          periodEnd: currentPeriod.periodEnd,
+        }),
+      "已加入本周同行目标",
+    ).then((ok) => {
+      if (ok) {
+        setAdding(false);
+        setDraft({ title: defaultGoalTitle("tasks-completed"), metric: "tasks-completed", target: 5 });
+      }
+    });
+  };
+  const editor = (editingId || adding) ? (
+    <div className="pet-goal-editor">
+      <label>
+        <span>目标名称</span>
+        <input
+          autoFocus
+          aria-label="目标名称"
+          value={draft.title}
+          maxLength={80}
+          onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+        />
+      </label>
+      <label>
+        <span>追踪什么</span>
+        <select
+          aria-label="目标类型"
+          value={draft.metric}
+          onChange={(event) => {
+            const metric = event.target.value as PetGoalMetric;
+            setDraft((current) => ({
+              ...current,
+              metric,
+              title: current.title.trim() ? current.title : defaultGoalTitle(metric),
+            }));
+          }}
+        >
+          <option value="tasks-completed">完成任务</option>
+          <option value="focus-minutes">专注分钟</option>
+          <option value="habit-checkins">习惯照顾</option>
+        </select>
+      </label>
+      <label>
+        <span>本周目标</span>
+        <input
+          type="number"
+          aria-label="本周目标数值"
+          min={1}
+          max={9_999}
+          step={1}
+          value={draft.target}
+          onChange={(event) => setDraft((current) => ({ ...current, target: Number(event.target.value) }))}
+        />
+      </label>
+      <div className="pet-goal-editor-note">本周 {currentPeriod.periodStart.slice(5)} — {currentPeriod.periodEnd.slice(5)} · 可随时暂停</div>
+      <div className="pet-goal-actions">
+        <button type="button" className="primary-button" disabled={busy || !draft.title.trim() || !Number.isFinite(draft.target) || draft.target < 1} onClick={save}>保存</button>
+        <button type="button" className="ghost-button" disabled={busy} onClick={() => { setAdding(false); setEditingId(undefined); }}>取消</button>
+      </div>
+    </div>
+  ) : null;
+  return (
+    <section className="pet-goals-card" aria-labelledby="pet-goals-title">
+      <div className="pet-section-heading">
+        <div>
+          <h2 id="pet-goals-title">本周同行目标</h2>
+          <p>给这一周一个温和方向；不追连续，不因没完成而扣分。</p>
+        </div>
+        <button type="button" className="soft-button" disabled={busy || goals.length >= 3} onClick={beginAdd}>
+          <Plus size={14} /> 新增
+        </button>
+      </div>
+      {editor}
+      <div className="pet-goals-list">
+        {goals.map((goal) => {
+          const progress = projectPetGoal(goal, facts);
+          const isPast = goal.periodEnd < currentPeriod.periodStart;
+          return (
+            <article className={`pet-goal-row ${progress.isComplete ? "is-complete" : ""} ${!goal.enabled ? "is-disabled" : ""} ${isPast ? "is-past" : ""}`} key={goal.id}>
+              <div className="pet-goal-row-top">
+                <span className="pet-goal-mark" aria-hidden="true"><CircleDot size={16} /></span>
+                <div className="pet-goal-copy">
+                  <strong>{goal.title}</strong>
+                  <small>{progress.metricLabel} · {goal.periodStart.slice(5)} — {goal.periodEnd.slice(5)}</small>
+                </div>
+                <b>{progress.value}/{goal.target} <em>{progress.unit}</em></b>
+              </div>
+              <div className="pet-goal-track" aria-label={`${goal.title}进度 ${Math.round(progress.ratio * 100)}%`}>
+                <i style={{ width: `${Math.round(progress.ratio * 100)}%` }} />
+              </div>
+              <div className="pet-goal-row-bottom">
+                <span>{!goal.enabled ? "已暂停" : isPast ? "这周已结束" : progress.isComplete ? "已经一起做到啦" : `还差 ${progress.remaining}${progress.unit}`}</span>
+                <div className="pet-goal-actions">
+                  <button type="button" className="ghost-button" disabled={busy} onClick={() => beginEdit(goal)}>编辑</button>
+                  <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.updateGoal(goal.id, { enabled: !goal.enabled }), goal.enabled ? "目标已暂停" : "目标已恢复")}>{goal.enabled ? "暂停" : "恢复"}</button>
+                  <button type="button" className="ghost-button" disabled={busy} onClick={() => void run(() => window.desktopApi!.pet.deleteGoal(goal.id), "目标已移除")}>移除</button>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+        {!goals.length && !adding && (
+          <div className="pet-goals-empty">
+            <CircleDot size={17} />
+            <span>还没有本周目标。可以从“完成 5 项任务”开始，也可以按你的节奏自定义。</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function EveningReviewCard({
+  tasks,
+  focusHistory,
+  onPlanTomorrow,
+}: {
+  tasks: readonly Task[];
+  focusHistory: PetSnapshot["focusHistory"];
+  onPlanTomorrow?: () => void;
+}) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const review = useMemo(
+    () => buildEveningReview(tasks, focusHistory, now),
+    [focusHistory, now, tasks],
+  );
+  return (
+    <section className="pet-evening-review-card" aria-label={review.label}>
+      <div className="pet-section-heading">
+        <div>
+          <h2>{review.label}</h2>
+          <p>{review.headline}</p>
+        </div>
+        <Clock3 size={18} aria-hidden="true" />
+      </div>
+      <div className="pet-review-metrics">
+        <div><strong>{review.completedCount}</strong><span>完成</span></div>
+        <div><strong>{review.focusMinutes}</strong><span>专注分钟</span></div>
+        <div><strong>{review.remainingCount}</strong><span>待处理</span></div>
+      </div>
+      <p className="pet-review-detail">{review.detail}</p>
+      {review.remainingCount > 0 && onPlanTomorrow && (
+        <div className="pet-evening-review-actions">
+          <span>不必今晚硬撑，可以先看一眼明天。</span>
+          <button type="button" className="soft-button" onClick={onPlanTomorrow}>
+            安排明天
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const weeklyCheckinStorageKey = "todo-agent:weekly-checkin";
+
+function readWeeklyCheckin(weekStart: string): WeeklyCheckinRecord | undefined {
+  try {
+    const raw = localStorage.getItem(weeklyCheckinStorageKey);
+    if (!raw) return undefined;
+    return normalizeWeeklyCheckin(JSON.parse(raw), weekStart);
+  } catch {
+    return undefined;
+  }
+}
+
+function WeeklyCheckinCard({
+  tasks,
+  notify,
+}: {
+  tasks: readonly Task[];
+  notify: (message: string, kind?: ToastKind) => void;
+}) {
+  const [now, setNow] = useState(() => new Date());
+  const [energy, setEnergy] = useState<WeeklyCheckinEnergy>(3);
+  const [pace, setPace] = useState<WeeklyCheckinPace>("steady");
+  const [note, setNote] = useState("");
+  const [saved, setSaved] = useState<WeeklyCheckinRecord>();
+  const weekStart = useMemo(() => weekStartFor(now), [now]);
+  const summary = useMemo(
+    () => weeklyReviewSummary(tasks, weekStart),
+    [tasks, weekStart],
+  );
+  const openCount = useMemo(
+    () => tasks.filter((task) => !task.deletedAt && task.status === "open").length,
+    [tasks],
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const previous = readWeeklyCheckin(weekStart);
+    setSaved(previous);
+    setEnergy(previous?.energy ?? 3);
+    setPace(previous?.pace ?? "steady");
+    setNote(previous?.note ?? "");
+  }, [weekStart]);
+
+  const copy = checkinCopy({
+    energy: saved?.energy ?? energy,
+    pace: saved?.pace ?? pace,
+    completedCount: summary.completedCount,
+    openCount,
+  });
+
+  const save = () => {
+    const record: WeeklyCheckinRecord = {
+      weekStart,
+      energy,
+      pace,
+      note: note.trim().slice(0, 300),
+      completedAt: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem(weeklyCheckinStorageKey, JSON.stringify(record));
+    } catch {
+      notify("这次没有保存下来，但你仍然可以继续使用。", "error");
+      return;
+    }
+    setSaved(record);
+    notify("本周节奏已记下，随时可以调整。", "success");
+  };
+
+  return (
+    <section className={`pet-weekly-checkin-card ${saved ? "is-saved" : ""}`} aria-label="每周 Check-in">
+      <div className="pet-section-heading">
+        <div>
+          <h2>每周 Check-in</h2>
+          <p>{saved ? "本周已记下这份节奏，不需要连续打卡。" : "花半分钟听听自己，再决定这周要走多快。"}</p>
+        </div>
+        <span className="pet-habit-badge">可选</span>
+      </div>
+      {saved ? (
+        <div className="pet-checkin-saved">
+          <div className="pet-checkin-saved-copy">
+            <strong>{copy.headline}</strong>
+            <p>{copy.detail}</p>
+            {saved.note && <small>“{saved.note}”</small>}
+          </div>
+          <button type="button" className="soft-button" onClick={() => setSaved(undefined)}>调整节奏</button>
+        </div>
+      ) : (
+        <div className="pet-checkin-form">
+          <div className="pet-checkin-question">
+            <span>今天的能量大概是</span>
+            <div className="pet-checkin-energy" role="group" aria-label="今天的能量">
+              {([1, 2, 3, 4, 5] as const).map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  className={energy === value ? "active" : ""}
+                  aria-pressed={energy === value}
+                  aria-label={`${value} 分能量`}
+                  onClick={() => setEnergy(value)}
+                >
+                  {value === 1 ? "🌧" : value === 2 ? "🌱" : value === 3 ? "☀" : value === 4 ? "✨" : "🌟"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="pet-checkin-question">
+            <span>这周想用什么节奏</span>
+            <div className="pet-checkin-pace" role="group" aria-label="本周节奏">
+              {(["gentle", "steady", "full"] as const).map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  className={pace === value ? "active" : ""}
+                  aria-pressed={pace === value}
+                  onClick={() => setPace(value)}
+                >
+                  {weeklyCheckinPaceLabel(value)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="pet-checkin-note">
+            <span>想留一句话吗（可选）</span>
+            <input
+              value={note}
+              maxLength={300}
+              placeholder="例如：这周先把早睡守住"
+              onChange={(event) => setNote(event.target.value)}
+            />
+          </label>
+          <div className="pet-checkin-footer">
+            <p>{copy.headline}</p>
+            <button type="button" className="primary-button" onClick={save}>记下本周节奏</button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PetReviewCard({
+  tasks,
+  onNavigate,
+  onNavigateTask,
+  onReviewAction,
+}: {
+  tasks: readonly Task[];
+  onNavigate: (route: MainRoute) => void;
+  onNavigateTask: (task: Task) => void;
+  onReviewAction: (task: Task, action: PetReviewAction) => Promise<void>;
+}) {
+  const review = useMemo(() => buildPetReviewSummary(tasks), [tasks]);
+  const [sessionTasks, setSessionTasks] = useState<Task[]>();
+  const buckets = [review.overdue, review.blocked, review.unplanned];
+  if (sessionTasks) {
+    return (
+      <PetReviewSession
+        tasks={sessionTasks}
+        onAction={onReviewAction}
+        onOpenTask={onNavigateTask}
+        onClose={() => setSessionTasks(undefined)}
+      />
+    );
+  }
+  return (
+    <section className={`pet-review-card ${review.clear ? "is-clear" : ""}`} aria-label="宠物回顾">
+      <div className="pet-section-heading">
+        <div>
+          <h2>宠物回顾</h2>
+          <p>{review.clear ? "没有催促，只把值得看一眼的事情留在这里。" : review.headline}</p>
+        </div>
+        {review.clear ? (
+          <span className="pet-habit-badge">已清爽</span>
+        ) : (
+          <button
+            type="button"
+            className="soft-button"
+            onClick={() => setSessionTasks(review.tasks)}
+          >
+            <RotateCcw size={14} /> 开始回顾
+          </button>
+        )}
+      </div>
+      {review.clear ? (
+        <div className="pet-review-clear">
+          <CheckCircle2 size={18} aria-hidden="true" />
+          <span>今天的任务暂时没有逾期、阻塞或待排时间事项。</span>
+        </div>
+      ) : (
+        <>
+          <div className="pet-review-buckets">
+            {buckets.map((item) => (
+              <button
+                type="button"
+                className={`pet-review-bucket is-${item.key} ${item.tasks.length ? "has-items" : ""}`}
+                key={item.key}
+                disabled={!item.tasks.length}
+                onClick={() => onNavigate(item.key === "overdue" ? "today" : "all")}
+              >
+                <strong>{item.tasks.length}</strong>
+                <span>{item.label}</span>
+                <small>{item.hint}</small>
+              </button>
+            ))}
+          </div>
+          {review.nextTask && (
+            <div className="pet-review-next">
+              <div>
+                <span>可以先看</span>
+                <strong>{review.nextTask.title}</strong>
+              </div>
+              <button type="button" className="soft-button" onClick={() => onNavigate("all")}>打开任务</button>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function PetHomePage({
+  notify,
+  tasks,
+  projects,
+  onNavigate,
+  onNavigateTask,
+  onStartFocus,
+  onPlanTomorrow,
+  onReviewAction,
+}: {
+  notify: (message: string, kind?: ToastKind) => void;
+  tasks: readonly Task[];
+  projects: readonly TaskProject[];
+  onNavigate: (route: MainRoute) => void;
+  onNavigateTask: (task: Task) => void;
+  onStartFocus: (task: Task) => Promise<void>;
+  onPlanTomorrow: () => void;
+  onReviewAction: (task: Task, action: PetReviewAction) => Promise<void>;
+}) {
   const { snapshot, weather, refresh, setWeather } = usePetData();
-  const [section, setSection] = useState<"home" | "diary" | "memory">("home");
+  const petWeatherEffect = petWeatherEffectFor(weather);
+  const roomThemePacks = useInstalledPetRoomThemePacks();
+  const [seasonalEvents, setSeasonalEvents] = useState(defaultSettings.pet.seasonalEvents);
+  const legacyHabitMigrationStarted = useRef(false);
+  const [section, setSection] = useState<
+    "home" | "room" | "adventure" | "play" | "diary" | "memory"
+  >("home");
   const [busy, setBusy] = useState(false);
   const [memoryText, setMemoryText] = useState("");
   const [editingDiary, setEditingDiary] = useState<PetDiaryEntry>();
   const [editingMemory, setEditingMemory] = useState<PetMemoryEntry>();
+  const [adventure, setAdventure] = useState<PetAdventure>();
+  const [companionGreeting, setCompanionGreeting] = useState<{ id: string; text: string }>();
+  const companionGreetingTimerRef = useRef<number | undefined>(undefined);
+  const [roomDraftPositions, setRoomDraftPositions] = useState(() => projectPetRoomPlacements());
+  const roomDraftPositionsRef = useRef(roomDraftPositions);
+  const roomStageRef = useRef<HTMLDivElement>(null);
+  const roomDragRef = useRef<{
+    id: PetRoomDecorationId;
+    pointerId: number;
+    origin: Required<PetDecorationPlacement>;
+  } | undefined>(undefined);
+  const [roomDragId, setRoomDragId] = useState<PetRoomDecorationId>();
 
   const run = async (operation: () => Promise<void>, success: string) => {
     setBusy(true);
@@ -3952,6 +10436,89 @@ function PetHomePage({
       setBusy(false);
     }
   };
+  useEffect(() => {
+    if (section !== "adventure" || !window.desktopApi) return;
+    void window.desktopApi.pet
+      .dailyAdventure()
+      .then(setAdventure)
+      .catch(() => undefined);
+  }, [section, snapshot?.revision]);
+  useEffect(() => {
+    if (!snapshot) return;
+    const next = projectPetRoomPlacements(snapshot.appearance.decorationPositions);
+    roomDraftPositionsRef.current = next;
+    setRoomDraftPositions(next);
+  }, [snapshot?.revision]);
+  useEffect(() => {
+    if (!snapshot || !window.desktopApi || legacyHabitMigrationStarted.current) return;
+    let marker = false;
+    try {
+      marker = localStorage.getItem(ELASTIC_HABITS_MIGRATED_KEY) === "1";
+    } catch {
+      marker = false;
+    }
+    if (marker) {
+      legacyHabitMigrationStarted.current = true;
+      return;
+    }
+    legacyHabitMigrationStarted.current = true;
+    const legacy = readStoredElasticHabits();
+    const markMigrated = () => {
+      try {
+        localStorage.setItem(ELASTIC_HABITS_MIGRATED_KEY, "1");
+      } catch {
+        // The service state remains authoritative when localStorage is unavailable.
+      }
+    };
+    if (!legacy?.length) {
+      markMigrated();
+      return;
+    }
+    void (async () => {
+      const current = new Map(snapshot.habits.map((habit) => [habit.id, habit]));
+      let available = Math.max(0, 12 - current.size);
+      for (const habit of legacy.slice(0, 12)) {
+        const existing = current.get(habit.id);
+        if (existing) {
+          if (
+            existing.label !== habit.label ||
+            existing.hint !== habit.hint ||
+            existing.cadenceMinutes !== habit.cadenceMinutes ||
+            existing.enabled !== (habit.enabled !== false)
+          ) {
+            await window.desktopApi!.pet.updateHabit(habit.id, {
+              label: habit.label,
+              hint: habit.hint,
+              cadenceMinutes: habit.cadenceMinutes,
+              enabled: habit.enabled !== false,
+            });
+          }
+        } else if (available > 0) {
+          await window.desktopApi!.pet.addHabit({
+            label: habit.label,
+            hint: habit.hint,
+            cadenceMinutes: habit.cadenceMinutes,
+          });
+          available -= 1;
+        }
+      }
+      await refresh();
+      // Only mark after every legacy record has been accepted. If an IPC
+      // write fails, a later launch can retry instead of silently losing it.
+      markMigrated();
+    })().catch(() => undefined);
+  }, [refresh, snapshot]);
+  useEffect(() => {
+    if (!window.desktopApi) return undefined;
+    const apply = (settings: AppSettings) => setSeasonalEvents(settings.pet.seasonalEvents);
+    void window.desktopApi.settings.get().then(apply).catch(() => undefined);
+    return window.desktopApi.events.onSettingsChanged(apply);
+  }, []);
+  useEffect(() => () => {
+    if (companionGreetingTimerRef.current !== undefined) {
+      window.clearTimeout(companionGreetingTimerRef.current);
+    }
+  }, []);
   if (!snapshot) {
     return (
       <main className="pet-page loading-page">
@@ -3961,6 +10528,65 @@ function PetHomePage({
     );
   }
   const profile = snapshot.profile;
+  const roomAtmosphere = snapshot.appearance.atmosphere ?? "daylight";
+  const roomSeason = seasonalEvents ? petSeasonalEventForDate() : undefined;
+  const activeRoomThemePack = roomThemePacks.activePack;
+  const roomThemeStyle = activeRoomThemePack
+    ? ({
+        "--pet-room-top": activeRoomThemePack.colors.top,
+        "--pet-room-ground": activeRoomThemePack.colors.ground,
+        "--pet-room-window": activeRoomThemePack.colors.window,
+        "--pet-room-accent": activeRoomThemePack.colors.accent,
+        ...(activeRoomThemePack.backgroundDataUrl
+          ? { "--pet-room-background-image": `url(${activeRoomThemePack.backgroundDataUrl})` }
+          : {}),
+      } as CSSProperties)
+    : undefined;
+  const hasUnlocked = (itemId: string) =>
+    snapshot.inventory.some((item) => item.id === itemId);
+  const beginRoomDecorationDrag = (id: PetRoomDecorationId, event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (busy) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    roomDragRef.current = {
+      id,
+      pointerId: event.pointerId,
+      origin: roomDraftPositionsRef.current[id],
+    };
+    setRoomDragId(id);
+  };
+  const moveRoomDecoration = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = roomDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const rect = roomStageRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    const current = roomDraftPositionsRef.current[drag.id];
+    const next = {
+      ...roomDraftPositionsRef.current,
+      [drag.id]: placementForPetRoomPoint(
+        event,
+        rect,
+        current,
+        PET_ROOM_DECORATION_DEFAULTS[drag.id],
+      ),
+    };
+    roomDraftPositionsRef.current = next;
+    setRoomDraftPositions(next);
+  };
+  const finishRoomDecorationDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = roomDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    roomDragRef.current = undefined;
+    setRoomDragId(undefined);
+    const next = roomDraftPositionsRef.current;
+    const final = next[drag.id];
+    const changed = final.x !== drag.origin.x || final.y !== drag.origin.y || final.scale !== drag.origin.scale;
+    if (!changed || busy) return;
+    void run(async () => {
+      await window.desktopApi?.pet.customize({ decorationPositions: next });
+    }, "摆件位置已更新");
+  };
   const levelProgress = profile.experience % 100;
   const recentRewards = snapshot.rewards.slice(0, 6);
   return (
@@ -3974,13 +10600,22 @@ function PetHomePage({
         <div className="pet-page-character">
           <PetCharacter
             name={profile.name}
+            visualStyle="atlas"
             mood={snapshot.focus?.status === "running" ? "focus" : "happy"}
+            interactive
+            palette={snapshot.appearance.palette}
+            outfit={snapshot.appearance.outfit}
+            personality={profile.personality}
+            weatherEffect={petWeatherEffect}
           />
         </div>
       </header>
       <nav className="pet-page-tabs" aria-label="小窝导航">
         {([
           ["home", "成长"],
+          ["room", "小房间"],
+          ["adventure", "今日冒险"],
+          ["play", "一起玩"],
           ["diary", "日记"],
           ["memory", "记忆"],
         ] as const).map(([value, label]) => (
@@ -3997,6 +10632,14 @@ function PetHomePage({
 
       {section === "home" && (
         <div className="pet-dashboard">
+          <PetPostcardCard
+            name={profile.name}
+            personality={profile.personality}
+            tasks={tasks}
+            focusHistory={snapshot.focusHistory}
+            weather={weather}
+            onOpenToday={() => onNavigate("today")}
+          />
           <section className="pet-level-card">
             <div className="pet-level-number">Lv.{profile.level}</div>
             <div>
@@ -4016,31 +10659,34 @@ function PetHomePage({
             </div>
           </section>
           <section className="pet-weather-card">
-            <div className="pet-weather-icon">
-              {weather?.conditionLabel.includes("雨") ? "☂" : weather?.conditionLabel.includes("雪") ? "❄" : "☀"}
+            <div className="pet-weather-main">
+              <div className="pet-weather-icon">
+                {weather?.conditionLabel.includes("雨") ? "☂" : weather?.conditionLabel.includes("雪") ? "❄" : "☀"}
+              </div>
+              <div>
+                <strong>{weather ? `${Math.round(weather.temperatureC)}℃ · ${weather.conditionLabel}` : "天气未开启"}</strong>
+                <p>
+                  {weather
+                    ? `${weather.city}${weather.stale ? " · 缓存已过期" : ` · 降水 ${weather.precipitationProbability ?? "—"}%`}`
+                    : "可在设置中填写城市，不需要精确定位。"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                disabled={busy}
+                aria-label="刷新天气"
+                onClick={() =>
+                  void run(async () => {
+                    const next = await window.desktopApi?.pet.refreshWeather(true);
+                    setWeather(next);
+                  }, "天气已更新")
+                }
+              >
+                <RefreshCw size={15} />
+              </button>
             </div>
-            <div>
-              <strong>{weather ? `${Math.round(weather.temperatureC)}℃ · ${weather.conditionLabel}` : "天气未开启"}</strong>
-              <p>
-                {weather
-                  ? `${weather.city}${weather.stale ? " · 缓存已过期" : ` · 降水 ${weather.precipitationProbability ?? "—"}%`}`
-                  : "可在设置中填写城市，不需要精确定位。"}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="icon-button"
-              disabled={busy}
-              aria-label="刷新天气"
-              onClick={() =>
-                void run(async () => {
-                  const next = await window.desktopApi?.pet.refreshWeather(true);
-                  setWeather(next);
-                }, "天气已更新")
-              }
-            >
-              <RefreshCw size={15} />
-            </button>
+            <PetWeatherForecast forecast={weather?.forecast} stale={weather?.stale} />
           </section>
           <section className="pet-attributes-card">
             <h2>成长属性</h2>
@@ -4060,6 +10706,41 @@ function PetHomePage({
               ))}
             </div>
           </section>
+          <PetGoalsPanel
+            goals={snapshot.goals}
+            tasks={tasks}
+            focusHistory={snapshot.focusHistory}
+            habits={snapshot.habits}
+            refresh={refresh}
+            notify={notify}
+          />
+          <PetCompletionStampsCard
+            tasks={tasks}
+            rewards={snapshot.rewards}
+            onOpenTask={onNavigateTask}
+          />
+          <PetProjectChapters
+            tasks={tasks}
+            projects={projects}
+            onOpenProjects={() => onNavigate("projects")}
+            onOpenTask={(taskId) => {
+              const task = tasks.find((candidate) => candidate.id === taskId);
+              if (task) onNavigateTask(task);
+            }}
+          />
+          <ElasticHabitsPanel habits={snapshot.habits} refresh={refresh} notify={notify} />
+          <EveningReviewCard
+            tasks={tasks}
+            focusHistory={snapshot.focusHistory}
+            onPlanTomorrow={onPlanTomorrow}
+          />
+          <WeeklyCheckinCard tasks={tasks} notify={notify} />
+          <PetReviewCard
+            tasks={tasks}
+            onNavigate={onNavigate}
+            onNavigateTask={onNavigateTask}
+            onReviewAction={onReviewAction}
+          />
           <section className="pet-rewards-card">
             <div className="pet-section-heading">
               <div>
@@ -4085,6 +10766,474 @@ function PetHomePage({
             )}
           </section>
         </div>
+      )}
+
+      {section === "room" && (
+        <section className="pet-room-section">
+          <div
+            ref={roomStageRef}
+            className={`pet-room-stage room-${snapshot.appearance.roomTheme} atmosphere-${roomAtmosphere}${activeRoomThemePack ? " custom-room-theme" : ""}${activeRoomThemePack?.backgroundDataUrl ? " has-room-theme-asset" : ""}`}
+            style={roomThemeStyle}
+            onPointerMove={moveRoomDecoration}
+            onPointerUp={finishRoomDecorationDrag}
+            onPointerCancel={finishRoomDecorationDrag}
+          >
+            <span className="pet-room-window" aria-hidden="true">☁</span>
+            {roomSeason && (
+              <div
+                className={`pet-room-seasonal-layer pet-room-seasonal-${roomSeason.season}`}
+                aria-hidden="true"
+              >
+                {petRoomSeasonalDecorations(roomSeason.season).map((decoration) => (
+                  <span
+                    key={decoration.id}
+                    className="pet-room-seasonal-decoration"
+                    aria-hidden="true"
+                    title={decoration.label}
+                    style={{
+                      left: `${decoration.x}%`,
+                      top: `${decoration.y}%`,
+                      fontSize: `${decoration.size}px`,
+                    }}
+                  >
+                    {decoration.glyph}
+                  </span>
+                ))}
+              </div>
+            )}
+            {([
+              ["cloud-lamp", "☼", "cloud-lamp"],
+              ["plant", "♧", "room-plant"],
+              ["books", "▥", "room-books"],
+            ] as const).map(([id, glyph, className]) => {
+              if (!snapshot.appearance.decorations.includes(id)) return null;
+              const placement = roomDraftPositions[id];
+              return (
+                <span
+                  key={id}
+                  className={`pet-room-decoration ${className} ${roomDragId === id ? "is-dragging" : ""}`}
+                  aria-hidden="true"
+                  title="按住拖动摆件"
+                  onPointerDown={(event) => beginRoomDecorationDrag(id, event)}
+                  style={{
+                    left: `${placement.x}%`,
+                    top: `${placement.y}%`,
+                    transform: `translate(-50%, -50%) scale(${placement.scale})`,
+                  }}
+                >
+                  {glyph}
+                </span>
+              );
+            })}
+            {snapshot.companions.length > 0 && (
+              <div className="pet-room-companions" aria-label="小窝里的陪伴小伙伴">
+                {snapshot.companions.map((companion) => (
+                  <button
+                    type="button"
+                    className={`pet-room-companion-slot ${companionGreeting?.id === companion.id ? "is-greeting" : ""}`}
+                    key={companion.id}
+                    aria-label={`和${companion.name}互动`}
+                    title={`和${companion.name}互动`}
+                    onClick={() => {
+                      setCompanionGreeting({
+                        id: companion.id,
+                        text: petCompanionGreeting(companion),
+                      });
+                      if (companionGreetingTimerRef.current !== undefined) {
+                        window.clearTimeout(companionGreetingTimerRef.current);
+                      }
+                      companionGreetingTimerRef.current = window.setTimeout(() => {
+                        setCompanionGreeting(undefined);
+                        companionGreetingTimerRef.current = undefined;
+                      }, 3_200);
+                    }}
+                  >
+                    <PetCompanionAvatar
+                      kind={companion.kind}
+                      name={companion.name}
+                      personality={companion.personality}
+                    />
+                    <span>{companion.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {companionGreeting && (
+              <div className="pet-room-companion-bubble" role="status" aria-live="polite">
+                {companionGreeting.text}
+              </div>
+            )}
+            <PetCharacter
+              name={profile.name}
+              visualStyle="atlas"
+              mood="happy"
+              action="dance"
+              interactive
+              palette={snapshot.appearance.palette}
+              outfit={snapshot.appearance.outfit}
+              personality={profile.personality}
+              weatherEffect={petWeatherEffect}
+            />
+          </div>
+          <div className="pet-room-controls">
+            <div className="pet-section-heading">
+              <div>
+                <h2>布置你们的小房间</h2>
+                <p>外观只表达陪伴，不与饥饿、连续签到或惩罚绑定。</p>
+              </div>
+            </div>
+            <label>
+              <span>身体配色</span>
+              <select
+                value={snapshot.appearance.palette}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      palette: event.target.value as typeof snapshot.appearance.palette,
+                    });
+                  }, "配色已更换")
+                }
+              >
+                <option value="lavender">薰衣草</option>
+                <option value="mint">薄荷云</option>
+                <option value="sunset">日落糖</option>
+                <option value="midnight">星夜</option>
+              </select>
+            </label>
+            <label>
+              <span>陪伴性格</span>
+              <select
+                value={profile.personality}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      personality: event.target.value as PetPersonality,
+                    });
+                  }, "性格已调整")
+                }
+              >
+                <option value="gentle">温柔陪伴 · 轻声鼓励</option>
+                <option value="energetic">元气鼓励 · 更有活力</option>
+                <option value="calm">冷静管家 · 少打扰</option>
+                <option value="playful">活泼淘气 · 更爱互动</option>
+                <option value="witty">轻微淘气 · 偶尔逗你</option>
+                <option value="quiet">安静陪伴 · 慢节奏</option>
+              </select>
+              <small className="pet-personality-hint">
+                只改变动作节奏和表达方式，不改变任务、提醒或同步规则。
+              </small>
+            </label>
+            <label>
+              <span>服装</span>
+              <select
+                value={snapshot.appearance.outfit}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      outfit: event.target.value as typeof snapshot.appearance.outfit,
+                    });
+                  }, "服装已更换")
+                }
+              >
+                <option value="none">轻装</option>
+                <option value="scarf">暖暖围巾</option>
+                <option value="explorer" disabled={!hasUnlocked("outfit-explorer")}>
+                  探索帽{hasUnlocked("outfit-explorer") ? "" : " · 完成冒险解锁"}
+                </option>
+                <option value="starlight" disabled={!hasUnlocked("outfit-starlight")}>
+                  星光披风{hasUnlocked("outfit-starlight") ? "" : " · 接住任务星解锁"}
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>房间主题</span>
+              <select
+                value={snapshot.appearance.roomTheme}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      roomTheme: event.target.value as typeof snapshot.appearance.roomTheme,
+                    });
+                  }, "房间已布置")
+                }
+              >
+                <option value="cloud-room">云朵工作室</option>
+                <option value="forest-nook">森林角落</option>
+                <option value="night-library">夜航书房</option>
+              </select>
+            </label>
+            <label>
+              <span>小窝主题包</span>
+              <select
+                aria-label="小窝主题包"
+                value={roomThemePacks.activeId ?? ""}
+                disabled={busy}
+                onChange={(event) => {
+                  const nextId = event.target.value || undefined;
+                  roomThemePacks.activate(nextId);
+                  notify(nextId ? "小窝主题已应用" : "已恢复房间主题颜色", "success");
+                }}
+              >
+                <option value="">跟随房间主题</option>
+                {roomThemePacks.packs.map((pack) => (
+                  <option value={pack.id} key={pack.id}>{pack.name}</option>
+                ))}
+              </select>
+            </label>
+            <PetRoomThemeEditor
+              activePack={activeRoomThemePack}
+              disabled={busy}
+              onInstall={(pack) => {
+                roomThemePacks.install(pack);
+                roomThemePacks.activate(pack.id);
+                notify("小窝主题已安装并应用", "success");
+              }}
+            />
+            {activeRoomThemePack && (
+              <div className="pet-room-theme-pack-current">
+                <span>{activeRoomThemePack.description || "本机小窝主题"}</span>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={busy}
+                  onClick={() => {
+                    roomThemePacks.remove(activeRoomThemePack.id);
+                    notify("小窝主题已移除", "success");
+                  }}
+                >
+                  移除当前主题
+                </button>
+              </div>
+            )}
+            <label>
+              <span>小窝氛围</span>
+              <select
+                value={roomAtmosphere}
+                disabled={busy}
+                onChange={(event) =>
+                  void run(async () => {
+                    await window.desktopApi?.pet.customize({
+                      atmosphere: event.target.value as typeof roomAtmosphere,
+                    });
+                  }, "小窝氛围已调整")
+                }
+              >
+                <option value="daylight">明亮日光 · 清爽工作</option>
+                <option value="cozy">柔和灯光 · 安静陪伴</option>
+                <option value="moonlit">月光夜色 · 慢慢收尾</option>
+              </select>
+              <small className="pet-personality-hint">
+                只改变小窝的光线和色彩，不影响任务、提醒或专注计时。
+              </small>
+            </label>
+            <fieldset>
+              <legend>摆件</legend>
+              {([[
+                "cloud-lamp",
+                "云灯",
+                "decoration-cloud-lamp",
+              ], ["plant", "小植物", "decoration-plant"], ["books", "任务书架", "decoration-books"]] as const).map(([id, label, itemId]) => {
+                const enabled = snapshot.appearance.decorations.includes(id);
+                const unlocked = hasUnlocked(itemId);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={enabled ? "active" : ""}
+                    disabled={busy || !unlocked}
+                    title={unlocked ? undefined : `${label}尚未解锁`}
+                    onClick={() =>
+                      void run(async () => {
+                        await window.desktopApi?.pet.customize({
+                          decorations: enabled
+                            ? snapshot.appearance.decorations.filter((item) => item !== id)
+                            : [...snapshot.appearance.decorations, id],
+                        });
+                      }, enabled ? "摆件已收起" : "摆件已放好")
+                    }
+                  >
+                    {enabled ? <Check size={14} /> : <Plus size={14} />} {label}{unlocked ? "" : " · 待解锁"}
+                  </button>
+                );
+              })}
+            </fieldset>
+            <PetRoomLayoutControls
+              decorations={snapshot.appearance.decorations}
+              positions={roomDraftPositions}
+              disabled={busy}
+              onChange={(positions) =>
+                void run(async () => {
+                  await window.desktopApi?.pet.customize({
+                    decorationPositions: positions,
+                  });
+                }, "摆件位置已更新")
+              }
+            />
+            <section className="pet-companion-roster" aria-labelledby="pet-companion-roster-title">
+              <div className="pet-companion-roster-heading">
+                <div>
+                  <h3 id="pet-companion-roster-title">邀请小伙伴</h3>
+                  <p>它们只在小窝里陪你，不复制任务，也不参与同步。</p>
+                </div>
+                <span className="pet-companion-roster-count">{snapshot.companions.length}/3</span>
+              </div>
+              {snapshot.companions.length > 0 && (
+                <div className="pet-companion-list">
+                  {snapshot.companions.map((companion) => (
+                    <div className="pet-companion-card" key={companion.id}>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        aria-label={`让${companion.name}暂时离开小窝`}
+                        title="让它暂时离开小窝"
+                        onClick={() =>
+                          void run(async () => {
+                            await window.desktopApi?.pet.deleteCompanion(companion.id);
+                          }, `${companion.name}先去休息了`)
+                        }
+                      >
+                        <X size={13} />
+                      </button>
+                      <PetCompanionAvatar
+                        kind={companion.kind}
+                        name={companion.name}
+                        personality={companion.personality}
+                        compact
+                      />
+                      <strong>{companion.name}</strong>
+                      <small>{petCompanionKindLabels[companion.kind]}</small>
+                      <select
+                        value={companion.personality}
+                        disabled={busy}
+                        aria-label={`设置${companion.name}的陪伴性格`}
+                        onChange={(event) =>
+                          void run(async () => {
+                            await window.desktopApi?.pet.updateCompanion(companion.id, {
+                              personality: event.target.value as PetPersonality,
+                            });
+                          }, `${companion.name}的节奏已调整`)
+                        }
+                      >
+                        <option value="gentle">温柔</option>
+                        <option value="energetic">元气</option>
+                        <option value="calm">冷静</option>
+                        <option value="playful">活泼</option>
+                        <option value="witty">淘气</option>
+                        <option value="quiet">安静</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {snapshot.companions.length < 3 && (
+                <div className="pet-companion-add" aria-label="可邀请的小伙伴">
+                  {([
+                    ["paper-bird", "纸飞机", "帮你传递下一步"],
+                    ["cloudlet", "云团", "把节奏放慢一点"],
+                    ["moss-mouse", "苔苔", "一起整理小角落"],
+                    ["moon-moth", "月蛾", "安静陪你专注"],
+                  ] as const).map(([kind, label, hint]) => {
+                    const exists = snapshot.companions.some((companion) => companion.kind === kind);
+                    return (
+                      <button
+                        type="button"
+                        key={kind}
+                        disabled={busy || exists}
+                        title={exists ? `${label}已经在小窝里` : hint}
+                        onClick={() =>
+                          void run(async () => {
+                            await window.desktopApi?.pet.addCompanion({
+                              kind: kind as PetCompanionKind,
+                            });
+                          }, `${label}来小窝啦`)
+                        }
+                      >
+                        {exists ? "✓ " : "+ "}{label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+            <PetTeamHuddleCard
+              companions={snapshot.companions}
+              tasks={tasks}
+              disabled={busy}
+              onStartFocus={onStartFocus}
+              onOpenTask={onNavigateTask}
+            />
+            <PetCollectionCard inventory={snapshot.inventory} />
+          </div>
+        </section>
+      )}
+
+      {section === "adventure" && (
+        <section className="pet-adventure-section">
+          <div className="pet-adventure-scene" aria-hidden="true">
+            <span>✦</span>
+            <PetCharacter
+              name={profile.name}
+              visualStyle="atlas"
+              action={adventure?.completedAt ? "celebrate" : "inspect"}
+              emotion={adventure?.completedAt ? "proud" : "curious"}
+              palette={snapshot.appearance.palette}
+              outfit="explorer"
+              personality={profile.personality}
+              weatherEffect={petWeatherEffect}
+            />
+          </div>
+          <article className="pet-adventure-card">
+            <span className="pet-game-kicker">{adventure?.localDate ?? "今天"} · 每日一篇，不要求连续</span>
+            <h2>{adventure?.title ?? "正在展开地图…"}</h2>
+            <p>{adventure?.prompt}</p>
+            {adventure?.completedAt ? (
+              <div className="pet-adventure-outcome">
+                <strong>你们今天选择了：{adventure.choices.find((choice) => choice.id === adventure.selectedChoiceId)?.label}</strong>
+                <p>{adventure.outcome}</p>
+                <small>获得一颗冒险星与温和成长；错过一天不会失去任何东西。</small>
+              </div>
+            ) : (
+              <div className="pet-adventure-choices">
+                {adventure?.choices.map((choice) => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    className="soft-button"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(async () => {
+                        await window.desktopApi?.pet.completeAdventure(adventure.id, choice.id);
+                        const next = await window.desktopApi?.pet.dailyAdventure(adventure.localDate);
+                        if (next) setAdventure(next);
+                      }, "今日冒险已写入日记")
+                    }
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </article>
+        </section>
+      )}
+
+      {section === "play" && (
+        <PetPlayground
+          disabled={busy}
+          onComplete={(game, score, durationSeconds) =>
+            void run(async () => {
+              await window.desktopApi?.pet.recordMiniGame({
+                game,
+                score,
+                durationSeconds,
+              });
+            }, game === "breathing" ? "呼吸完成，慢一点也很好" : `接住了 ${score} 颗任务星`)
+          }
+        />
       )}
 
       {section === "diary" && (
@@ -4160,6 +11309,32 @@ function PetHomePage({
                 </div>
                 <h3>{entry.title}</h3>
                 <p>{entry.content}</p>
+                {entry.taskIds?.length ? (
+                  <div className="pet-diary-task-links" aria-label="日记关联任务">
+                    <span>一起完成</span>
+                    <div>
+                      {entry.taskIds.map((taskId) => {
+                        const task = tasks.find((candidate) => candidate.id === taskId);
+                        return task ? (
+                          <button
+                            key={task.id}
+                            type="button"
+                            className="pet-diary-task-link"
+                            onClick={() => onNavigateTask(task)}
+                            title="打开任务"
+                          >
+                            <CheckCircle2 size={13} />
+                            <span>{task.title}</span>
+                          </button>
+                        ) : (
+                          <span key={taskId} className="pet-diary-task-missing">
+                            任务已移除
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
                 <footer>
                   <span>完成 {entry.completedTaskCount} · 专注 {Math.round(entry.focusSeconds / 60)} 分钟</span>
                   <button type="button" className="ghost-button" onClick={() => setEditingDiary(entry)}>编辑</button>
@@ -4293,6 +11468,24 @@ function PetHomePage({
   );
 }
 
+type AutomationConditionDraft = {
+  source: "all" | "local" | "feishu";
+  project: string;
+  list: string;
+  section: string;
+  tag: string;
+  context: string;
+};
+
+const emptyAutomationConditionDraft = (): AutomationConditionDraft => ({
+  source: "all",
+  project: "",
+  list: "",
+  section: "",
+  tag: "",
+  context: "",
+});
+
 function SettingsPage({
   notify,
 }: {
@@ -4300,15 +11493,47 @@ function SettingsPage({
 }) {
   const [section, setSection] = useState<SettingsSection>("general");
   const [appSettings, setAppSettings] = useState<AppSettings>(defaultSettings);
+  const projectController = useTaskController("all", "");
+  const automationProjectState = useProjects();
+  const automationListState = useLists();
+  const projectReminderOptions = useMemo(
+    () => Array.from(new Set(
+      projectController.tasks
+        .map((task) => task.projectId?.trim())
+        .filter((projectId): projectId is string => Boolean(projectId)),
+    )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
+    [projectController.tasks],
+  );
+  const [selectedReminderProjects, setSelectedReminderProjects] = useState<string[]>([]);
+  const [bulkProjectReminderMode, setBulkProjectReminderMode] =
+    useState<ProjectReminderSelection>("inherit");
+  useEffect(() => {
+    setSelectedReminderProjects((current) =>
+      current.filter((projectId) => projectReminderOptions.includes(projectId)),
+    );
+  }, [projectReminderOptions]);
   const [apiKey, setApiKey] = useState("");
+  const [fallbackApiKey, setFallbackApiKey] = useState("");
+  const actionPacks = useInstalledPetActionPacks();
+  const taskTemplates = useTaskTemplates();
+  const [actionPackJson, setActionPackJson] = useState("");
+  const [actionPackError, setActionPackError] = useState("");
+  const [taskTemplateJson, setTaskTemplateJson] = useState("");
+  const [taskTemplateError, setTaskTemplateError] = useState("");
   const [feishuSecret, setFeishuSecret] = useState("");
   const [feishuStatus, setFeishuStatus] = useState<FeishuStatusView>();
   const [dataPreview, setDataPreview] = useState<ReadyDataPreview>();
+  const [petDataPreview, setPetDataPreview] = useState<ReadyPetDataPreview>();
   const [modelUsage, setModelUsage] = useState<ModelUsageStatus>();
   const [connectionTest, setConnectionTest] =
     useState<ModelConnectionTestResult>();
+  const [activityStatus, setActivityStatus] = useState<AgentActivityStatus>();
+  const [activitySetup, setActivitySetup] = useState<AgentActivitySetup>();
+  const [activityAgentId, setActivityAgentId] = useState<ExternalAgentId>("codex");
   const [importStrategy, setImportStrategy] =
     useState<DataImportStrategyView>("skip");
+  const [petImportStrategy, setPetImportStrategy] =
+    useState<PetDataImportStrategyView>("skip");
   const [clearDataSheet, setClearDataSheet] = useState(false);
   const [disconnectSheet, setDisconnectSheet] = useState(false);
   const [clearSelection, setClearSelection] = useState({
@@ -4317,17 +11542,219 @@ function SettingsPage({
     operations: true,
     resetSettings: false,
   });
+  const [markdownIncludesHistory, setMarkdownIncludesHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+  const settingsModalReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const disconnectDialogRef = useRef<HTMLDivElement>(null);
+  const disconnectCancelRef = useRef<HTMLButtonElement>(null);
+  const dataPreviewDialogRef = useRef<HTMLDivElement>(null);
+  const importStrategyRef = useRef<HTMLSelectElement>(null);
+  const petDataPreviewDialogRef = useRef<HTMLDivElement>(null);
+  const petImportStrategyRef = useRef<HTMLSelectElement>(null);
+  const clearDataDialogRef = useRef<HTMLDivElement>(null);
+  const clearDataCancelRef = useRef<HTMLButtonElement>(null);
+  const rememberSettingsModalTrigger = (trigger?: HTMLElement): void => {
+    const activeElement = trigger ?? document.activeElement;
+    settingsModalReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+  };
+  const restoreSettingsModalFocus = (): void => {
+    const returnFocus = settingsModalReturnFocusRef.current;
+    settingsModalReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (
+        !returnFocus.isConnected ||
+        returnFocus.hasAttribute("disabled") ||
+        returnFocus.getAttribute("aria-disabled") === "true"
+      ) {
+        return;
+      }
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  const closeDisconnectSheet = (): void => {
+    setDisconnectSheet(false);
+    restoreSettingsModalFocus();
+  };
+  const closeDataPreview = (cancel = true): void => {
+    if (cancel && dataPreview) {
+      void window.desktopApi?.data
+        .cancelPreview(dataPreview.previewToken)
+        .catch(() => undefined);
+    }
+    setDataPreview(undefined);
+    restoreSettingsModalFocus();
+  };
+  const closePetDataPreview = (cancel = true): void => {
+    if (cancel && petDataPreview) {
+      void window.desktopApi?.pet
+        .cancelDataImport(petDataPreview.previewToken)
+        .catch(() => undefined);
+    }
+    setPetDataPreview(undefined);
+    restoreSettingsModalFocus();
+  };
+  const closeClearDataSheet = (): void => {
+    setClearDataSheet(false);
+    restoreSettingsModalFocus();
+  };
+  useDialogFocus(
+    disconnectDialogRef,
+    disconnectCancelRef,
+    () => {
+      if (!saving) closeDisconnectSheet();
+    },
+    disconnectSheet,
+  );
+  useDialogFocus(
+    dataPreviewDialogRef,
+    importStrategyRef,
+    () => {
+      if (!saving) closeDataPreview();
+    },
+    Boolean(dataPreview),
+  );
+  useDialogFocus(
+    petDataPreviewDialogRef,
+    petImportStrategyRef,
+    () => {
+      if (!saving) closePetDataPreview();
+    },
+    Boolean(petDataPreview),
+  );
+  useDialogFocus(
+    clearDataDialogRef,
+    clearDataCancelRef,
+    () => {
+      if (!saving) closeClearDataSheet();
+    },
+    clearDataSheet,
+  );
+  const [automationName, setAutomationName] = useState("");
+  const [automationTrigger, setAutomationTrigger] =
+    useState<TaskAutomationTrigger>("task-created");
+  const [automationScheduleFrequency, setAutomationScheduleFrequency] =
+    useState<TaskAutomationScheduleFrequency>("daily");
+  const [automationScheduleTime, setAutomationScheduleTime] = useState("09:00");
+  const [automationScheduleWeekdays, setAutomationScheduleWeekdays] = useState<number[]>([
+    1, 2, 3, 4, 5,
+  ]);
+  const [automationDeadlineWindowMinutes, setAutomationDeadlineWindowMinutes] =
+    useState("60");
+  const [automationActionKind, setAutomationActionKind] =
+    useState<TaskAutomationAction["kind"]>("set-flagged");
+  const [automationActionValue, setAutomationActionValue] = useState("");
+  const [automationConditionSource, setAutomationConditionSource] =
+    useState<"all" | "local" | "feishu">("all");
+  const [automationConditionProject, setAutomationConditionProject] =
+    useState("");
+  const [automationConditionList, setAutomationConditionList] =
+    useState("");
+  const [automationConditionSection, setAutomationConditionSection] =
+    useState("");
+  const [automationConditionTag, setAutomationConditionTag] = useState("");
+  const [automationConditionContext, setAutomationConditionContext] =
+    useState("");
+  const [automationAlternativeConditions, setAutomationAlternativeConditions] =
+    useState<AutomationConditionDraft[]>([]);
+  const [automationAlternativesOpen, setAutomationAlternativesOpen] = useState(false);
+  const [automationPreview, setAutomationPreview] = useState<{
+    rule: TaskAutomationRule;
+    tasks: Task[];
+    draftKey: string;
+  }>();
+  const automationProjectOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const project of automationProjectState.projects) {
+      if (!project.archived) options.set(project.id, project.name);
+    }
+    for (const task of projectController.tasks) {
+      const projectId = task.projectId?.trim();
+      if (projectId && !options.has(projectId)) options.set(projectId, projectId);
+    }
+    return Array.from(options.entries())
+      .sort((left, right) => left[1].localeCompare(right[1], "zh-CN"))
+      .slice(0, 100);
+  }, [automationProjectState.projects, projectController.tasks]);
+  const automationListOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const list of automationListState.lists) {
+      if (!list.archived) options.set(list.id, list.name);
+    }
+    for (const task of projectController.tasks) {
+      const listId = task.listId?.trim();
+      if (listId && !options.has(listId)) options.set(listId, listId);
+    }
+    return Array.from(options.entries())
+      .sort((left, right) => left[1].localeCompare(right[1], "zh-CN"))
+      .slice(0, 100);
+  }, [automationListState.lists, projectController.tasks]);
+  const automationSectionOptions = useMemo(
+    () => Array.from(new Set(
+      projectController.tasks
+        .map((task) => task.sectionId?.trim())
+        .filter((sectionId): sectionId is string => Boolean(sectionId)),
+    )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
+    [projectController.tasks],
+  );
+  const automationTagOptions = useMemo(
+    () => Array.from(new Set(
+      projectController.tasks
+        .flatMap((task) => task.tags)
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
+    [projectController.tasks],
+  );
+  const automationContextOptions = useMemo(
+    () => Array.from(new Set(
+      projectController.tasks
+        .flatMap((task) => task.contexts ?? [])
+        .map((context) => context.trim())
+        .filter(Boolean),
+    )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
+    [projectController.tasks],
+  );
+  const activeAiProvider = agentProviderFor(appSettings);
+  const activeAiModelConfigured = Boolean(activeAiProvider.model.trim());
+  const activeAiAuthConfigured =
+    activeAiProvider.authMode === "none" || Boolean(activeAiProvider.credentialId);
+  const fallbackAiReady =
+    appSettings.ai.fallback.enabled &&
+    Boolean(appSettings.ai.fallback.model.trim()) &&
+    (appSettings.ai.fallback.authMode === "none" ||
+      Boolean(appSettings.ai.fallback.credentialId));
+  const activityExample = useMemo(() => {
+    if (!activitySetup) return "";
+    return activitySetup.example.replace(
+      /("agent_id"\s*:\s*")codex("\s*,)/u,
+      `$1${activityAgentId}$2`,
+    );
+  }, [activityAgentId, activitySetup]);
+  const activityAgentOptions = useMemo(
+    () => externalAgentOptions.filter((option) => appSettings.agentActivity.allowedAgents.includes(option.id)),
+    [appSettings.agentActivity.allowedAgents],
+  );
+  useEffect(() => {
+    if (activityAgentOptions.some((option) => option.id === activityAgentId)) return;
+    setActivityAgentId(activityAgentOptions[0]?.id ?? "custom");
+  }, [activityAgentId, activityAgentOptions]);
   useEffect(() => {
     if (!window.desktopApi) return undefined;
     void window.desktopApi.settings
       .get()
       .then(setAppSettings)
       .catch(() => notify("读取设置失败", "error"));
-    void window.desktopApi.feishu.status().then(setFeishuStatus);
+    void window.desktopApi.feishu.status().then(setFeishuStatus).catch(() => undefined);
     void window.desktopApi.agent
       .modelUsage()
       .then(setModelUsage)
+      .catch(() => undefined);
+    void window.desktopApi.agentActivity?.status()
+      .then(setActivityStatus)
       .catch(() => undefined);
     const offSettings =
       window.desktopApi.events.onSettingsChanged(setAppSettings);
@@ -4364,13 +11791,260 @@ function SettingsPage({
   };
   const update = (patch: Partial<AppSettings>, message?: string) =>
     void persist({ ...appSettings, ...patch }, message);
-  const saveApiKey = async () => {
+  const automationActionValueOrNull = (value: string): string | null =>
+    value.trim() || null;
+  const buildAutomationAction = (): TaskAutomationAction => {
+    switch (automationActionKind) {
+      case "set-flagged":
+        return { kind: "set-flagged", value: automationActionValue !== "false" };
+      case "set-project":
+      case "set-list":
+      case "set-section":
+        return {
+          kind: automationActionKind,
+          value: automationActionValueOrNull(automationActionValue),
+        } as TaskAutomationAction;
+      case "set-defer-until":
+        return {
+          kind: "set-defer-until",
+          value: automationActionValue.trim() || null,
+        };
+      case "add-tag":
+      case "remove-tag":
+      case "add-context":
+      case "remove-context":
+        return { kind: automationActionKind, value: automationActionValue.trim() };
+    }
+  };
+  const automationProjectNames = useMemo(
+    () => new Map(automationProjectOptions),
+    [automationProjectOptions],
+  );
+  const automationListNames = useMemo(
+    () => new Map(automationListOptions),
+    [automationListOptions],
+  );
+  const describeAutomationConditionBranch = (
+    branch: TaskAutomationConditionBranch,
+  ): string => {
+    const labels: string[] = [];
+    if (branch.source) labels.push(branch.source === "local" ? "仅本地" : "仅飞书");
+    if (branch.projectId) {
+      labels.push(`项目：${automationProjectNames.get(branch.projectId) ?? branch.projectId}`);
+    }
+    if (branch.listId) {
+      labels.push(`清单：${automationListNames.get(branch.listId) ?? branch.listId}`);
+    }
+    if (branch.sectionId) labels.push(`分组：${branch.sectionId}`);
+    if (branch.tag) labels.push(`标签：${branch.tag}`);
+    if (branch.context) labels.push(`情境：${branch.context}`);
+    return labels.length ? labels.join(" · ") : "所有任务";
+  };
+  const describeAutomationCondition = (rule: TaskAutomationRule): string => {
+    const { anyOf, ...base } = rule.condition;
+    const baseLabel = describeAutomationConditionBranch(base);
+    if (!anyOf?.length) return baseLabel;
+    return `${baseLabel} · 任一：${anyOf.map(describeAutomationConditionBranch).join(" / ")}`;
+  };
+  const buildAutomationConditionBranch = (
+    draft: AutomationConditionDraft,
+  ): TaskAutomationConditionBranch | undefined => {
+    const branch: TaskAutomationConditionBranch = {
+      ...(draft.source === "all" ? {} : { source: draft.source }),
+      ...(draft.project.trim() ? { projectId: draft.project.trim() } : {}),
+      ...(draft.list.trim() ? { listId: draft.list.trim() } : {}),
+      ...(draft.section.trim() ? { sectionId: draft.section.trim() } : {}),
+      ...(draft.tag.trim() ? { tag: draft.tag.trim() } : {}),
+      ...(draft.context.trim() ? { context: draft.context.trim() } : {}),
+    };
+    return Object.keys(branch).length > 0 ? branch : undefined;
+  };
+  const automationDraftKey = JSON.stringify({
+    name: automationName,
+    trigger: automationTrigger,
+    scheduleFrequency: automationScheduleFrequency,
+    scheduleTime: automationScheduleTime,
+    scheduleWeekdays: automationScheduleWeekdays,
+    deadlineWindowMinutes: automationDeadlineWindowMinutes,
+    conditionSource: automationConditionSource,
+    conditionProject: automationConditionProject,
+    conditionList: automationConditionList,
+    conditionSection: automationConditionSection,
+    conditionTag: automationConditionTag,
+    conditionContext: automationConditionContext,
+    alternatives: automationAlternativeConditions,
+    actionKind: automationActionKind,
+    actionValue: automationActionValue,
+  });
+  const buildAutomationRule = (): TaskAutomationRule => {
+    if (automationTrigger === "scheduled" && !/^([01]\d|2[0-3]):[0-5]\d$/u.test(automationScheduleTime)) {
+      throw new Error("INVALID_AUTOMATION_SCHEDULE_TIME");
+    }
+    if (
+      automationTrigger === "scheduled" &&
+      automationScheduleFrequency === "weekly" &&
+      automationScheduleWeekdays.length === 0
+    ) {
+      throw new Error("INVALID_AUTOMATION_WEEKDAYS");
+    }
+    const alternativeConditions = automationAlternativeConditions
+      .map(buildAutomationConditionBranch)
+      .filter((branch): branch is TaskAutomationConditionBranch => branch !== undefined);
+    if (alternativeConditions.length !== automationAlternativeConditions.length) {
+      throw new Error("INVALID_AUTOMATION_ALTERNATIVE");
+    }
+    return createTaskAutomationRule({
+      name: automationName,
+      trigger: automationTrigger,
+      condition: {
+        ...(automationConditionSource === "all"
+          ? {}
+          : { source: automationConditionSource }),
+        ...(automationConditionProject.trim()
+          ? { projectId: automationConditionProject.trim() }
+          : {}),
+        ...(automationConditionList.trim()
+          ? { listId: automationConditionList.trim() }
+          : {}),
+        ...(automationConditionSection.trim()
+          ? { sectionId: automationConditionSection.trim() }
+          : {}),
+        ...(automationConditionTag.trim()
+          ? { tag: automationConditionTag.trim() }
+          : {}),
+        ...(automationConditionContext.trim()
+          ? { context: automationConditionContext.trim() }
+          : {}),
+        ...(alternativeConditions.length ? { anyOf: alternativeConditions } : {}),
+      },
+      action: buildAutomationAction(),
+      ...(automationTrigger === "scheduled"
+        ? {
+            schedule: {
+              frequency: automationScheduleFrequency,
+              time: automationScheduleTime,
+              ...(automationScheduleFrequency === "weekly"
+                ? { weekdays: automationScheduleWeekdays }
+                : {}),
+            },
+          }
+        : {}),
+      ...(automationTrigger === "deadline-approaching"
+        ? { deadlineWindowMinutes: Number(automationDeadlineWindowMinutes) }
+        : {}),
+    });
+  };
+  const automationErrorMessage = (reason: unknown): string => {
+    if (!(reason instanceof Error)) return "自动化规则无效";
+    if (reason.message === "INVALID_AUTOMATION_SCHEDULE_TIME") return "请填写有效的计划时间";
+    if (reason.message === "INVALID_AUTOMATION_WEEKDAYS") return "每周计划至少选择一天";
+    if (reason.message === "INVALID_AUTOMATION_ALTERNATIVE") return "请完整填写每个任一条件组，或移除空白条件组";
+    if (reason.message === "INVALID_TASK_AUTOMATION_RULE") return "请填写有效的规则名称和动作值";
+    return "自动化规则无效";
+  };
+  const automationPreviewTriggerHint = (rule: TaskAutomationRule): string => {
+    if (rule.trigger === "scheduled") return "计划触发只会处理仍未完成的任务。";
+    if (rule.trigger === "deadline-approaching") {
+      return "临近截止预览按当前时间窗口计算；实际执行仍会由后台定时检查。";
+    }
+    if (rule.trigger === "task-created") return "新建触发器只会在新任务创建时执行。";
+    if (rule.trigger === "task-completed") return "完成触发器只会在任务完成时执行。";
+    return "这里展示的是当前任务快照的条件匹配，不会模拟或执行动作。";
+  };
+  const previewAutomation = (): void => {
+    try {
+      const rule = buildAutomationRule();
+      const tasks = taskAutomationPreviewTasks(rule, projectController.tasks, new Date());
+      setAutomationPreview({ rule, tasks, draftKey: automationDraftKey });
+      notify(`试运行完成：当前有 ${tasks.length} 项任务符合条件`, "success");
+    } catch (reason) {
+      notify(automationErrorMessage(reason), "error");
+    }
+  };
+  const addAutomation = async (): Promise<void> => {
+    if (appSettings.automations.length >= 50) {
+      notify("最多保存 50 条任务自动化规则", "error");
+      return;
+    }
+    try {
+      const rule = buildAutomationRule();
+      const saved = await persist(
+        { ...appSettings, automations: [...appSettings.automations, rule] },
+        "自动化规则已保存",
+      );
+      if (!saved) return;
+      setAutomationName("");
+      setAutomationActionValue("");
+      setAutomationTrigger("task-created");
+      setAutomationScheduleFrequency("daily");
+      setAutomationScheduleTime("09:00");
+      setAutomationScheduleWeekdays([1, 2, 3, 4, 5]);
+      setAutomationDeadlineWindowMinutes("60");
+      setAutomationConditionSource("all");
+      setAutomationConditionProject("");
+      setAutomationConditionList("");
+      setAutomationConditionSection("");
+      setAutomationConditionTag("");
+      setAutomationConditionContext("");
+      setAutomationAlternativeConditions([]);
+      setAutomationAlternativesOpen(false);
+      setAutomationPreview(undefined);
+    } catch (reason) {
+      notify(automationErrorMessage(reason), "error");
+    }
+  };
+  const toggleAutomation = (id: string, enabled: boolean): void => {
+    const automations = appSettings.automations.map((rule) =>
+      rule.id === id
+        ? { ...rule, enabled, updatedAt: new Date().toISOString() }
+        : rule,
+    );
+    void persist({ ...appSettings, automations }, enabled ? "自动化已启用" : "自动化已暂停");
+  };
+  const removeAutomation = (id: string): void => {
+    void persist(
+      {
+        ...appSettings,
+        automations: appSettings.automations.filter((rule) => rule.id !== id),
+      },
+      "自动化规则已删除",
+    );
+  };
+  const updateModelPricing = (
+    provider: "primary" | "fallback",
+    field: keyof ModelPricing,
+    value: number,
+  ) => {
+    setAppSettings((current) => {
+      if (provider === "primary") {
+        return {
+          ...current,
+          ai: {
+            ...current.ai,
+            pricing: { ...current.ai.pricing, [field]: value },
+          },
+        };
+      }
+      return {
+        ...current,
+        ai: {
+          ...current.ai,
+          fallback: {
+            ...current.ai.fallback,
+            pricing: { ...current.ai.fallback.pricing, [field]: value },
+          },
+        },
+      };
+    });
+  };
+  const persistModelPricing = () => void persist(appSettings, "模型价格已更新");
+  const saveApiKey = async (): Promise<boolean> => {
     if (
       appSettings.ai.authMode === "none" ||
       !apiKey.trim() ||
       !window.desktopApi
     )
-      return;
+      return false;
     setSaving(true);
     try {
       const credential = await window.desktopApi.settings.setCredential({
@@ -4378,28 +12052,95 @@ function SettingsPage({
         value: apiKey,
         id: appSettings.ai.credentialId,
       });
-      await persist(
+      const saved = await persist(
         {
           ...appSettings,
           ai: { ...appSettings.ai, credentialId: credential.id },
         },
         "API Key 已加密保存",
       );
+      if (!saved) return false;
       setApiKey("");
+      return true;
     } catch (reason) {
       notify(
         reason instanceof Error ? reason.message : "安全存储不可用",
+        "error",
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+  const saveFallbackApiKey = async () => {
+    const fallback = appSettings.ai.fallback;
+    if (
+      fallback.authMode === "none" ||
+      !fallbackApiKey.trim() ||
+      !window.desktopApi
+    )
+      return;
+    setSaving(true);
+    try {
+      const credential = await window.desktopApi.settings.setCredential({
+        kind: "ai-api-key",
+        value: fallbackApiKey,
+        id: fallback.credentialId,
+      });
+      await persist(
+        {
+          ...appSettings,
+          ai: {
+            ...appSettings.ai,
+            fallback: { ...fallback, credentialId: credential.id },
+          },
+        },
+        "备用模型 API Key 已加密保存",
+      );
+      setFallbackApiKey("");
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "备用模型凭据保存失败",
         "error",
       );
     } finally {
       setSaving(false);
     }
   };
+  const installActionPack = () => {
+    const result = parsePetActionPackJson(actionPackJson);
+    if (!result.ok) {
+      setActionPackError(result.message);
+      return;
+    }
+    actionPacks.install(result.pack);
+    actionPacks.activate(result.pack.id);
+    setActionPackJson("");
+    setActionPackError("");
+    notify(`已安装动作包「${result.pack.name}」`, "success");
+  };
+  const installTaskTemplate = () => {
+    const result = parseTaskTemplateJson(taskTemplateJson);
+    if (!result.ok) {
+      setTaskTemplateError(result.message);
+      return;
+    }
+    taskTemplates.install(result.template);
+    setTaskTemplateJson("");
+    setTaskTemplateError("");
+    notify(`已安装工作流模板「${result.template.name}」`, "success");
+  };
   const testModelConnection = async () => {
     if (!window.desktopApi) return;
     setSaving(true);
     setConnectionTest(undefined);
     try {
+      // If the user just entered a replacement key, do not silently test the
+      // previous credential. Persist it through OS secure storage first.
+      if (appSettings.ai.authMode === "bearer" && apiKey.trim()) {
+        const saved = await saveApiKey();
+        if (!saved) return;
+      }
       const result = await window.desktopApi.agent.testModelConnection();
       setConnectionTest(result);
       setModelUsage(result.usage);
@@ -4535,7 +12276,7 @@ function SettingsPage({
         }
         await window.desktopApi.tasks.purge(task.id);
       }
-      setDisconnectSheet(false);
+      closeDisconnectSheet();
       notify(
         strategy === "keep"
           ? "已断开飞书；本地缓存、映射和冲突记录均已保留"
@@ -4571,6 +12312,33 @@ function SettingsPage({
       setSaving(false);
     }
   };
+  const exportMarkdownData = async () => {
+    if (!window.desktopApi) return;
+    setSaving(true);
+    try {
+      const result = await window.desktopApi.data.exportMarkdownToFile({
+        redaction: "private",
+        include: {
+          tasks: true,
+          projects: true,
+          lists: true,
+          operations: markdownIncludesHistory,
+        },
+      });
+      if (result.status === "exported")
+        notify(
+          `已导出可读 Markdown${markdownIncludesHistory ? "（含事件摘要）" : ""}（${Math.ceil(result.bytes / 1024)} KB）`,
+          "success",
+        );
+    } catch (reason) {
+      notify(
+        reason instanceof Error ? reason.message : "Markdown 导出失败",
+        "error",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
   const previewImport = async () => {
     if (!window.desktopApi) return;
     setSaving(true);
@@ -4589,10 +12357,58 @@ function SettingsPage({
       setSaving(false);
     }
   };
-  const cancelImport = () => {
-    if (dataPreview)
-      void window.desktopApi?.data.cancelPreview(dataPreview.previewToken);
-    setDataPreview(undefined);
+  const exportPetData = async () => {
+    if (!window.desktopApi) return;
+    setSaving(true);
+    try {
+      const result = await window.desktopApi.pet.exportData();
+      if (result.status === "exported") {
+        notify(
+          `已导出 Todo Pet 档案（${Math.ceil(result.bytes / 1024)} KB；不包含正在运行的专注）`,
+          "success",
+        );
+      }
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "宠物档案导出失败", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const previewPetDataImport = async () => {
+    if (!window.desktopApi) return;
+    setSaving(true);
+    try {
+      const result = await window.desktopApi.pet.previewDataImport();
+      if (result.status === "ready") {
+        setPetDataPreview(result);
+        setPetImportStrategy("skip");
+      }
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "宠物档案无效", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const commitPetDataImport = async () => {
+    if (!window.desktopApi || !petDataPreview) return;
+    setSaving(true);
+    try {
+      const committed = await window.desktopApi.pet.commitDataImport(
+        petDataPreview.previewToken,
+        petImportStrategy,
+      );
+      notify(
+        committed.result.replaced
+          ? "Todo Pet 档案已导入，当前专注保持不变"
+          : "已保留本机 Todo Pet 档案",
+        "success",
+      );
+      closePetDataPreview(false);
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : "宠物档案导入失败", "error");
+    } finally {
+      setSaving(false);
+    }
   };
   const commitImport = async () => {
     if (!window.desktopApi || !dataPreview) return;
@@ -4606,13 +12422,13 @@ function SettingsPage({
         `导入完成：新增 ${committed.result.tasks.create} 项任务`,
         "success",
       );
-      setDataPreview(undefined);
+      closeDataPreview(false);
     } catch (reason) {
       notify(
         reason instanceof Error ? reason.message : "导入提交失败",
         "error",
       );
-      setDataPreview(undefined);
+      closeDataPreview();
     } finally {
       setSaving(false);
     }
@@ -4629,7 +12445,7 @@ function SettingsPage({
           `已清除 ${result.tasks} 项任务、${result.drafts} 份草稿`,
           "success",
         );
-        setClearDataSheet(false);
+        closeClearDataSheet();
         setAppSettings(await window.desktopApi.settings.get());
       }
     } catch (reason) {
@@ -4645,6 +12461,7 @@ function SettingsPage({
     ["general", <Settings size={17} />, "通用"],
     ["floating", <PanelTop size={17} />, "Todo Pet"],
     ["notifications", <Bell size={17} />, "提醒"],
+    ["automations", <ListChecks size={17} />, "任务自动化"],
     ["integrations", <Cloud size={17} />, "飞书"],
     ["ai", <Sparkles size={17} />, "模型与 Agent"],
     ["permissions", <ShieldCheck size={17} />, "权限中心"],
@@ -4710,7 +12527,13 @@ function SettingsPage({
                           value ? "已启用开机启动" : "已关闭开机启动",
                           "success",
                         );
-                      });
+                      })
+                      .catch((reason) =>
+                        notify(
+                          reason instanceof Error ? reason.message : "开机启动设置失败",
+                          "error",
+                        ),
+                      );
                   else update({ launchAtLogin: value });
                 }}
                 label="开机启动"
@@ -4746,12 +12569,74 @@ function SettingsPage({
                 label="关闭后驻留"
               />
             </div>
+            <div className="settings-subheading">
+              <span>任务规划</span>
+              <p>调整 Todo Pet 选择“下一步”时看重什么；只影响本地建议，不改任务事实或飞书。</p>
+            </div>
+            {urgencyWeightLabels.map(({ key, label, description }) => (
+              <div className="settings-row" key={key}>
+                <div>
+                  <strong>{label}</strong>
+                  <p>{description}</p>
+                </div>
+                <div className="settings-number-control">
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={5}
+                    aria-label={`${label}权重`}
+                    value={appSettings.planning.urgencyWeights[key]}
+                    onChange={(event) => {
+                      const next = Number(event.target.value);
+                      if (!Number.isFinite(next)) return;
+                      setAppSettings((current) => ({
+                        ...current,
+                        planning: {
+                          ...current.planning,
+                          urgencyWeights: {
+                            ...current.planning.urgencyWeights,
+                            [key]: Math.min(100, Math.max(0, Math.round(next))),
+                          },
+                        },
+                      }));
+                    }}
+                    onBlur={() => void persist(appSettings, "任务规划偏好已更新")}
+                  />
+                  <span>/ 100</span>
+                </div>
+              </div>
+            ))}
+            <div className="settings-row">
+              <div>
+                <strong>恢复默认权重</strong>
+                <p>截止 70 · 今天 90 · 优先级 40 · 短任务 10</p>
+              </div>
+              <button
+                type="button"
+                className="soft-button"
+                disabled={saving}
+                onClick={() =>
+                  void persist(
+                    {
+                      ...appSettings,
+                      planning: structuredClone(defaultSettings.planning),
+                    },
+                    "已恢复默认规划偏好",
+                  )
+                }
+              >
+                恢复默认
+              </button>
+            </div>
           </section>
         )}
         {section === "floating" && (
           <section className="settings-section">
             <h1>Todo Pet 与桌面</h1>
             <p>桌面宠物、随身面板和主应用保持同一任务语境。</p>
+            <BuddyGallery onOpenAgentSettings={() => setSection('ai')} />
             <div className="settings-subheading">
               <span>身份与外观</span>
               <p>同一个名字会用于桌面陪伴、提醒和对话。</p>
@@ -4786,7 +12671,13 @@ function SettingsPage({
                   if (window.desktopApi)
                     void window.desktopApi.shell
                       .setFloatingVisible(value)
-                      .then(setAppSettings);
+                      .then(setAppSettings)
+                      .catch((reason) =>
+                        notify(
+                          reason instanceof Error ? reason.message : "Todo Pet 显示设置失败",
+                          "error",
+                        ),
+                      );
                   else
                     void persist({
                       ...appSettings,
@@ -4891,6 +12782,22 @@ function SettingsPage({
             </div>
             <div className="settings-row">
               <div>
+                <strong>鼠标穿透</strong>
+                <p>宠物保持可见，但鼠标点击会落到后面的窗口；可从这里或系统托盘关闭</p>
+              </div>
+              <Switch
+                checked={appSettings.floating.mousePassthrough}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    floating: { ...appSettings.floating, mousePassthrough: value },
+                  }, value ? "已开启鼠标穿透" : "已关闭鼠标穿透")
+                }
+                label="鼠标穿透 Todo Pet"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
                 <strong>全屏时隐藏</strong>
                 <p>演示、视频或游戏进入全屏后自动隐藏</p>
               </div>
@@ -4930,6 +12837,30 @@ function SettingsPage({
             </div>
             <div className="settings-row">
               <div>
+                <strong>陪伴策略模板</strong>
+                <p>一键组合主动程度、提醒语气、动作性格和专注自动衔接；也可以逐项改成自定义。</p>
+              </div>
+              <select
+                className="settings-input"
+                aria-label="陪伴策略模板"
+                value={detectCompanionStrategy(appSettings)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "custom") return;
+                  void persist(
+                    applyCompanionStrategy(appSettings, value as CompanionStrategy),
+                    `${companionStrategyLabels[value as CompanionStrategy]}已启用`,
+                  );
+                }}
+              >
+                <option value="custom">自定义</option>
+                {(Object.keys(companionStrategyLabels) as CompanionStrategy[]).map((strategy) => (
+                  <option value={strategy} key={strategy}>{companionStrategyLabels[strategy]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="settings-row">
+              <div>
                 <strong>点击互动</strong>
                 <p>每天首次主动互动会留下少量亲密度记录</p>
               </div>
@@ -4958,6 +12889,275 @@ function SettingsPage({
                   })
                 }
                 label="主动陪伴"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>动作性格</strong>
+                <p>决定 20 种待机动作出现的组合与节奏</p>
+              </div>
+              <select
+                className="settings-input"
+                value={appSettings.pet.actionPack}
+                onChange={(event) =>
+                  void persist({
+                    ...appSettings,
+                    pet: {
+                      ...appSettings.pet,
+                      actionPack: event.target.value as AppSettings["pet"]["actionPack"],
+                    },
+                  }, "动作性格已更新")
+                }
+              >
+                <option value="balanced">自然平衡</option>
+                <option value="calm">安静陪伴</option>
+                <option value="playful">活泼好奇</option>
+                <option value="focused">专注搭档</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>动作幅度</strong>
+                <p>“舒缓”会保留呼吸和眨眼，但降低跳动与位移</p>
+              </div>
+              <select
+                className="settings-input"
+                value={appSettings.pet.animationIntensity}
+                onChange={(event) =>
+                  void persist({
+                    ...appSettings,
+                    pet: {
+                      ...appSettings.pet,
+                      animationIntensity: event.target.value as AppSettings["pet"]["animationIntensity"],
+                    },
+                  }, "动作幅度已更新")
+                }
+              >
+                <option value="lively">鲜明</option>
+                <option value="gentle">舒缓</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>工作时回应</strong>
+                <p>只读取系统最近是否有输入，让宠物偶尔敲键盘或翻书；不读取按键内容，默认关闭</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.inputReactionsEnabled}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, inputReactionsEnabled: value },
+                  }, value ? "已开启工作时回应" : "已关闭工作时回应")
+                }
+                label="工作时回应"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>休假模式</strong>
+                <p>保留宠物、任务、同步和手动互动；暂停主动陪伴、工作时回应和自动日记，不产生连续签到压力</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.vacationMode}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, vacationMode: value },
+                  }, value ? "已进入休假模式" : "已恢复陪伴")
+                }
+                label="休假模式"
+              />
+            </div>
+            <div className="settings-subheading">
+              <span>可安装动作包</span>
+              <p>动作包只是一组已有待机动作；可以调节动作冷却和出现频率，不允许脚本、网络请求、文件读取或外部代码。</p>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>当前动作包</strong>
+                <p>{actionPacks.activePack?.description ?? "未选择自定义包，使用上面的内置动作性格"}</p>
+              </div>
+              <select
+                className="settings-input"
+                aria-label="当前自定义动作包"
+                value={actionPacks.activeId ?? ""}
+                onChange={(event) => actionPacks.activate(event.target.value || undefined)}
+              >
+                <option value="">使用内置动作性格</option>
+                {actionPacks.packs.map((pack) => (
+                  <option value={pack.id} key={pack.id}>{pack.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="action-pack-installer">
+              <textarea
+                className="settings-input action-pack-json"
+                aria-label="动作包 JSON"
+                value={actionPackJson}
+                onChange={(event) => {
+                  setActionPackJson(event.target.value);
+                  setActionPackError("");
+                }}
+                placeholder={'粘贴动作包 JSON，例如：{\n  "id": "cozy-reading",\n  "name": "安静阅读",\n  "description": "更多阅读和休息动作",\n  "idleActions": ["read", "drink", "stretch", "nap"],\n  "cooldownMs": 30000,\n  "actionWeights": { "read": 5, "drink": 2 }\n}'}
+                rows={5}
+              />
+              <div className="settings-actions">
+                <button type="button" className="soft-button" disabled={!actionPackJson.trim()} onClick={installActionPack}>
+                  <Upload size={15} /> 安装 / 更新动作包
+                </button>
+                {actionPacks.activePack && (
+                  <button type="button" className="danger-button" onClick={() => {
+                    const removed = actionPacks.activePack;
+                    if (!removed) return;
+                    actionPacks.remove(removed.id);
+                    notify(`已移除动作包「${removed.name}」`, "success");
+                  }}>
+                    <Trash2 size={15} /> 移除当前包
+                  </button>
+                )}
+              </div>
+              {actionPackError && <p className="form-error">{actionPackError}</p>}
+            </div>
+            <PetActionPackEditor
+              activePack={actionPacks.activePack}
+              disabled={saving}
+              onInstall={(pack) => {
+                actionPacks.install(pack);
+                actionPacks.activate(pack.id);
+                notify(`已安装并启用动作包「${pack.name}」`, "success");
+              }}
+            />
+            <div className="settings-subheading">
+              <span>工作流模板</span>
+              <p>把会议、研究或发布流程保存成几步任务；使用时仍会先预览，再由你确认创建。</p>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>内置模板</strong>
+                <p>{taskTemplates.templates.length} 个模板可在快速录入中使用，模板只保存在本机。</p>
+              </div>
+              <span className="settings-inline-note">本地优先</span>
+            </div>
+            <div className="action-pack-installer task-template-installer">
+              <textarea
+                className="settings-input action-pack-json"
+                aria-label="工作流模板 JSON"
+                value={taskTemplateJson}
+                onChange={(event) => {
+                  setTaskTemplateJson(event.target.value);
+                  setTaskTemplateError("");
+                }}
+                placeholder={'粘贴模板 JSON，例如：{\n  "id": "launch-checklist",\n  "name": "发布检查",\n  "description": "发布前逐项确认",\n  "defaultSource": "local",\n  "steps": [{ "id": "check", "titleTemplate": "检查：{{title}}", "estimatedMinutes": 30 }]\n}'}
+                rows={5}
+              />
+              <div className="settings-actions">
+                <button type="button" className="soft-button" disabled={!taskTemplateJson.trim()} onClick={installTaskTemplate}>
+                  <Upload size={15} /> 安装 / 更新模板
+                </button>
+              </div>
+              {taskTemplateError && <p className="form-error">{taskTemplateError}</p>}
+              {taskTemplates.templates.filter((template) => !["meeting-follow-up", "research-brief", "publish-article"].includes(template.id)).map((template) => (
+                <div className="task-template-installed" key={template.id}>
+                  <span><strong>{template.name}</strong><small>{template.steps.length} 步 · {template.description}</small></span>
+                  <button type="button" className="icon-button" aria-label={`移除模板${template.name}`} onClick={() => {
+                    taskTemplates.remove(template.id);
+                    notify(`已移除模板「${template.name}」`, "success");
+                  }}><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>主动交流间隔</strong>
+                <p>专注、会议、静音、夜间和全屏状态始终优先免打扰</p>
+              </div>
+              <div className="settings-number-control">
+                <input
+                  className="settings-input"
+                  type="number"
+                  aria-label="主动交流间隔"
+                  min={15}
+                  max={240}
+                  step={15}
+                  value={appSettings.pet.proactiveIntervalMinutes}
+                  onChange={(event) =>
+                    setAppSettings((current) => ({
+                      ...current,
+                      pet: {
+                        ...current.pet,
+                        proactiveIntervalMinutes: Number(event.target.value),
+                      },
+                    }))
+                  }
+                  onBlur={() => void persist(appSettings, "主动交流间隔已更新")}
+                />
+                <span>分钟</span>
+              </div>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>每日主动陪伴预算</strong>
+                <p>宠物每天主动开口的次数；设为 0 表示不限次数</p>
+              </div>
+              <div className="settings-number-control">
+                <input
+                  className="settings-input"
+                  type="number"
+                  aria-label="每日主动陪伴预算"
+                  min={0}
+                  max={20}
+                  step={1}
+                  value={appSettings.pet.proactiveDailyLimit}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    setAppSettings((current) => ({
+                      ...current,
+                      pet: {
+                        ...current.pet,
+                        proactiveDailyLimit: Math.min(20, Math.max(0, Math.round(value))),
+                      },
+                    }));
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                  onBlur={() => void persist(appSettings, "每日主动陪伴预算已更新")}
+                />
+                <span>次</span>
+              </div>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>会议模式</strong>
+                <p>宠物保持呼吸与眨眼，但不主动说话或弹出提醒</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.meetingMode}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, meetingMode: value },
+                  })
+                }
+                label="会议模式"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>季节小事件</strong>
+                <p>只改变小装饰和偶发动作，不影响任务与成长数值</p>
+              </div>
+              <Switch
+                checked={appSettings.pet.seasonalEvents}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    pet: { ...appSettings.pet, seasonalEvents: value },
+                  })
+                }
+                label="季节小事件"
               />
             </div>
             <div className="settings-row">
@@ -5076,6 +13276,85 @@ function SettingsPage({
                 }
                 label="自动开始下一轮"
               />
+            </div>
+            <div className="settings-row settings-row-select">
+              <div>
+                <strong>专注环境音</strong>
+                <p>只在专注阶段播放本地生成的轻环境音，暂停或休息时自动停止</p>
+              </div>
+              <select
+                className="settings-input settings-select"
+                aria-label="专注环境音"
+                value={appSettings.focus.environmentSound}
+                onChange={(event) => {
+                  const value = event.target.value as AppSettings["focus"]["environmentSound"];
+                  const next = {
+                    ...appSettings,
+                    focus: { ...appSettings.focus, environmentSound: value },
+                  };
+                  setAppSettings(next);
+                  void persist(next);
+                }}
+              >
+                {environmentSoundOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="settings-subheading">
+              <span>专注守护</span>
+              <p>只在专注进行时检查前台应用名，宠物提醒你回到节奏。</p>
+            </div>
+            <div className="settings-row settings-row-select">
+              <div>
+                <strong>守护方式</strong>
+                <p>温和提醒不会打断；自动暂停只暂停 Todo Agent 的这次专注。</p>
+              </div>
+              <select
+                className="settings-input settings-select"
+                aria-label="专注守护方式"
+                value={appSettings.focus.shieldMode}
+                onChange={(event) => {
+                  const value = event.target.value as AppSettings["focus"]["shieldMode"];
+                  const next = {
+                    ...appSettings,
+                    focus: { ...appSettings.focus, shieldMode: value },
+                  };
+                  setAppSettings(next);
+                  void persist(next, "专注守护已更新");
+                }}
+              >
+                <option value="off">关闭</option>
+                <option value="gentle">温和提醒</option>
+                <option value="pause">匹配时自动暂停</option>
+              </select>
+            </div>
+            <div className="settings-row settings-row-stack">
+              <div>
+                <strong>关注的应用</strong>
+                <p>每行一个名称或片段，例如 Chrome、YouTube。最多 12 个。</p>
+              </div>
+              <textarea
+                className="settings-input settings-textarea"
+                aria-label="专注守护应用"
+                rows={3}
+                placeholder="Chrome\nYouTube"
+                value={appSettings.focus.shieldApplications.join("\n")}
+                onChange={(event) => {
+                  const values = normalizeShieldApplications(event.target.value.split("\n"));
+                  setAppSettings((current) => ({
+                    ...current,
+                    focus: { ...current.focus, shieldApplications: values },
+                  }));
+                }}
+                onBlur={() => void persist(appSettings, "专注守护应用已更新")}
+              />
+            </div>
+            <div className="settings-note settings-note-quiet">
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span>隐私边界：只读取当前前台应用名，不读取窗口标题或内容，不关闭、阻挡或控制其他应用；可随时关闭。</span>
             </div>
             <div className="settings-subheading">
               <span>天气卡片</span>
@@ -5307,6 +13586,217 @@ function SettingsPage({
                 </div>
               </div>
             )}
+            <div className="settings-row">
+              <div>
+                <strong>每日任务提醒预算</strong>
+                <p>普通任务每天最多弹出多少次；同步风险、审批和晨报不占用这个预算</p>
+              </div>
+              <input
+                type="number"
+                min={0}
+                max={50}
+                step={1}
+                className="settings-input"
+                aria-label="每日任务提醒预算"
+                value={appSettings.notifications.dailyTaskReminderLimit}
+                onChange={(event) =>
+                  (() => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    void persist({
+                      ...appSettings,
+                      notifications: {
+                        ...appSettings.notifications,
+                        dailyTaskReminderLimit: Math.min(50, Math.max(0, Math.round(value))),
+                      },
+                    });
+                  })()
+                }
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>连续忽略后降频</strong>
+                <p>同一任务连续关闭两次提醒后不再重复打扰，任务仍保留在列表中</p>
+              </div>
+              <Switch
+                checked={appSettings.notifications.taskIgnoreBackoffEnabled}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    notifications: {
+                      ...appSettings.notifications,
+                      taskIgnoreBackoffEnabled: value,
+                    },
+                  })
+                }
+                label="连续忽略后降频"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>同类任务提醒间隔</strong>
+                <p>两次不同任务提醒之间至少间隔多久；设为 0 表示不额外等待</p>
+              </div>
+              <div className="settings-number-control">
+                <input
+                  type="number"
+                  min={0}
+                  max={1440}
+                  step={15}
+                  className="settings-input"
+                  aria-label="同类任务提醒间隔"
+                  value={appSettings.notifications.taskReminderMinIntervalMinutes}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    setAppSettings((current) => ({
+                      ...current,
+                      notifications: {
+                        ...current.notifications,
+                        taskReminderMinIntervalMinutes: Math.min(1440, Math.max(0, Math.round(value))),
+                      },
+                    }));
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                  onBlur={() => void persist(appSettings, "任务提醒间隔已更新")}
+                />
+                <span>分钟</span>
+              </div>
+            </div>
+            {(["local", "feishu"] as const).map((source) => (
+              <div className="settings-row" key={source}>
+                <div>
+                  <strong>{source === "local" ? "本地任务提醒" : "飞书任务提醒"}</strong>
+                  <p>可只提醒高优先级任务，或暂时关闭这一来源</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label={`${source === "local" ? "本地" : "飞书"}任务提醒策略`}
+                  value={appSettings.notifications.taskReminderSourceMode[source]}
+                  onChange={(event) =>
+                    void persist({
+                      ...appSettings,
+                      notifications: {
+                        ...appSettings.notifications,
+                        taskReminderSourceMode: {
+                          ...appSettings.notifications.taskReminderSourceMode,
+                          [source]: event.target.value as "normal" | "important-only" | "off",
+                        },
+                      },
+                    }, "任务提醒策略已更新")
+                  }
+                >
+                  <option value="normal">全部提醒</option>
+                  <option value="important-only">仅高优先级</option>
+                  <option value="off">关闭来源</option>
+                </select>
+              </div>
+            ))}
+            {projectReminderOptions.length > 0 && (
+              <div className="settings-subsection">
+                <div className="settings-subsection-heading">
+                  <strong>项目例外</strong>
+                  <span>项目策略优先于来源策略；选择“跟随来源”即可恢复全局规则</span>
+                </div>
+                <div className="settings-project-bulk">
+                  <div>
+                    <strong>批量设置项目</strong>
+                    <p>一次为多个项目应用相同策略，未选中的项目保持不变。</p>
+                  </div>
+                  <select
+                    className="settings-multi-select"
+                    multiple
+                    size={Math.min(6, Math.max(3, projectReminderOptions.length))}
+                    aria-label="选择要批量设置提醒策略的项目"
+                    value={selectedReminderProjects}
+                    onChange={(event) =>
+                      setSelectedReminderProjects(
+                        Array.from(event.target.selectedOptions, (option) => option.value),
+                      )
+                    }
+                  >
+                    {projectReminderOptions.map((projectId) => (
+                      <option key={projectId} value={projectId}>{projectId}</option>
+                    ))}
+                  </select>
+                  <div className="settings-project-bulk-actions">
+                    <select
+                      className="settings-input"
+                      aria-label="批量项目提醒策略"
+                      value={bulkProjectReminderMode}
+                      onChange={(event) =>
+                        setBulkProjectReminderMode(event.target.value as ProjectReminderSelection)
+                      }
+                    >
+                      <option value="inherit">跟随来源</option>
+                      <option value="normal">全部提醒</option>
+                      <option value="important-only">仅高优先级</option>
+                      <option value="off">关闭项目</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="soft-button"
+                      disabled={selectedReminderProjects.length === 0 || saving}
+                      onClick={() => {
+                        const nextModes = updateProjectReminderModes(
+                          appSettings.notifications.taskReminderProjectMode,
+                          selectedReminderProjects,
+                          bulkProjectReminderMode,
+                        );
+                        void persist({
+                          ...appSettings,
+                          notifications: {
+                            ...appSettings.notifications,
+                            taskReminderProjectMode: nextModes,
+                          },
+                        }, `已更新 ${selectedReminderProjects.length} 个项目的提醒策略`)
+                          .then((saved) => {
+                            if (saved) setSelectedReminderProjects([]);
+                          });
+                      }}
+                    >
+                      应用到已选
+                    </button>
+                  </div>
+                </div>
+                {projectReminderOptions.map((projectId) => {
+                  const override = appSettings.notifications.taskReminderProjectMode[projectId];
+                  return (
+                    <div className="settings-row" key={projectId}>
+                      <div>
+                        <strong>{projectId}</strong>
+                        <p>只影响这个项目的普通任务提醒</p>
+                      </div>
+                      <select
+                        className="settings-input"
+                        aria-label={`${projectId}项目提醒策略`}
+                        value={override ?? "inherit"}
+                        onChange={(event) => {
+                          const nextModes = { ...appSettings.notifications.taskReminderProjectMode };
+                          if (event.target.value === "inherit") delete nextModes[projectId];
+                          else nextModes[projectId] = event.target.value as "normal" | "important-only" | "off";
+                          void persist({
+                            ...appSettings,
+                            notifications: {
+                              ...appSettings.notifications,
+                              taskReminderProjectMode: nextModes,
+                            },
+                          }, "项目提醒策略已更新");
+                        }}
+                      >
+                        <option value="inherit">跟随来源</option>
+                        <option value="normal">全部提醒</option>
+                        <option value="important-only">仅高优先级</option>
+                        <option value="off">关闭项目</option>
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {appSettings.notifications.mutedUntil &&
               new Date(appSettings.notifications.mutedUntil) > new Date() && (
                 <div className="settings-row">
@@ -5337,6 +13827,585 @@ function SettingsPage({
                   </button>
                 </div>
               )}
+          </section>
+        )}
+        {section === "automations" && (
+          <section className="settings-section">
+            <h1>任务自动化</h1>
+            <p>
+              把重复的小动作交给本机规则。最多保存 50 条；规则只改 Todo Agent 的私有字段，生成普通可撤销记录，不会把项目、标签或分组写回飞书。
+            </p>
+            <div className="settings-note-quiet">
+              <ListChecks size={16} aria-hidden="true" />
+              <span>触发器支持“新建任务”“完成任务”“临近截止”、按计划执行和任务详情里的“手动应用”。规则不执行脚本、不联网，也不会在后台替你创建任务。</span>
+            </div>
+            <div className="settings-subsection">
+              <div className="settings-subsection-heading">
+                <strong>新建规则</strong>
+                <span>{appSettings.automations.length}/50</span>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>规则名称</strong>
+                  <p>用一句话说明这条规则做什么</p>
+                </div>
+                <input
+                  className="settings-input"
+                  aria-label="自动化规则名称"
+                  placeholder="例如：新任务自动标记重点"
+                  value={automationName}
+                  onChange={(event) => setAutomationName(event.target.value)}
+                />
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>什么时候</strong>
+                  <p>
+                    {automationTrigger === "deadline-approaching"
+                      ? "进入提前窗口时检查；只写入有实际变化的动作"
+                      : automationTrigger === "scheduled"
+                        ? "按本机时间检查一次"
+                        : "只在事实发生的瞬间执行一次"}
+                  </p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化触发器"
+                  value={automationTrigger}
+                  onChange={(event) => setAutomationTrigger(event.target.value as TaskAutomationTrigger)}
+                >
+                  <option value="task-created">任务新建时</option>
+                  <option value="task-completed">任务完成时</option>
+                  <option value="manual">手动应用时</option>
+                  <option value="scheduled">按计划自动执行</option>
+                  <option value="deadline-approaching">临近截止时</option>
+                </select>
+              </div>
+              {automationTrigger === "scheduled" && (
+                <>
+                  <div className="settings-note-quiet">
+                    <Clock3 size={16} aria-hidden="true" />
+                    <span>定时规则只在应用运行时检查；错过设定时间会在当天下一次检查时补执行一次。同一周期不会重复执行。</span>
+                  </div>
+                  <div className="settings-row">
+                    <div>
+                      <strong>执行频率</strong>
+                      <p>每天一次，或在选定的星期几执行</p>
+                    </div>
+                    <select
+                      className="settings-input"
+                      aria-label="自动化计划频率"
+                      value={automationScheduleFrequency}
+                      onChange={(event) => setAutomationScheduleFrequency(event.target.value as TaskAutomationScheduleFrequency)}
+                    >
+                      <option value="daily">每天</option>
+                      <option value="weekly">每周指定日期</option>
+                    </select>
+                  </div>
+                  <div className="settings-row">
+                    <div>
+                      <strong>执行时间</strong>
+                      <p>使用本机时区；应用运行后会按分钟检查</p>
+                    </div>
+                    <input
+                      className="settings-input"
+                      aria-label="自动化计划时间"
+                      type="time"
+                      value={automationScheduleTime}
+                      onChange={(event) => setAutomationScheduleTime(event.target.value)}
+                    />
+                  </div>
+                  {automationScheduleFrequency === "weekly" && (
+                    <div className="settings-row settings-row-stack">
+                      <div>
+                        <strong>星期几</strong>
+                        <p>至少选择一天；所有选择都会在同一时间检查</p>
+                      </div>
+                      <div className="automation-weekday-picker" role="group" aria-label="自动化计划星期">
+                        {[
+                          [1, "周一"],
+                          [2, "周二"],
+                          [3, "周三"],
+                          [4, "周四"],
+                          [5, "周五"],
+                          [6, "周六"],
+                          [0, "周日"],
+                        ].map(([day, label]) => {
+                          const weekday = day as number;
+                          const checked = automationScheduleWeekdays.includes(weekday);
+                          return (
+                            <label key={weekday} className="automation-weekday-option">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() =>
+                                  setAutomationScheduleWeekdays((current) =>
+                                    checked
+                                      ? current.filter((value) => value !== weekday)
+                                      : [...current, weekday].sort((left, right) => left - right),
+                                  )
+                                }
+                              />
+                              <span>{label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {automationTrigger === "deadline-approaching" && (
+                <>
+                  <div className="settings-note-quiet">
+                    <AlarmClock size={16} aria-hidden="true" />
+                    <span>
+                      应用每 30 秒检查一次；任务进入这个窗口后只执行一次有实际变化的私有动作。
+                      已过期、已完成或没有截止时间的任务不会触发。
+                    </span>
+                  </div>
+                  <div className="settings-row">
+                    <div>
+                      <strong>提前多久</strong>
+                      <p>临近截止时执行一次；不会修改截止时间或写回飞书</p>
+                    </div>
+                    <select
+                      className="settings-input"
+                      aria-label="自动化截止提前窗口"
+                      value={automationDeadlineWindowMinutes}
+                      onChange={(event) => setAutomationDeadlineWindowMinutes(event.target.value)}
+                    >
+                      {[5, 15, 30, 60, 120, 360, 720, 1_440, 2_880, 10_080].map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {taskAutomationDeadlineLabel(minutes)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+              <div className="settings-row">
+                <div>
+                  <strong>来源条件</strong>
+                  <p>可限制为本地任务或飞书任务</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化来源条件"
+                  value={automationConditionSource}
+                  onChange={(event) => setAutomationConditionSource(event.target.value as "all" | "local" | "feishu")}
+                >
+                  <option value="all">所有来源</option>
+                  <option value="local">仅本地</option>
+                  <option value="feishu">仅飞书</option>
+                </select>
+              </div>
+              <div className="settings-note-quiet">
+                <Filter size={16} aria-hidden="true" />
+                <span>条件组合：下面填写的条件会同时生效；可展开“任一条件组”表达 OR；留空表示不限制。规则仍只读取任务的本地私有字段。</span>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>项目条件（可选）</strong>
+                  <p>只匹配属于这个本地项目的任务</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化项目条件"
+                  value={automationConditionProject}
+                  onChange={(event) => setAutomationConditionProject(event.target.value)}
+                >
+                  <option value="">所有项目</option>
+                  {automationProjectOptions.map(([id, name]) => (
+                    <option key={id} value={id}>{name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>清单条件（可选）</strong>
+                  <p>只匹配属于这个本地清单的任务</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化清单条件"
+                  value={automationConditionList}
+                  onChange={(event) => setAutomationConditionList(event.target.value)}
+                >
+                  <option value="">所有清单</option>
+                  {automationListOptions.map(([id, name]) => (
+                    <option key={id} value={id}>{name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>分组条件（可选）</strong>
+                  <p>匹配任务的本地分组标题</p>
+                </div>
+                <input
+                  className="settings-input"
+                  aria-label="自动化分组条件"
+                  list="automation-section-options"
+                  placeholder="例如：本周发布"
+                  value={automationConditionSection}
+                  onChange={(event) => setAutomationConditionSection(event.target.value)}
+                />
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>标签条件（可选）</strong>
+                  <p>只有带这个标签的任务会匹配</p>
+                </div>
+                <input
+                  className="settings-input"
+                  aria-label="自动化标签条件"
+                  list="automation-tag-options"
+                  placeholder="例如：发布"
+                  value={automationConditionTag}
+                  onChange={(event) => setAutomationConditionTag(event.target.value)}
+                />
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>情境条件（可选）</strong>
+                  <p>匹配办公室、家、出门等本地情境</p>
+                </div>
+                <input
+                  className="settings-input"
+                  aria-label="自动化情境条件"
+                  list="automation-context-options"
+                  placeholder="例如：办公室"
+                  value={automationConditionContext}
+                  onChange={(event) => setAutomationConditionContext(event.target.value)}
+                />
+              </div>
+              <details
+                className="automation-alternative-conditions"
+                open={automationAlternativesOpen}
+                onToggle={(event) => setAutomationAlternativesOpen(event.currentTarget.open)}
+              >
+                <summary>
+                  任一条件组（可选）{automationAlternativeConditions.length ? ` · ${automationAlternativeConditions.length} 组` : ""}
+                </summary>
+                <div className="automation-alternative-content">
+                  <div className="settings-note-quiet">
+                    <GitBranch size={16} aria-hidden="true" />
+                    <span>顶部条件仍需同时满足；这里的每一组只要满足其中一组即可。适合“项目 A 或项目 B”这类规则，最多 5 组。</span>
+                  </div>
+                  {automationAlternativeConditions.map((draft, index) => (
+                    <div className="automation-alternative-card" key={`alternative-${index}`}>
+                      <div className="automation-alternative-card-heading">
+                        <strong>任一条件 {index + 1}</strong>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`删除任一条件${index + 1}`}
+                          onClick={() =>
+                            setAutomationAlternativeConditions((current) =>
+                              current.filter((_item, candidateIndex) => candidateIndex !== index),
+                            )
+                          }
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      <div className="automation-alternative-grid">
+                        <label className="automation-alternative-field">
+                          <span>来源</span>
+                          <select
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}来源`}
+                            value={draft.source}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index
+                                    ? { ...item, source: event.target.value as AutomationConditionDraft["source"] }
+                                    : item,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="all">所有来源</option>
+                            <option value="local">仅本地</option>
+                            <option value="feishu">仅飞书</option>
+                          </select>
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>项目</span>
+                          <select
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}项目`}
+                            value={draft.project}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, project: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="">所有项目</option>
+                            {automationProjectOptions.map(([id, name]) => (
+                              <option key={id} value={id}>{name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>清单</span>
+                          <select
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}清单`}
+                            value={draft.list}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, list: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          >
+                            <option value="">所有清单</option>
+                            {automationListOptions.map(([id, name]) => (
+                              <option key={id} value={id}>{name}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>分组</span>
+                          <input
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}分组`}
+                            list="automation-section-options"
+                            placeholder="例如：本周发布"
+                            value={draft.section}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, section: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>标签</span>
+                          <input
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}标签`}
+                            list="automation-tag-options"
+                            placeholder="例如：发布"
+                            value={draft.tag}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, tag: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="automation-alternative-field">
+                          <span>情境</span>
+                          <input
+                            className="settings-input"
+                            aria-label={`任一条件${index + 1}情境`}
+                            list="automation-context-options"
+                            placeholder="例如：办公室"
+                            value={draft.context}
+                            onChange={(event) =>
+                              setAutomationAlternativeConditions((current) =>
+                                current.map((item, candidateIndex) =>
+                                  candidateIndex === index ? { ...item, context: event.target.value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="soft-button"
+                    disabled={automationAlternativeConditions.length >= 5}
+                    onClick={() => {
+                      setAutomationAlternativeConditions((current) => [
+                        ...current,
+                        emptyAutomationConditionDraft(),
+                      ]);
+                      setAutomationAlternativesOpen(true);
+                    }}
+                  >
+                    <Plus size={14} /> 添加任一条件组
+                  </button>
+                </div>
+              </details>
+              <datalist id="automation-section-options">
+                {automationSectionOptions.map((value) => <option key={value} value={value} />)}
+              </datalist>
+              <datalist id="automation-tag-options">
+                {automationTagOptions.map((value) => <option key={value} value={value} />)}
+              </datalist>
+              <datalist id="automation-context-options">
+                {automationContextOptions.map((value) => <option key={value} value={value} />)}
+              </datalist>
+              <div className="settings-row">
+                <div>
+                  <strong>执行动作</strong>
+                  <p>动作只作用于本地私有上下文</p>
+                </div>
+                <select
+                  className="settings-input"
+                  aria-label="自动化执行动作"
+                  value={automationActionKind}
+                  onChange={(event) => {
+                    setAutomationActionKind(event.target.value as TaskAutomationAction["kind"]);
+                    setAutomationActionValue("");
+                  }}
+                >
+                  <option value="set-flagged">设置重点标记</option>
+                  <option value="add-tag">添加标签</option>
+                  <option value="remove-tag">移除标签</option>
+                  <option value="add-context">添加情境</option>
+                  <option value="remove-context">移除情境</option>
+                  <option value="set-project">设置本地项目</option>
+                  <option value="set-list">设置本地清单</option>
+                  <option value="set-section">设置分组标题</option>
+                  <option value="set-defer-until">设置稍后日期</option>
+                </select>
+              </div>
+              <div className="settings-row">
+                <div>
+                  <strong>动作值</strong>
+                  <p>
+                    {automationActionKind === "set-flagged"
+                      ? "选择是否标记为重点"
+                      : automationActionKind === "set-defer-until"
+                        ? "留空表示清除稍后日期"
+                        : "留空表示清除该字段（标签/情境动作除外）"}
+                  </p>
+                </div>
+                {automationActionKind === "set-flagged" ? (
+                  <select
+                    className="settings-input"
+                    aria-label="自动化重点标记值"
+                    value={automationActionValue || "true"}
+                    onChange={(event) => setAutomationActionValue(event.target.value)}
+                  >
+                    <option value="true">标记为重点</option>
+                    <option value="false">取消重点标记</option>
+                  </select>
+                ) : (
+                  <input
+                    className="settings-input"
+                    type={automationActionKind === "set-defer-until" ? "date" : "text"}
+                    aria-label="自动化动作值"
+                    placeholder={automationActionKind === "set-defer-until" ? "选择日期" : "填写值"}
+                    value={automationActionValue}
+                    onChange={(event) => setAutomationActionValue(event.target.value)}
+                  />
+                )}
+              </div>
+              {automationPreview?.draftKey === automationDraftKey && (
+                <div className="automation-preview-card" role="status" aria-live="polite">
+                  <div className="automation-preview-heading">
+                    <div>
+                      <strong>试运行预览</strong>
+                      <p>
+                        {describeAutomationCondition(automationPreview.rule)} · {taskAutomationActionLabel(automationPreview.rule.action)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="清除自动化预览"
+                      onClick={() => setAutomationPreview(undefined)}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                  <div className="automation-preview-summary">
+                    当前有 <strong>{automationPreview.tasks.length}</strong> 项任务会匹配。这里只读取本机任务，不会修改任务、飞书或同步队列。
+                  </div>
+                  <div className="automation-preview-hint">{automationPreviewTriggerHint(automationPreview.rule)}</div>
+                  {automationPreview.tasks.length > 0 ? (
+                    <ul className="automation-preview-list">
+                      {automationPreview.tasks.slice(0, 5).map((task) => (
+                        <li key={task.id}>
+                          <span className="automation-preview-status" aria-hidden="true">
+                            {task.status === "completed" ? "✓" : "○"}
+                          </span>
+                          <span>{task.title}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="automation-preview-empty">当前没有匹配任务；条件满足后，规则仍会按触发器运行。</div>
+                  )}
+                  {automationPreview.tasks.length > 5 && (
+                    <div className="automation-preview-more">仅展示前 5 项。</div>
+                  )}
+                </div>
+              )}
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={saving}
+                  onClick={previewAutomation}
+                >
+                  <Eye size={15} /> 试运行预览
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={saving || appSettings.automations.length >= 50}
+                  onClick={() => void addAutomation()}
+                >
+                  <Plus size={15} /> 保存规则
+                </button>
+                <span className="settings-hint">预览不会写入任务；保存后才会启用，执行时会在任务历史里留下可撤销的普通更新。</span>
+              </div>
+            </div>
+            <div className="settings-subheading">已保存规则</div>
+            {appSettings.automations.length === 0 ? (
+              <div className="settings-note-quiet">还没有规则。可以先试试“任务新建时 → 设置重点标记”，或创建“临近截止时 → 标记重点”，让重要任务在截止前进入你的视线。</div>
+            ) : (
+              appSettings.automations.map((rule) => (
+                <div className="settings-row" key={rule.id}>
+                  <div>
+                    <strong>{rule.name}</strong>
+                    <p>
+                      {taskAutomationTriggerLabel(rule.trigger)}
+                      {rule.schedule ? ` · ${taskAutomationScheduleLabel(rule.schedule)}` : ""}
+                      {rule.deadlineWindowMinutes
+                        ? ` · ${taskAutomationDeadlineLabel(rule.deadlineWindowMinutes)}`
+                        : ""}
+                      {" · "}{taskAutomationActionLabel(rule.action)}
+                      · {describeAutomationCondition(rule)}
+                    </p>
+                  </div>
+                  <div className="settings-row-actions">
+                    <Switch
+                      checked={rule.enabled}
+                      onChange={(value) => toggleAutomation(rule.id, value)}
+                      label={`${rule.name}自动化`}
+                    />
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`删除${rule.name}`}
+                      disabled={saving}
+                      onClick={() => removeAutomation(rule.id)}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </section>
         )}
         {section === "integrations" && (
@@ -5705,6 +14774,12 @@ function SettingsPage({
                     void window.desktopApi?.feishu
                       .cancelOAuth()
                       .then(setFeishuStatus)
+                      .catch((reason) =>
+                        notify(
+                          reason instanceof Error ? reason.message : "取消授权失败",
+                          "error",
+                        ),
+                      )
                   }
                 >
                   取消授权
@@ -5748,7 +14823,10 @@ function SettingsPage({
                   type="button"
                   className="danger-button"
                   disabled={saving}
-                  onClick={() => setDisconnectSheet(true)}
+                  onClick={(event) => {
+                    rememberSettingsModalTrigger(event.currentTarget);
+                    setDisconnectSheet(true);
+                  }}
                 >
                   断开连接
                 </button>
@@ -5762,6 +14840,183 @@ function SettingsPage({
             <p>
               兼容 OpenAI-style Chat Completions；使用 API Key 时会通过系统安全存储保护。
             </p>
+            <div className="settings-subheading">外部 Agent 活动桥接</div>
+            <div className="settings-row">
+              <div>
+                <strong>让 Todo Pet 观察外部 Agent</strong>
+                <p>
+                  兼容 clawd-on-desk 的本地状态协议；只接收状态、会话和工具名称，不接收提示词、参数或文件内容。
+                </p>
+              </div>
+              <Switch
+                checked={appSettings.agentActivity.enabled}
+                onChange={(value) => {
+                  void persist({
+                    ...appSettings,
+                    agentActivity: { ...appSettings.agentActivity, enabled: value },
+                  }, value ? "外部 Agent 活动桥接已开启" : "外部 Agent 活动桥接已关闭").then(async () => {
+                    const status = await window.desktopApi?.agentActivity?.status().catch(() => undefined);
+                    if (status) setActivityStatus(status);
+                  });
+                }}
+                label="启用外部 Agent 活动桥接"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>宠物显示外部状态</strong>
+                <p>关闭后仍可接收桥接数据，但不会改变宠物动作或气泡。</p>
+              </div>
+              <Switch
+                checked={appSettings.agentActivity.showInPet}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    agentActivity: { ...appSettings.agentActivity, showInPet: value },
+                  })
+                }
+                label="在宠物上显示外部 Agent 状态"
+              />
+            </div>
+            <div className="settings-row settings-row-stack">
+              <div>
+                <strong>允许接入的 Agent</strong>
+                <p>默认开放常见 CLI；自定义 Agent 使用同一个本机 /state 端点。</p>
+              </div>
+              <div className="agent-activity-agent-grid" role="group" aria-label="允许接入的外部 Agent">
+                {externalAgentOptions.map((option) => {
+                  const checked = appSettings.agentActivity.allowedAgents.includes(option.id);
+                  return (
+                    <label className={`agent-activity-agent-option ${checked ? "is-selected" : ""}`} key={option.id}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => {
+                          const allowedAgents = event.target.checked
+                            ? [...appSettings.agentActivity.allowedAgents, option.id]
+                            : appSettings.agentActivity.allowedAgents.filter((id) => id !== option.id);
+                          void persist({
+                            ...appSettings,
+                            agentActivity: { ...appSettings.agentActivity, allowedAgents },
+                          });
+                        }}
+                      />
+                      <span><strong>{option.label}</strong><small>{option.hint}</small></span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>状态保留时间</strong>
+                <p>Agent 停止上报后，超过此时间会从宠物活动中移除。</p>
+              </div>
+              <select
+                className="settings-input"
+                value={appSettings.agentActivity.staleAfterSeconds}
+                aria-label="外部 Agent 状态保留时间"
+                onChange={(event) =>
+                  void persist({
+                    ...appSettings,
+                    agentActivity: {
+                      ...appSettings.agentActivity,
+                      staleAfterSeconds: Number(event.target.value),
+                    },
+                  })
+                }
+              >
+                <option value={30}>30 秒</option>
+                <option value={60}>1 分钟</option>
+                <option value={120}>2 分钟</option>
+                <option value={300}>5 分钟</option>
+                <option value={900}>15 分钟</option>
+              </select>
+            </div>
+            <div className="settings-actions agent-activity-actions">
+              <button
+                type="button"
+                className="primary-button"
+                disabled={!appSettings.agentActivity.enabled || saving}
+                onClick={() => {
+                  const bridge = window.desktopApi?.agentActivity;
+                  if (!bridge) return;
+                  void bridge
+                    .setup()
+                    .then((setup) => {
+                      setActivitySetup(setup);
+                      return bridge.status();
+                    })
+                    .then((status) => setActivityStatus(status))
+                    .catch((reason) => notify(reason instanceof Error ? reason.message : "生成接入信息失败", "error"));
+                }}
+              >
+                <Sparkles size={15} />
+                显示接入信息
+              </button>
+              {activityStatus && (
+                <span className={`settings-hint ${activityStatus.running ? "is-success" : ""}`}>
+                  {activityStatus.running
+                    ? `运行中 · ${activityStatus.endpoint}`
+                    : "桥接未运行"}
+                </span>
+              )}
+            </div>
+            {activitySetup && (
+              <div className="agent-activity-setup-card">
+                <div>
+                  <strong>本机接入信息</strong>
+                  <small>只在本机回环地址监听；Token 仅保存在系统用户目录和此页面，不会上传。对应 Agent 的模型、订阅和权限仍由 Agent 自己负责，Todo Agent 只观察状态。</small>
+                </div>
+                <label className="agent-activity-setup-picker">
+                  <span>生成哪个 Agent 的接入示例</span>
+                  <select
+                    className="settings-input"
+                    value={activityAgentId}
+                    aria-label="选择外部 Agent 接入示例"
+                    onChange={(event) => setActivityAgentId(event.target.value as ExternalAgentId)}
+                  >
+                    {activityAgentOptions.map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                  </select>
+                </label>
+                <code>{activityExample}</code>
+                <div className="settings-actions">
+                  <button
+                    type="button"
+                    className="soft-button"
+                    onClick={() => {
+                      if (!navigator.clipboard) {
+                        notify("当前环境不支持复制，请手动选择示例", "error");
+                        return;
+                      }
+                      void navigator.clipboard
+                        .writeText(activityExample)
+                        .then(() => notify("接入示例已复制", "success"))
+                        .catch(() => notify("复制失败，请手动选择示例", "error"));
+                    }}
+                  >
+                    复制接入示例
+                  </button>
+                  <button
+                    type="button"
+                    className="soft-button"
+                    onClick={() => {
+                      const bridge = window.desktopApi?.agentActivity;
+                      if (!bridge) return;
+                      void bridge
+                        .rotateToken()
+                        .then(setActivitySetup)
+                        .then(() => notify("Token 已轮换，旧接入立即失效", "success"))
+                        .catch((reason) => notify(reason instanceof Error ? reason.message : "Token 轮换失败", "error"));
+                    }}
+                  >
+                    轮换 Token
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="settings-row">
               <div>
                 <strong>启用 AI</strong>
@@ -5779,6 +15034,12 @@ function SettingsPage({
               />
             </div>
             <div className="settings-subheading">模型连接</div>
+            <div className="settings-row">
+              <div><strong>连接协议</strong><p>Ollama 使用原生 /api/chat；选择协议不会更改现有地址或密钥。</p></div>
+              <select className="settings-input" aria-label="主模型连接协议" value={appSettings.ai.protocol ?? 'openai-compatible'} onChange={event => void persist({ ...appSettings, ai: { ...appSettings.ai, protocol: event.target.value as 'openai-compatible' | 'ollama' } })}>
+                <option value="openai-compatible">OpenAI-compatible</option><option value="ollama">Ollama 本地模型</option>
+              </select>
+            </div>
             <div className="settings-row">
               <div>
                 <strong>Endpoint</strong>
@@ -5848,13 +15109,37 @@ function SettingsPage({
             </div>
             <div className="settings-row">
               <div>
+                <strong>模型路由</strong>
+                <p>可在主模型暂时不可用时切到本地模型；不会把写操作重复发送给已返回内容的模型</p>
+              </div>
+              <select
+                className="settings-input"
+                aria-label="模型路由"
+                value={appSettings.ai.routing}
+                onChange={(event) =>
+                  void persist({
+                    ...appSettings,
+                    ai: {
+                      ...appSettings.ai,
+                      routing: event.target.value as AppSettings["ai"]["routing"],
+                    },
+                  })
+                }
+              >
+                <option value="primary-only">只用主模型</option>
+                <option value="fallback-on-error">主模型失败时切本地备用</option>
+                <option value="local-only">只用本地模型</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div>
                 <strong>API Key</strong>
                 <p>
                   {appSettings.ai.authMode === "none"
                     ? "当前不会读取、发送或要求 API Key"
                     : appSettings.ai.credentialId
-                    ? "已安全保存；输入新值可替换"
-                    : "不会进入提示词、日志或导出"}
+                      ? "已安全保存；输入新值后测试会先替换"
+                      : "不会进入提示词、日志或导出"}
                 </p>
               </div>
               <input
@@ -5891,15 +15176,147 @@ function SettingsPage({
                 disabled={
                   saving ||
                   !appSettings.ai.enabled ||
-                  (appSettings.ai.authMode !== "none" &&
-                    !appSettings.ai.credentialId) ||
-                  !appSettings.ai.model.trim()
+                  !activeAiAuthConfigured ||
+                  !activeAiModelConfigured
                 }
                 onClick={() => void testModelConnection()}
               >
                 <RefreshCw size={15} />
                 测试连接
               </button>
+            </div>
+            <div className="settings-subheading">本地备用模型</div>
+            <div className="settings-row">
+              <div><strong>备用连接协议</strong><p>Ollama 本机地址通常为 http://127.0.0.1:11434，并使用无 API Key 模式。</p></div>
+              <select className="settings-input" aria-label="备用模型连接协议" value={appSettings.ai.fallback.protocol ?? 'openai-compatible'} onChange={event => void persist({ ...appSettings, ai: { ...appSettings.ai, fallback: { ...appSettings.ai.fallback, protocol: event.target.value as 'openai-compatible' | 'ollama' } } })}>
+                <option value="openai-compatible">OpenAI-compatible</option><option value="ollama">Ollama 本地模型</option>
+              </select>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>启用本地备用</strong>
+                <p>支持 Ollama、LM Studio 或任意 OpenAI-compatible 本地服务；默认不联网、不上传任务</p>
+              </div>
+              <Switch
+                checked={appSettings.ai.fallback.enabled}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    ai: {
+                      ...appSettings.ai,
+                      fallback: { ...appSettings.ai.fallback, enabled: value },
+                    },
+                  })
+                }
+                label="启用本地备用模型"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>本地 Endpoint</strong>
+                <p>例如 http://127.0.0.1:11434/v1</p>
+              </div>
+              <input
+                className="settings-input"
+                value={appSettings.ai.fallback.endpoint}
+                onChange={(event) =>
+                  setAppSettings((current) => ({
+                    ...current,
+                    ai: {
+                      ...current.ai,
+                      fallback: {
+                        ...current.ai.fallback,
+                        endpoint: event.target.value,
+                      },
+                    },
+                  }))
+                }
+                onBlur={() => void persist(appSettings)}
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>本地模型</strong>
+                <p>需要支持 tool_calls；只用本地模式也可以留空主模型</p>
+              </div>
+              <input
+                className="settings-input"
+                value={appSettings.ai.fallback.model}
+                onChange={(event) =>
+                  setAppSettings((current) => ({
+                    ...current,
+                    ai: {
+                      ...current.ai,
+                      fallback: {
+                        ...current.ai.fallback,
+                        model: event.target.value,
+                      },
+                    },
+                  }))
+                }
+                onBlur={() => void persist(appSettings)}
+                placeholder="例如 llama3.2"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>本地认证</strong>
+                <p>{appSettings.ai.fallback.authMode === "none" ? "不发送 Authorization" : "使用单独的 API Key"}</p>
+              </div>
+              <select
+                className="settings-input"
+                aria-label="本地模型认证方式"
+                value={appSettings.ai.fallback.authMode}
+                onChange={(event) =>
+                  void persist({
+                    ...appSettings,
+                    ai: {
+                      ...appSettings.ai,
+                      fallback: {
+                        ...appSettings.ai.fallback,
+                        authMode: event.target.value as AiAuthenticationMode,
+                      },
+                    },
+                  })
+                }
+              >
+                <option value="none">无需 API Key</option>
+                <option value="bearer">Bearer API Key</option>
+              </select>
+            </div>
+            {appSettings.ai.fallback.authMode === "bearer" && (
+              <div className="settings-row">
+                <div>
+                  <strong>本地 API Key</strong>
+                  <p>{appSettings.ai.fallback.credentialId ? "已安全保存；输入新值可替换" : "不会进入提示词、日志或导出"}</p>
+                </div>
+                <input
+                  className="settings-input"
+                  type="password"
+                  value={fallbackApiKey}
+                  onChange={(event) => setFallbackApiKey(event.target.value)}
+                  placeholder={appSettings.ai.fallback.credentialId ? "••••••••" : "输入后加密保存"}
+                />
+              </div>
+            )}
+            <div className="settings-actions">
+              {appSettings.ai.fallback.authMode === "bearer" && (
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={!fallbackApiKey.trim() || saving}
+                  onClick={() => void saveFallbackApiKey()}
+                >
+                  {appSettings.ai.fallback.credentialId ? "更新本地 API Key" : "安全保存本地 API Key"}
+                </button>
+              )}
+              <span className="settings-hint">
+                {appSettings.ai.routing === "local-only"
+                  ? "当前对话只会使用本地模型"
+                  : appSettings.ai.routing === "fallback-on-error" && fallbackAiReady
+                    ? "主模型出现网络或 5xx 错误时自动切换"
+                    : "备用模型尚未参与对话"}
+              </span>
             </div>
             {connectionTest && (
               <div
@@ -5945,10 +15362,27 @@ function SettingsPage({
                 </div>
                 <small>
                   {modelUsage.blocked
-                    ? `已暂停新运行 · ${modelUsage.blockedReason}`
+                    ? `已暂停新运行 · ${
+                        modelUsage.blockedReason === "daily-cost-limit-reached"
+                          ? "已达到每日费用预算"
+                          : modelUsage.blockedReason === "provider-cost-unavailable"
+                            ? "提供方未回报可计费的输入/输出 token"
+                            : modelUsage.blockedReason === "daily-token-limit-reached"
+                              ? "已达到每日 Token 预算"
+                              : modelUsage.blockedReason === "provider-usage-unavailable"
+                                ? "提供方未回报 Token 用量"
+                                : "本地用量记录不可用"
+                      }`
                     : modelUsage.accounting === "provider-reported"
                       ? `提供方精确回报 · 剩余 ${modelUsage.remainingTokens?.toLocaleString() ?? "不限"}`
                       : `统计状态：${modelUsage.accounting}`}
+                </small>
+                <small>
+                  {modelUsage.cost.mode === "enforced"
+                    ? `今日费用 $${(modelUsage.cost.usedUsd ?? 0).toFixed(4)} / $${(modelUsage.cost.configuredDailyLimitUsd ?? 0).toFixed(2)} · 剩余 $${(modelUsage.cost.remainingUsd ?? 0).toFixed(4)}`
+                    : modelUsage.cost.reason === "MODEL_PRICING_NOT_CONFIGURED"
+                      ? "费用预算未启用价格核算；可在下方填写模型价格"
+                      : "费用预算未设置上限"}
                 </small>
               </div>
             )}
@@ -6045,6 +15479,25 @@ function SettingsPage({
             </div>
             <div className="settings-row">
               <div>
+                <strong>与 Todo Pet 同步人格</strong>
+                <p>开启后，Agent 跟随「设置 → Todo Pet」中的温柔、轻吐槽、安静或效率人格；关闭后使用独立表达风格，不改变权限、工具或任务规则。</p>
+              </div>
+              <Switch
+                checked={appSettings.persona.syncWithPet !== false}
+                onChange={(value) =>
+                  void persist({
+                    ...appSettings,
+                    persona: {
+                      ...appSettings.persona,
+                      syncWithPet: value,
+                    },
+                  }, "Agent 人格联动已更新")
+                }
+                label="与 Todo Pet 同步人格"
+              />
+            </div>
+            <div className="settings-row">
+              <div>
                 <strong>主动程度</strong>
                 <p>决定 Agent 是否主动总结和建议下一步</p>
               </div>
@@ -6118,7 +15571,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>每日费用预算</strong>
-                <p>仅作本地偏好，以美元计；不会替代提供方账单限额</p>
+                <p>配置模型价格后会在本机按提供方回报的输入/输出 token 核算，并在达到上限前阻止新运行</p>
               </div>
               <input
                 className="settings-input"
@@ -6137,6 +15590,86 @@ function SettingsPage({
                 }
                 onBlur={() => void persist(appSettings)}
               />
+            </div>
+            <div className="settings-row settings-row-stack">
+              <div>
+                <strong>主模型价格（美元 / 百万 tokens）</strong>
+                <p>只用于本地预算；不会猜测价格，也不会发送给模型提供方。填 0 表示该部分免费或不计费。</p>
+              </div>
+              <div className="settings-pricing-grid">
+                <label className="settings-number-control">
+                  输入
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100_000}
+                    step={0.01}
+                    aria-label="主模型输入价格（每百万 tokens）"
+                    value={appSettings.ai.pricing.promptUsdPerMillionTokens}
+                    onChange={(event) =>
+                      updateModelPricing("primary", "promptUsdPerMillionTokens", Number(event.target.value))
+                    }
+                    onBlur={persistModelPricing}
+                  />
+                </label>
+                <label className="settings-number-control">
+                  输出
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100_000}
+                    step={0.01}
+                    aria-label="主模型输出价格（每百万 tokens）"
+                    value={appSettings.ai.pricing.completionUsdPerMillionTokens}
+                    onChange={(event) =>
+                      updateModelPricing("primary", "completionUsdPerMillionTokens", Number(event.target.value))
+                    }
+                    onBlur={persistModelPricing}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="settings-row settings-row-stack">
+              <div>
+                <strong>备用 / 本地模型价格（美元 / 百万 tokens）</strong>
+                <p>仅在切换到本地模型或备用模型实际接管时使用；本地模型通常可保持为 0。</p>
+              </div>
+              <div className="settings-pricing-grid">
+                <label className="settings-number-control">
+                  输入
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100_000}
+                    step={0.01}
+                    aria-label="备用模型输入价格（每百万 tokens）"
+                    value={appSettings.ai.fallback.pricing.promptUsdPerMillionTokens}
+                    onChange={(event) =>
+                      updateModelPricing("fallback", "promptUsdPerMillionTokens", Number(event.target.value))
+                    }
+                    onBlur={persistModelPricing}
+                  />
+                </label>
+                <label className="settings-number-control">
+                  输出
+                  <input
+                    className="settings-input"
+                    type="number"
+                    min={0}
+                    max={100_000}
+                    step={0.01}
+                    aria-label="备用模型输出价格（每百万 tokens）"
+                    value={appSettings.ai.fallback.pricing.completionUsdPerMillionTokens}
+                    onChange={(event) =>
+                      updateModelPricing("fallback", "completionUsdPerMillionTokens", Number(event.target.value))
+                    }
+                    onBlur={persistModelPricing}
+                  />
+                </label>
+              </div>
             </div>
           </section>
         )}
@@ -6169,6 +15702,42 @@ function SettingsPage({
                 </option>
               </select>
             </div>
+            <div className="settings-subsection-heading">
+              <div>
+                <strong>Agent 能力分层</strong>
+                <p>
+                  关闭后对应工具不会提供给模型；重新开启只影响新的 Agent 运行。数据范围仍需在“隐私与数据”单独控制。
+                </p>
+              </div>
+              <span className="status-pill">默认全开</span>
+            </div>
+            {AGENT_CAPABILITY_DESCRIPTORS.map((descriptor) => (
+              <div className="settings-row" key={descriptor.key}>
+                <div>
+                  <strong>{descriptor.label}</strong>
+                  <p>{descriptor.description}</p>
+                  {descriptor.key === "feishuSync" && !appSettings.feishu.configured && (
+                    <small className="settings-hint">尚未连接飞书，开启后也不会自动创建远端任务。</small>
+                  )}
+                </div>
+                <Switch
+                  checked={appSettings.agentCapabilities[descriptor.key]}
+                  onChange={(value) =>
+                    void persist(
+                      {
+                        ...appSettings,
+                        agentCapabilities: {
+                          ...appSettings.agentCapabilities,
+                          [descriptor.key]: value,
+                        },
+                      },
+                      `${descriptor.label}已${value ? "开启" : "关闭"}`,
+                    )
+                  }
+                  label={`允许 Agent 使用${descriptor.label}`}
+                />
+              </div>
+            ))}
             <div className="settings-row">
               <div>
                 <strong>交互式全权限</strong>
@@ -6325,17 +15894,36 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>导出备份</strong>
-                <p>默认隐去私人备注、草稿、位置与所有凭据引用</p>
+                <p>JSON 备份默认隐去私人备注、草稿、位置与所有凭据引用；Markdown 可选附带任务事件摘要</p>
               </div>
-              <button
-                type="button"
-                className="soft-button"
-                disabled={saving}
-                onClick={() => void exportData()}
-              >
-                <Download size={15} />
-                安全导出
-              </button>
+              <div className="settings-row-actions">
+                <div className="markdown-export-history-option">
+                  <Switch
+                    checked={markdownIncludesHistory}
+                    onChange={setMarkdownIncludesHistory}
+                    label="Markdown 包含任务事件摘要"
+                  />
+                  <span>包含事件摘要</span>
+                </div>
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={saving}
+                  onClick={() => void exportData()}
+                >
+                  <Download size={15} />
+                  安全 JSON
+                </button>
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={saving}
+                  onClick={() => void exportMarkdownData()}
+                >
+                  <FileText size={15} />
+                  可读 Markdown
+                </button>
+              </div>
             </div>
             <div className="settings-row">
               <div>
@@ -6346,11 +15934,43 @@ function SettingsPage({
                 type="button"
                 className="soft-button"
                 disabled={saving}
-                onClick={() => void previewImport()}
+                onClick={(event) => {
+                  rememberSettingsModalTrigger(event.currentTarget);
+                  void previewImport();
+                }}
               >
                 <Upload size={15} />
                 选择文件并预览
               </button>
+            </div>
+            <div className="settings-row">
+              <div>
+                <strong>Todo Pet 档案</strong>
+                <p>迁移宠物的成长、外观、库存、冒险、小游戏、日记和记忆；不会带走凭据或正在运行的专注。</p>
+              </div>
+              <div className="settings-row-actions">
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={saving}
+                  onClick={() => void exportPetData()}
+                >
+                  <Download size={15} />
+                  导出宠物档案
+                </button>
+                <button
+                  type="button"
+                  className="soft-button"
+                  disabled={saving}
+                  onClick={(event) => {
+                    rememberSettingsModalTrigger(event.currentTarget);
+                    void previewPetDataImport();
+                  }}
+                >
+                  <Upload size={15} />
+                  导入并预览
+                </button>
+              </div>
             </div>
             <div className="settings-row">
               <div>
@@ -6361,7 +15981,10 @@ function SettingsPage({
                 type="button"
                 className="danger-button"
                 disabled={saving}
-                onClick={() => setClearDataSheet(true)}
+                onClick={(event) => {
+                  rememberSettingsModalTrigger(event.currentTarget);
+                  setClearDataSheet(true);
+                }}
               >
                 选择清除范围
               </button>
@@ -6377,10 +16000,12 @@ function SettingsPage({
       {disconnectSheet && (
         <div className="modal-backdrop">
           <div
+            ref={disconnectDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="disconnect-feishu-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -6427,8 +16052,9 @@ function SettingsPage({
               <button
                 type="button"
                 className="soft-button"
+                ref={disconnectCancelRef}
                 disabled={saving}
-                onClick={() => setDisconnectSheet(false)}
+                onClick={closeDisconnectSheet}
               >
                 取消
               </button>
@@ -6439,10 +16065,12 @@ function SettingsPage({
       {dataPreview && (
         <div className="modal-backdrop">
           <div
+            ref={dataPreviewDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="import-preview-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -6463,6 +16091,7 @@ function SettingsPage({
                   <p>推荐先跳过已有项目，最容易撤销</p>
                 </div>
                 <select
+                  ref={importStrategyRef}
                   className="settings-input"
                   value={importStrategy}
                   onChange={(event) =>
@@ -6526,7 +16155,7 @@ function SettingsPage({
               <button
                 type="button"
                 className="soft-button"
-                onClick={cancelImport}
+                onClick={() => closeDataPreview()}
               >
                 取消
               </button>
@@ -6547,13 +16176,110 @@ function SettingsPage({
           </div>
         </div>
       )}
+      {petDataPreview && (
+        <div className="modal-backdrop">
+          <div
+            ref={petDataPreviewDialogRef}
+            className="modal-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pet-import-preview-title"
+            tabIndex={-1}
+          >
+            <div className="modal-header">
+              <span className="feature-icon">
+                <Sparkles size={20} />
+              </span>
+              <div>
+                <h2 id="pet-import-preview-title">导入 Todo Pet 档案</h2>
+                <p>
+                  先预览再提交；预览令牌将在 {formatDateTime(petDataPreview.expiresAt)} 失效。
+                </p>
+              </div>
+            </div>
+            <div className="modal-body">
+              {(() => {
+                const plan = petDataPreview.strategies[petImportStrategy];
+                const rows: Array<[string, number, number]> = [
+                  ["成长奖励", plan.incoming.rewards, plan.existing.rewards],
+                  ["库存物品", plan.incoming.inventory, plan.existing.inventory],
+                  ["冒险记录", plan.incoming.adventures, plan.existing.adventures],
+                  ["小游戏", plan.incoming.miniGames, plan.existing.miniGames],
+                  ["弹性习惯", plan.incoming.habits, plan.existing.habits],
+                  ["本周同行目标", plan.incoming.goals, plan.existing.goals],
+                  ["小窝伙伴", plan.incoming.companions, plan.existing.companions],
+                  ["日记", plan.incoming.diary, plan.existing.diary],
+                  ["记忆", plan.incoming.memories, plan.existing.memories],
+                  ["互动消息", plan.incoming.proactiveMessages, plan.existing.proactiveMessages],
+                  ["专注历史", plan.incoming.focusHistory, plan.existing.focusHistory],
+                ];
+                return (
+                  <>
+                    <div className="settings-row">
+                      <div>
+                        <strong>导入策略</strong>
+                        <p>宠物是单一档案；跳过会保留本机，覆盖会替换本机档案。</p>
+                      </div>
+                      <select
+                        ref={petImportStrategyRef}
+                        className="settings-input"
+                        value={petImportStrategy}
+                        onChange={(event) =>
+                          setPetImportStrategy(event.target.value as PetDataImportStrategyView)
+                        }
+                      >
+                        <option value="skip">保留本机（推荐）</option>
+                        <option value="overwrite">用备份覆盖本机</option>
+                      </select>
+                    </div>
+                    {rows.map(([label, incoming, existing]) => (
+                      <div className="permission-row" key={label}>
+                        <span>{label}</span>
+                        <strong>备份 {incoming} · 本机 {existing}</strong>
+                      </div>
+                    ))}
+                    <div className="warning-note">
+                      <Info size={15} />
+                      当前运行中的专注会保留，不会被导入打断。
+                    </div>
+                    {plan.warnings
+                      .filter((warning) => !warning.includes("当前正在运行"))
+                      .map((warning) => (
+                        <div className="warning-note" key={warning}>
+                          <AlertTriangle size={15} />
+                          {warning}
+                        </div>
+                      ))}
+                  </>
+                );
+              })()}
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="soft-button" onClick={() => closePetDataPreview()}>
+                取消
+              </button>
+              <span className="action-spacer" />
+              <button
+                type="button"
+                className="primary-button"
+                disabled={saving || !petDataPreview.strategies[petImportStrategy].willReplace}
+                onClick={() => void commitPetDataImport()}
+              >
+                确认导入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {clearDataSheet && (
         <div className="modal-backdrop">
           <div
+            ref={clearDataDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="clear-data-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -6634,7 +16360,8 @@ function SettingsPage({
               <button
                 type="button"
                 className="soft-button"
-                onClick={() => setClearDataSheet(false)}
+                ref={clearDataCancelRef}
+                onClick={closeClearDataSheet}
               >
                 取消
               </button>
@@ -6659,6 +16386,9 @@ function SettingsPage({
 
 function Onboarding({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const primaryActionRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus(dialogRef, primaryActionRef, onDone);
   const steps = [
     {
       icon: <Check size={23} />,
@@ -6680,10 +16410,12 @@ function Onboarding({ onDone }: { onDone: () => void }) {
   return (
     <div className="modal-backdrop">
       <div
+        ref={dialogRef}
         className="modal-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-title"
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">{current.icon}</span>
@@ -6725,6 +16457,7 @@ function Onboarding({ onDone }: { onDone: () => void }) {
             </button>
           )}
           <button
+            ref={primaryActionRef}
             type="button"
             className="primary-button"
             onClick={() =>
@@ -6759,6 +16492,33 @@ function ReminderActionSheet({
   );
   const [busy, setBusy] = useState(false);
   const available = new Set(delivery.actions.map((action) => action.id));
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const firstActionRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  useEffect(() => {
+    const activeElement = document.activeElement;
+    returnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    return () => {
+      const returnFocus = returnFocusRef.current;
+      if (!returnFocus) return;
+      window.requestAnimationFrame(() => {
+        if (
+          !returnFocus.isConnected ||
+          returnFocus.hasAttribute("disabled") ||
+          returnFocus.getAttribute("aria-disabled") === "true"
+        ) {
+          return;
+        }
+        returnFocus.focus({ preventScroll: true });
+      });
+    };
+  }, []);
+  useDialogFocus(dialogRef, firstActionRef, () => {
+    if (!busy) onClose();
+  });
   const act = async (action: ReminderPresetAction) => {
     if (!window.desktopApi || busy) return;
     setBusy(true);
@@ -6811,10 +16571,12 @@ function ReminderActionSheet({
   return (
     <div className="modal-backdrop">
       <div
+        ref={dialogRef}
         className="modal-sheet compact-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="reminder-action-title"
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -6826,10 +16588,20 @@ function ReminderActionSheet({
           </div>
         </div>
         <div className="modal-body">
+          {delivery.reason && (
+            <details className="reminder-reason" open>
+              <summary>为什么现在提醒</summary>
+              <div className="reminder-reason-copy">
+                <strong>{delivery.reason.label}</strong>
+                {delivery.reason.detail && <span>{delivery.reason.detail}</span>}
+              </div>
+            </details>
+          )}
           <div className="settings-subheading">快速稍后</div>
           <div className="reminder-presets">
             {available.has("snooze-10m") && (
               <button
+                ref={firstActionRef}
                 type="button"
                 className="soft-button"
                 disabled={busy}
@@ -6933,6 +16705,18 @@ function MainWindow() {
   const [search, setSearch] = useState("");
   const [agentDraft, setAgentDraft] = useState("");
   const [pendingTaskId, setPendingTaskId] = useState<string>();
+  const [pendingTaskFocusId, setPendingTaskFocusId] = useState<TaskId>();
+  const [inboxTriageRequest, setInboxTriageRequest] = useState(0);
+  const inboxTriageSequenceRef = useRef(0);
+  const [inboxTriageOpen, setInboxTriageOpen] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  const [wideDesktop, setWideDesktop] = useState(() =>
+    typeof window === "undefined"
+      ? true
+      : window.matchMedia("(min-width: 761px)").matches,
+  );
+  const [feishuStatus, setFeishuStatus] = useState<FeishuStatusView>();
   const [taskCollectionEpoch, setTaskCollectionEpoch] = useState(0);
   const [sourceFilter, setSourceFilter] = useState<TaskSourceType | undefined>(
     initialNavigation.current.sourceFilter,
@@ -6941,6 +16725,10 @@ function MainWindow() {
     navigation.current = next;
     setRoute(next.route);
     setSourceFilter(next.sourceFilter);
+    if (next.route !== "inbox") {
+      setInboxTriageRequest(0);
+      setInboxTriageOpen(false);
+    }
   }, []);
   const navigate = useCallback(
     (
@@ -6948,6 +16736,10 @@ function MainWindow() {
       nextSourceFilter?: TaskSourceType,
       options: { replace?: boolean } = {},
     ) => {
+      // A route change invalidates a pending search jump. The search handler
+      // sets its new focus target immediately after navigating, while any
+      // later user navigation cannot leave a stale target behind.
+      setPendingTaskFocusId(undefined);
       const current = navigation.current;
       if (
         !options.replace &&
@@ -7006,6 +16798,7 @@ function MainWindow() {
     "inbox",
     "today",
     "upcoming",
+    "deferred",
     "all",
     "completed",
     "trash",
@@ -7013,14 +16806,252 @@ function MainWindow() {
     ? (route as TaskView)
     : "today";
   const controller = useTaskController(taskView, search, sourceFilter);
+  // The timeline is a planning surface over all open tasks, independent of
+  // whichever collection is currently selected in the main list.
+  const timelineController = useTaskController("all", "", sourceFilter);
+  // Completed tasks are a separate view in the local service. Keep them in
+  // the timeline snapshot so the week overview can show a truthful review
+  // rather than silently reporting zero completions.
+  const timelineCompletedController = useTaskController("completed", "", sourceFilter);
+  const [latestUndoableOperation, setLatestUndoableOperation] =
+    useState<TaskOperationSummary>();
+  const [latestRedoableOperation, setLatestRedoableOperation] =
+    useState<TaskOperationSummary>();
+  const latestUndoRequestRef = useRef(0);
+  const latestRedoRequestRef = useRef(0);
+  const undoInFlightRef = useRef<string | undefined>(undefined);
+  const redoInFlightRef = useRef<string | undefined>(undefined);
   const sidebarCounts = useSidebarCounts();
+  const projectState = useProjects();
+  const listState = useLists();
   const [newTask, setNewTask] = useState(false);
+  const [newTaskPreset, setNewTaskPreset] = useState<CalendarFollowUpDraft>();
+  const newTaskReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const openNewTask = useCallback(() => {
+    const activeElement = document.activeElement;
+    newTaskReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    setNewTask(true);
+  }, []);
+  const closeNewTask = useCallback(() => {
+    setNewTask(false);
+    setNewTaskPreset(undefined);
+    const returnFocus = newTaskReturnFocusRef.current;
+    newTaskReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  }, []);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const shortcutsButtonRef = useRef<HTMLButtonElement>(null);
+  const shortcutsReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const commandPaletteReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const globalSearchRequestRef = useRef(0);
+  const globalSearchReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const [globalSearchTasks, setGlobalSearchTasks] = useState<Task[]>([]);
+  const [globalSearchConversations, setGlobalSearchConversations] = useState<GlobalSearchConversation[]>([]);
+  const [timelineFocusDate, setTimelineFocusDate] = useState<string>();
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  const [globalSearchError, setGlobalSearchError] = useState<string>();
+  const [pendingAgentConversationId, setPendingAgentConversationId] = useState<string>();
+  const [dailyPlanOpen, setDailyPlanOpen] = useState(false);
+  const [dailyPlanDate, setDailyPlanDate] = useState(() => dateKey());
+  const [dailyPlanPreset, setDailyPlanPreset] = useState<MorningKickoffPreset>();
+  const [dailyPlanTasks, setDailyPlanTasks] = useState<Task[]>([]);
+  const [dailyPlanLoading, setDailyPlanLoading] = useState(false);
+  const [dailyPlanError, setDailyPlanError] = useState<string>();
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => readCalendarEvents());
+  const [calendarActionItems, setCalendarActionItems] = useState<{
+    event: CalendarEvent;
+    drafts: CalendarActionItemDraft[];
+  }>();
+  const calendarActionItemsReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const closeCalendarActionItems = useCallback(() => {
+    setCalendarActionItems(undefined);
+    const returnFocus = calendarActionItemsReturnFocusRef.current;
+    calendarActionItemsReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  }, []);
   const [activeReminder, setActiveReminder] = useState<ReminderDelivery>();
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastRouteRef = useRef(route);
   const [onboarding, setOnboarding] = useState(
     () => localStorage.getItem("todo-agent:onboarding-complete") !== "true",
   );
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 761px)");
+    const onChange = () => setWideDesktop(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    // Native window resizing is the source of truth for Electron. Chromium
+    // normally emits the MediaQueryList event as well, but the resize event
+    // keeps the preference/action surface correct across platform window
+    // managers that only update the viewport on the latter.
+    window.addEventListener("resize", onChange);
+    return () => {
+      media.removeEventListener("change", onChange);
+      window.removeEventListener("resize", onChange);
+    };
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(sidebarCollapsedStorageKey, String(sidebarCollapsed));
+    } catch {
+      // A restricted storage area should not make the main workspace unusable.
+    }
+  }, [sidebarCollapsed]);
+  const toggleSidebar = useCallback(() => {
+    if (!wideDesktop) return;
+    setSidebarCollapsed((value) => !value);
+  }, [wideDesktop]);
+  const loadDailyPlan = useCallback(async () => {
+    setDailyPlanLoading(true);
+    setDailyPlanError(undefined);
+    try {
+      const tasks = window.desktopApi
+        ? await Promise.all([
+            window.desktopApi.tasks.list({ view: "all" }),
+            // Completed dependencies are not candidates, but the planner
+            // needs them to avoid labelling an already-unblocked task as
+            // blocked merely because its dependency is absent from All.
+            window.desktopApi.tasks.list({ view: "completed" }),
+          ]).then(([open, completed]) => [...open, ...completed])
+        : controller.tasks;
+      setDailyPlanTasks(tasks);
+    } catch (reason) {
+      setDailyPlanError(
+        reason instanceof Error ? reason.message : "暂时无法读取全部任务",
+      );
+    } finally {
+      setDailyPlanLoading(false);
+    }
+  }, [controller.tasks]);
+  const openDailyPlan = useCallback(
+    (targetDate = dateKey(), preset?: MorningKickoffPreset) => {
+      setDailyPlanDate(targetDate);
+      setDailyPlanPreset(preset);
+      setDailyPlanOpen(true);
+      void loadDailyPlan();
+    },
+    [loadDailyPlan],
+  );
+  const openTodayPlan = useCallback(
+    (preset?: MorningKickoffPreset) => openDailyPlan(dateKey(), preset),
+    [openDailyPlan],
+  );
+  const openInboxTriage = useCallback(() => {
+    navigateTaskCollection("inbox");
+    setInboxTriageRequest(() => {
+      inboxTriageSequenceRef.current += 1;
+      return inboxTriageSequenceRef.current;
+    });
+  }, [navigateTaskCollection]);
+  const loadGlobalSearch = useCallback(async () => {
+    const requestId = ++globalSearchRequestRef.current;
+    setGlobalSearchLoading(true);
+    setGlobalSearchError(undefined);
+    try {
+      const tasks = window.desktopApi
+        ? await window.desktopApi.tasks.list({ includeDeleted: true })
+        : [...controller.tasks, ...timelineController.tasks, ...timelineCompletedController.tasks].filter(
+            (task, index, all) => all.findIndex((candidate) => candidate.id === task.id) === index,
+          );
+      if (requestId !== globalSearchRequestRef.current) return;
+      const collection = readStoredAgentConversationCollection();
+      setGlobalSearchTasks(tasks);
+      setGlobalSearchConversations(
+        collection.conversations.map((conversation) => ({
+          id: conversation.conversationId,
+          title: conversationTitle(conversation),
+          updatedAt: conversation.updatedAt,
+          messages: conversation.messages.map((message) => message.text),
+        })),
+      );
+    } catch (reason) {
+      if (requestId !== globalSearchRequestRef.current) return;
+      setGlobalSearchError(
+        reason instanceof Error ? reason.message : "暂时无法读取本地工作区",
+      );
+    } finally {
+      if (requestId === globalSearchRequestRef.current) {
+        setGlobalSearchLoading(false);
+      }
+    }
+  }, [controller.tasks, timelineCompletedController.tasks, timelineController.tasks]);
+  const openGlobalSearch = useCallback(() => {
+    const activeElement = document.activeElement;
+    globalSearchReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    setGlobalSearchOpen(true);
+    void loadGlobalSearch();
+  }, [loadGlobalSearch]);
+  const closeGlobalSearch = useCallback((restoreFocus = true) => {
+    globalSearchRequestRef.current += 1;
+    setGlobalSearchOpen(false);
+    setGlobalSearchLoading(false);
+    setGlobalSearchError(undefined);
+    const returnFocus = restoreFocus ? globalSearchReturnFocusRef.current : undefined;
+    globalSearchReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  }, []);
+  const handleTaskFocused = useCallback((taskId: TaskId) => {
+    setPendingTaskFocusId((current) => (current === taskId ? undefined : current));
+  }, []);
+  const handleGlobalSearchSelect = useCallback(
+    (result: GlobalSearchResult) => {
+      closeGlobalSearch(false);
+      if (result.kind === "task" && result.task) {
+        setPendingTaskId(result.task.id);
+        const destination = result.task.deletedAt
+          ? "trash"
+          : result.task.status === "completed"
+            ? "completed"
+            : "all";
+        navigateTaskCollection(destination, result.task.source.type);
+        setPendingTaskFocusId(result.task.id);
+        return;
+      }
+      if (result.kind === "conversation" && result.conversationId) {
+        setPendingAgentConversationId(result.conversationId);
+        navigate("agent");
+        return;
+      }
+      if (result.kind === "calendar" && result.calendarEvent) {
+        const eventDate = new Date(result.calendarEvent.startAt);
+        if (!Number.isNaN(eventDate.getTime())) setTimelineFocusDate(dateKey(eventDate));
+        navigate("timeline");
+        return;
+      }
+      if (result.kind === "project") {
+        navigate("projects");
+        return;
+      }
+      if (result.kind === "list") {
+        navigate("lists");
+      }
+    },
+    [closeGlobalSearch, navigate, navigateTaskCollection],
+  );
+  const updateCalendarEvents = useCallback((events: CalendarEvent[]) => {
+    setCalendarEvents(events);
+    writeCalendarEvents(events);
+  }, []);
   useEffect(() => {
     const stored = readMainNavigationState(window.history.state);
     if (stored) {
@@ -7055,7 +17086,8 @@ function MainWindow() {
     if (!window.desktopApi) return;
     void window.desktopApi.settings
       .get()
-      .then((settings) => setOnboarding(!settings.onboardingComplete));
+      .then((settings) => setOnboarding(!settings.onboardingComplete))
+      .catch(() => undefined);
   }, []);
   const notify = useCallback(
     (
@@ -7064,7 +17096,28 @@ function MainWindow() {
       action?: ToastState["action"],
     ) => {
       const id = Date.now() + Math.random();
-      setToasts((current) => [...current, { id, message, kind, action }]);
+      let actionInvoked = false;
+      const guardedAction = action
+        ? {
+            ...action,
+            run: () => {
+              if (actionInvoked) return;
+              actionInvoked = true;
+              // An action toast represents an available transaction. Remove
+              // it as soon as the user commits that transaction so a second
+              // click cannot submit the same operation again while the IPC
+              // request is still settling.
+              setToasts((current) => current.filter((toast) => toast.id !== id));
+              action.run();
+            },
+          }
+        : undefined;
+      setToasts((current) => [
+        ...current.filter(
+          (toast) => toast.message !== message || toast.kind !== kind,
+        ),
+        { id, message, kind, action: guardedAction },
+      ]);
       window.setTimeout(
         () =>
           setToasts((current) => current.filter((toast) => toast.id !== id)),
@@ -7072,6 +17125,474 @@ function MainWindow() {
       );
     },
     [],
+  );
+  const refreshLatestUndoableOperation = useCallback(async () => {
+    const requestId = ++latestUndoRequestRef.current;
+    const taskApi = window.desktopApi?.tasks;
+    if (!taskApi || typeof taskApi.getLatestUndoableOperation !== "function") {
+      if (requestId === latestUndoRequestRef.current) {
+        setLatestUndoableOperation(undefined);
+      }
+      return;
+    }
+    try {
+      const operation = await taskApi.getLatestUndoableOperation();
+      if (requestId === latestUndoRequestRef.current) {
+        setLatestUndoableOperation(operation);
+      }
+    } catch {
+      if (requestId === latestUndoRequestRef.current) {
+        setLatestUndoableOperation(undefined);
+      }
+    }
+  }, []);
+  const refreshLatestRedoableOperation = useCallback(async () => {
+    const requestId = ++latestRedoRequestRef.current;
+    const taskApi = window.desktopApi?.tasks;
+    if (!taskApi || typeof taskApi.getLatestRedoableOperation !== "function") {
+      if (requestId === latestRedoRequestRef.current) {
+        setLatestRedoableOperation(undefined);
+      }
+      return;
+    }
+    try {
+      const operation = await taskApi.getLatestRedoableOperation();
+      if (requestId === latestRedoRequestRef.current) {
+        setLatestRedoableOperation(operation);
+      }
+    } catch {
+      if (requestId === latestRedoRequestRef.current) {
+        setLatestRedoableOperation(undefined);
+      }
+    }
+  }, []);
+  useEffect(() => {
+    const desktopApi = window.desktopApi;
+    if (
+      !desktopApi ||
+      typeof desktopApi.tasks.getLatestUndoableOperation !== "function" ||
+      typeof desktopApi.tasks.getLatestRedoableOperation !== "function"
+    ) {
+      setLatestUndoableOperation(undefined);
+      setLatestRedoableOperation(undefined);
+      return undefined;
+    }
+    void refreshLatestUndoableOperation();
+    void refreshLatestRedoableOperation();
+    return desktopApi.events.onTasksChanged(() => {
+      void refreshLatestUndoableOperation();
+      void refreshLatestRedoableOperation();
+    });
+  }, [refreshLatestRedoableOperation, refreshLatestUndoableOperation]);
+  const undoLastTaskOperation = useCallback(async () => {
+    const operation = latestUndoableOperation;
+    const taskApi = window.desktopApi?.tasks;
+    if (
+      !operation ||
+      !taskApi ||
+      undoInFlightRef.current === operation.id
+    ) {
+      return;
+    }
+    undoInFlightRef.current = operation.id;
+    // Make repeated key presses and a second palette click harmless while the
+    // main process validates the exact snapshot.
+    setLatestUndoableOperation(undefined);
+    try {
+      try {
+        await taskApi.undo(operation.id);
+      } catch (reason) {
+        await refreshLatestUndoableOperation();
+        notify(
+          taskUndoFailureMessage(reason),
+          "error",
+        );
+        return;
+      }
+      await Promise.all([
+        controller.refresh().catch(() => undefined),
+        timelineController.refresh().catch(() => undefined),
+        timelineCompletedController.refresh().catch(() => undefined),
+      ]);
+      await refreshLatestUndoableOperation();
+      setToasts((current) =>
+        current.filter(
+          (toast) => toast.kind !== "success" || toast.action?.label !== "撤销",
+        ),
+      );
+      notify("已撤销最近一次任务变更", "success");
+    } finally {
+      if (undoInFlightRef.current === operation.id) {
+        undoInFlightRef.current = undefined;
+      }
+    }
+  }, [
+    controller,
+    latestUndoableOperation,
+    notify,
+    refreshLatestUndoableOperation,
+    timelineCompletedController,
+    timelineController,
+  ]);
+  const redoLastTaskOperation = useCallback(async () => {
+    const operation = latestRedoableOperation;
+    const taskApi = window.desktopApi?.tasks;
+    if (
+      !operation ||
+      !taskApi ||
+      redoInFlightRef.current === operation.id
+    ) {
+      return;
+    }
+    redoInFlightRef.current = operation.id;
+    // Make repeated key presses and a second palette click harmless while the
+    // main process validates the exact pre-redo snapshot.
+    setLatestRedoableOperation(undefined);
+    try {
+      try {
+        await taskApi.redo(operation.id);
+      } catch (reason) {
+        await refreshLatestRedoableOperation();
+        notify(
+          reason instanceof Error
+            ? reason.message.includes("changed afterwards")
+              ? "这项变更已被后续修改，无法安全重做"
+              : reason.message
+            : "最近一次任务变更暂时无法重做",
+          "error",
+        );
+        return;
+      }
+      await Promise.all([
+        controller.refresh().catch(() => undefined),
+        timelineController.refresh().catch(() => undefined),
+        timelineCompletedController.refresh().catch(() => undefined),
+      ]);
+      await Promise.all([
+        refreshLatestUndoableOperation(),
+        refreshLatestRedoableOperation(),
+      ]);
+      setToasts((current) =>
+        current.filter(
+          (toast) => toast.kind !== "success" || toast.action?.label !== "撤销",
+        ),
+      );
+      notify("已重做最近一次任务变更", "success");
+    } finally {
+      if (redoInFlightRef.current === operation.id) {
+        redoInFlightRef.current = undefined;
+      }
+    }
+  }, [
+    controller,
+    latestRedoableOperation,
+    notify,
+    refreshLatestRedoableOperation,
+    refreshLatestUndoableOperation,
+    timelineCompletedController,
+    timelineController,
+  ]);
+  const undoTimelineOperation = useCallback(
+    async (operationId: string): Promise<void> => {
+      const taskApi = window.desktopApi?.tasks;
+      if (!taskApi) return;
+      try {
+        await taskApi.undo(operationId);
+        await Promise.all([
+          controller.refresh().catch(() => undefined),
+          timelineController.refresh().catch(() => undefined),
+          timelineCompletedController.refresh().catch(() => undefined),
+        ]);
+        await Promise.all([
+          refreshLatestUndoableOperation(),
+          refreshLatestRedoableOperation(),
+        ]);
+        notify("已撤销时间线任务变更", "success");
+      } catch (reason) {
+        await refreshLatestUndoableOperation();
+        await refreshLatestRedoableOperation();
+        notify(taskUndoFailureMessage(reason), "error");
+      }
+    },
+    [
+      controller,
+      notify,
+      refreshLatestRedoableOperation,
+      refreshLatestUndoableOperation,
+      timelineCompletedController,
+      timelineController,
+    ],
+  );
+  const openCommandPalette = useCallback(() => {
+    const activeElement = document.activeElement;
+    commandPaletteReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    setCommandPaletteOpen(true);
+  }, []);
+  const closeCommandPalette = useCallback((restoreFocus = true) => {
+    setCommandPaletteOpen(false);
+    const returnFocus = restoreFocus ? commandPaletteReturnFocusRef.current : undefined;
+    commandPaletteReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  }, []);
+  const openShortcuts = useCallback(() => {
+    const activeElement = document.activeElement;
+    shortcutsReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : shortcutsButtonRef.current ?? undefined;
+    setShortcutsOpen(true);
+  }, []);
+  const closeShortcuts = useCallback(() => {
+    setShortcutsOpen(false);
+    const returnFocus = shortcutsReturnFocusRef.current;
+    shortcutsReturnFocusRef.current = undefined;
+    window.requestAnimationFrame(() => {
+      const target =
+        returnFocus?.isConnected && !returnFocus.hasAttribute("disabled")
+          ? returnFocus
+          : shortcutsButtonRef.current;
+      target?.focus({ preventScroll: true });
+    });
+  }, []);
+  const commandModifier = isMacPlatform() ? "⌘" : "Ctrl";
+  const commandPaletteActions = useMemo<readonly CommandPaletteAction[]>(
+    () => [
+      {
+        id: "keyboard-shortcuts",
+        label: "查看快捷键",
+        description: "搜索桌面端常用操作与任务列表快捷键",
+        keywords: ["keyboard", "shortcut", "help", "快捷键", "键盘", "帮助"],
+        shortcut: "?",
+        icon: <Keyboard size={16} />,
+        run: openShortcuts,
+      },
+      ...(latestUndoableOperation
+        ? [
+            {
+              id: "undo-task-operation",
+              label: "撤销最近任务变更",
+              description: `恢复最近一次${taskHistoryOperationLabels[latestUndoableOperation.kind] ?? "任务变更"}`,
+              keywords: ["undo", "rollback", "撤销", "恢复", "回滚"],
+              shortcut: `${isMacPlatform() ? "⌘" : "Ctrl"} Z`,
+              icon: <Undo2 size={16} />,
+              run: () => void undoLastTaskOperation(),
+            },
+          ]
+        : []),
+      ...(latestRedoableOperation
+        ? [
+            {
+              id: "redo-task-operation",
+              label: "重做最近任务变更",
+              description: `重新应用最近一次${taskHistoryOperationLabels[latestRedoableOperation.kind] ?? "任务变更"}`,
+              keywords: ["redo", "reapply", "重做", "恢复操作", "再次应用"],
+              shortcut: `${isMacPlatform() ? "⌘" : "Ctrl"} ⇧ Z`,
+              icon: <Redo2 size={16} />,
+              run: () => void redoLastTaskOperation(),
+            },
+          ]
+        : []),
+      {
+        id: "new-task",
+        label: "新建任务",
+        description: "打开完整编辑器，补充日期、提醒、标签或来源",
+        keywords: ["create", "new", "任务", "新增"],
+        shortcut: `${commandModifier} N`,
+        icon: <Plus size={16} />,
+        run: openNewTask,
+      },
+      {
+        id: "quick-capture",
+        label: "快速捕获",
+        description: "用一句话、语音或上下文快速记下新任务",
+        keywords: ["quick", "capture", "inbox", "快捷", "语音"],
+        shortcut: `${commandModifier} ⇧ Space`,
+        icon: <Clipboard size={16} />,
+        run: () =>
+          void window.desktopApi?.shell
+            .showQuickCapture()
+            .catch(() => notify("快速捕获窗口暂时无法打开", "error")),
+      },
+      {
+        id: "global-search",
+        label: "全局查找",
+        description: "跨任务、项目、清单和本机会话搜索，不离开当前工作流",
+        keywords: ["global", "workspace", "search", "find", "全局", "查找", "会话"],
+        shortcut: `${commandModifier} ⇧ F`,
+        icon: <Search size={16} />,
+        run: openGlobalSearch,
+      },
+      {
+        id: "search-tasks",
+        label: "搜索当前任务列表",
+        description: "进入全部任务并聚焦当前列表搜索框",
+        keywords: ["search", "find", "搜索", "查找"],
+        shortcut: `${commandModifier} F`,
+        icon: <Search size={16} />,
+        run: () => {
+          navigateTaskCollection("all");
+          window.setTimeout(
+            () =>
+              document
+                .querySelector<HTMLInputElement>("[data-search-input]")
+                ?.focus(),
+            0,
+          );
+        },
+      },
+      {
+        id: "today",
+        label: "打开今天",
+        description: "回到 Today 工作台，查看当前计划",
+        keywords: ["today", "my day", "今天", "计划"],
+        icon: <Sun size={16} />,
+        run: () => navigateTaskCollection("today"),
+      },
+      {
+        id: "inbox",
+        label: "整理暂存",
+        description: "逐项处理尚未安排日期、项目或清单的任务",
+        keywords: ["inbox", "暂存", "整理"],
+        icon: <Inbox size={16} />,
+        run: openInboxTriage,
+      },
+      {
+        id: "all",
+        label: "打开全部任务",
+        description: "查看完整任务事实，不受 Today 过滤影响",
+        keywords: ["all", "全部", "任务"],
+        icon: <LayoutList size={16} />,
+        run: () => navigateTaskCollection("all"),
+      },
+      {
+        id: "deferred",
+        label: "打开稍后安排",
+        description: "查看被暂缓到未来日期、尚未进入 Today 的任务",
+        keywords: ["defer", "someday", "waiting", "稍后", "延后", "等待"],
+        icon: <Clock3 size={16} />,
+        run: () => navigateTaskCollection("deferred"),
+      },
+      {
+        id: "plan-today",
+        label: "一起规划今天",
+        description: "预览容量、依赖和预计时长后安排 Today",
+        keywords: ["plan", "planner", "规划", "排程", "容量"],
+        icon: <CalendarDays size={16} />,
+        run: () => {
+          navigateTaskCollection("today");
+          openDailyPlan();
+        },
+      },
+      {
+        id: "pet",
+        label: "打开 Todo Pet 小窝",
+        description: "查看成长、日记、回顾和陪伴设置",
+        keywords: ["pet", "home", "小窝", "宠物"],
+        icon: <UserRound size={16} />,
+        run: () => navigate("pet"),
+      },
+      {
+        id: "agent",
+        label: "和 Agent 聊聊",
+        description: "进入流式 Markdown 对话，先查询再确认任务操作",
+        keywords: ["agent", "chat", "AI", "对话"],
+        icon: <Sparkles size={16} />,
+        run: () => navigate("agent"),
+      },
+      {
+        id: "docs",
+        label: "打开文档中心",
+        description: "浏览 PRD、交互、视觉、技术、Todo Pet 与验收文档",
+        keywords: ["docs", "documentation", "readme", "文档", "说明", "规范"],
+        icon: <BookOpen size={16} />,
+        run: () => navigate("docs"),
+      },
+      {
+        id: "sync",
+        label: "同步飞书",
+        description: "打开同步页并手动刷新当前连接",
+        keywords: ["sync", "feishu", "飞书", "刷新"],
+        icon: <RefreshCw size={16} />,
+        run: () => {
+          navigate("sync");
+          void window.desktopApi?.feishu
+            .syncNow()
+            .then((report) =>
+              notify(
+                report.issue
+                  ? feishuSyncIssueCopy(report.issue)
+                  : `同步完成：拉取 ${report.pulled}，上传 ${report.pushed}`,
+                report.issue ? "error" : "success",
+              ),
+            )
+            .catch((reason) =>
+              notify(
+                reason instanceof Error ? reason.message : "同步失败，请稍后重试",
+                "error",
+              ),
+            );
+        },
+      },
+      {
+        id: "show-pet",
+        label: "显示桌面宠物",
+        description: "重新显示并唤起置顶的 Todo Pet",
+        keywords: ["floating", "pet", "show", "悬浮", "显示"],
+        icon: <PanelTop size={16} />,
+        run: () =>
+          void window.desktopApi?.shell
+            .setFloatingVisible(true)
+            .catch(() => notify("Todo Pet 暂时无法显示", "error")),
+      },
+      ...(wideDesktop
+        ? [
+            {
+              id: sidebarCollapsed ? "show-sidebar" : "hide-sidebar",
+              label: sidebarCollapsed ? "显示侧栏" : "隐藏侧栏",
+              description: sidebarCollapsed
+                ? "恢复主导航，保留当前工作区与任务选择"
+                : "收起主导航，为任务列表和详情留出更多空间",
+              keywords: ["sidebar", "focus", "navigation", "侧栏", "专注", "导航"],
+              shortcut: `${commandModifier} /`,
+              icon: sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />,
+              run: toggleSidebar,
+            },
+          ]
+        : []),
+      {
+        id: "settings",
+        label: "打开设置",
+        description: "配置快捷键、同步、模型、提醒和宠物行为",
+        keywords: ["settings", "preferences", "设置", "偏好"],
+        icon: <Settings size={16} />,
+        run: () => navigate("settings"),
+      },
+    ],
+    [
+      navigate,
+      navigateTaskCollection,
+      notify,
+      openDailyPlan,
+      openGlobalSearch,
+      openInboxTriage,
+      openNewTask,
+      openShortcuts,
+      latestRedoableOperation,
+      latestUndoableOperation,
+      commandModifier,
+      redoLastTaskOperation,
+      sidebarCollapsed,
+      toggleSidebar,
+      undoLastTaskOperation,
+      wideDesktop,
+    ],
   );
   useEffect(
     () =>
@@ -7096,6 +17617,11 @@ function MainWindow() {
   );
   useEffect(() => {
     const applyNavigation = (value: string) => {
+      if (value === "plan-today") {
+        navigateTaskCollection("today");
+        openDailyPlan();
+        return;
+      }
       if (value.startsWith("task:")) {
         const id = value.slice("task:".length);
         if (id) {
@@ -7113,7 +17639,8 @@ function MainWindow() {
             if (!draft?.text) return;
             setAgentDraft(draft.text);
             return window.desktopApi?.tasks.deleteDraft(floatingAgentDraftId);
-          });
+          })
+          .catch(() => undefined);
       }
     };
     if (window.desktopApi) {
@@ -7125,7 +17652,13 @@ function MainWindow() {
     };
     window.addEventListener("todo-agent:navigation", onRoute);
     return () => window.removeEventListener("todo-agent:navigation", onRoute);
-  }, [navigateFromSidebar, navigateTaskCollection]);
+  }, [navigateFromSidebar, navigateTaskCollection, openDailyPlan]);
+  useEffect(() => {
+    const api = window.desktopApi;
+    if (!api) return undefined;
+    void api.feishu.status().then(setFeishuStatus).catch(() => undefined);
+    return api.events.onFeishuStatus(setFeishuStatus);
+  }, []);
   useEffect(() => {
     if (
       !pendingTaskId ||
@@ -7139,15 +17672,181 @@ function MainWindow() {
     "inbox",
     "today",
     "upcoming",
+    "deferred",
     "all",
     "completed",
     "trash",
   ].includes(route);
   useEffect(() => {
+    if (!isTaskRoute) return;
+    const compactViewport = window.matchMedia("(max-width: 980px)");
+    const restoreInspector = () => {
+      if (compactViewport.matches) setInspectorCollapsed(false);
+    };
+    restoreInspector();
+    compactViewport.addEventListener("change", restoreInspector);
+    return () => compactViewport.removeEventListener("change", restoreInspector);
+  }, [isTaskRoute]);
+  useEffect(() => {
+    if (controller.selectedId) setInspectorCollapsed(false);
+  }, [controller.selectedId]);
+  const modalOpen = Boolean(
+    newTask ||
+    commandPaletteOpen ||
+    shortcutsOpen ||
+    globalSearchOpen ||
+    dailyPlanOpen ||
+    activeReminder ||
+    inboxTriageOpen ||
+    onboarding ||
+    calendarActionItems,
+  );
+  const focusTaskRowOrList = useCallback((taskId: TaskId) => {
+    window.requestAnimationFrame(() => {
+      const row = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-task-id]"),
+      ).find(
+        (element) =>
+          element.dataset.taskId === taskId && !element.closest("[hidden]"),
+      );
+      const target = row?.querySelector<HTMLElement>(
+        ".task-body, .task-table-title",
+      );
+      (target ?? document.querySelector<HTMLElement>(".content-column"))?.focus({
+        preventScroll: true,
+      });
+    });
+  }, []);
+  const closeSelectedTask = useCallback(() => {
+    const selectedTaskId = controller.selectedId;
+    controller.select(undefined);
+    if (selectedTaskId) focusTaskRowOrList(selectedTaskId);
+  }, [controller, focusTaskRowOrList]);
+  const collapseSelectedInspector = useCallback(() => {
+    const selectedTaskId = controller.selectedId;
+    setInspectorCollapsed(true);
+    window.requestAnimationFrame(() => {
+      const reopen = document.querySelector<HTMLElement>(
+        '[aria-label="展开任务详情"]',
+      );
+      if (reopen) {
+        reopen.focus({ preventScroll: true });
+        return;
+      }
+      if (selectedTaskId) focusTaskRowOrList(selectedTaskId);
+    });
+  }, [controller, focusTaskRowOrList]);
+  useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const isBackShortcut = isMacPlatform()
         ? event.metaKey && event.key === "["
         : event.altKey && event.key === "ArrowLeft";
+      const shortcutKey =
+        (event.metaKey || event.ctrlKey) &&
+        ["k", "n"].includes(event.key.toLocaleLowerCase());
+      const globalSearchShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLocaleLowerCase() === "f";
+      const undoShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLocaleLowerCase() === "z";
+      const redoShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.key.toLocaleLowerCase() === "z";
+      const sidebarShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "/" || event.code === "Slash");
+      const target = event.target instanceof Element ? event.target : undefined;
+      const shortcutHelpBlocked = target?.closest(
+        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]',
+      );
+      // A dialog-owned control must keep all desktop-global shortcuts scoped
+      // to the current layer. Individual dialogs still receive Escape and
+      // native editing shortcuts without the shell opening another surface.
+      if (target?.closest('[role="dialog"], [role="menu"]') && event.key !== "Escape") {
+        return;
+      }
+      if (
+        event.key === "?" &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !modalOpen &&
+        !shortcutHelpBlocked
+      ) {
+        event.preventDefault();
+        openShortcuts();
+        return;
+      }
+      if (
+        redoShortcut &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !modalOpen &&
+        !shortcutHelpBlocked &&
+        latestRedoableOperation
+      ) {
+        event.preventDefault();
+        void redoLastTaskOperation();
+        return;
+      }
+      if (
+        undoShortcut &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !modalOpen &&
+        !shortcutHelpBlocked &&
+        latestUndoableOperation
+      ) {
+        event.preventDefault();
+        void undoLastTaskOperation();
+        return;
+      }
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !modalOpen &&
+        !commandPaletteOpen &&
+        isTaskRoute &&
+        controller.selectedId
+      ) {
+        const target = event.target instanceof Element ? event.target : undefined;
+        if (!target?.closest('[role="dialog"], [role="menu"]')) {
+          event.preventDefault();
+          closeSelectedTask();
+        }
+        return;
+      }
+      if (modalOpen && !commandPaletteOpen) {
+        if (isBackShortcut || shortcutKey || globalSearchShortcut || sidebarShortcut) event.preventDefault();
+        return;
+      }
+      if (commandPaletteOpen) {
+        if (isBackShortcut || shortcutKey || globalSearchShortcut || sidebarShortcut) event.preventDefault();
+        return;
+      }
+      if (
+        sidebarShortcut &&
+        wideDesktop &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !modalOpen &&
+        !shortcutHelpBlocked
+      ) {
+        event.preventDefault();
+        toggleSidebar();
+        return;
+      }
       if (isBackShortcut) {
         event.preventDefault();
         goBack();
@@ -7158,47 +17857,78 @@ function MainWindow() {
         event.key.toLocaleLowerCase() === "k"
       ) {
         event.preventDefault();
-        if (!isTaskRoute) {
-          navigateTaskCollection("all");
+        // On task collections, ⌘/Ctrl+K is the quickest way back to the
+        // visible list search (the command palette remains available from
+        // the title-bar shortcut button). This keeps the shortcut useful at
+        // narrow desktop sizes where the search field is the primary
+        // navigation affordance, while non-task pages still open commands.
+        if (isTaskRoute) {
+          document
+            .querySelector<HTMLInputElement>("[data-search-input]")
+            ?.focus();
+        } else {
+          openCommandPalette();
         }
-        window.setTimeout(
-          () =>
-            document
-              .querySelector<HTMLInputElement>("[data-search-input]")
-              ?.focus(),
-          0,
-        );
       }
       if (
         (event.metaKey || event.ctrlKey) &&
         event.key.toLocaleLowerCase() === "n"
       ) {
         event.preventDefault();
-        setNewTask(true);
+        openNewTask();
+      }
+      if (globalSearchShortcut) {
+        event.preventDefault();
+        openGlobalSearch();
       }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [goBack, isTaskRoute, navigateTaskCollection]);
-  const syncState = controller.tasks.some(
-    (task) => task.sync.status === "conflict",
-  )
-    ? "conflict"
-    : controller.tasks.some((task) =>
-          ["pending", "offline", "syncing"].includes(task.sync.status),
+  }, [
+    commandPaletteOpen,
+    closeSelectedTask,
+    controller,
+    goBack,
+    isTaskRoute,
+    latestRedoableOperation,
+    latestUndoableOperation,
+    modalOpen,
+    openCommandPalette,
+    openGlobalSearch,
+    openNewTask,
+    openShortcuts,
+    redoLastTaskOperation,
+    toggleSidebar,
+    undoLastTaskOperation,
+    wideDesktop,
+  ]);
+  const feishuState = feishuSyncVisualState(feishuStatus);
+  const syncState: TaskSyncVisualState = controller.tasks.some(
+    (task) => taskSyncVisualState(task.sync.status) === "error",
+  ) || feishuState === "error"
+    ? "error"
+    : controller.tasks.some(
+          (task) => taskSyncVisualState(task.sync.status) === "conflict",
         )
-      ? "pending"
-      : "synced";
+      ? "conflict"
+      : controller.tasks.some(
+            (task) => taskSyncVisualState(task.sync.status) === "pending",
+          ) || feishuState === "pending"
+        ? "pending"
+        : "synced";
   const finishOnboarding = () => {
     localStorage.setItem("todo-agent:onboarding-complete", "true");
     setOnboarding(false);
     if (window.desktopApi) {
-      void window.desktopApi.settings.get().then((settings) =>
-        window.desktopApi!.settings.replace({
-          ...settings,
-          onboardingComplete: true,
-        }),
-      );
+      void window.desktopApi.settings
+        .get()
+        .then((settings) =>
+          window.desktopApi!.settings.replace({
+            ...settings,
+            onboardingComplete: true,
+          }),
+        )
+        .catch(() => undefined);
     }
   };
   const showSource = useCallback(
@@ -7217,23 +17947,42 @@ function MainWindow() {
     <div
       className="app-background"
       data-inspector-open={
-        isTaskRoute && controller.selected ? "true" : undefined
+        isTaskRoute && controller.selected && !inspectorCollapsed ? "true" : undefined
+      }
+      data-modal-open={
+        modalOpen ? "true" : undefined
       }
     >
       <div className="app-window">
         <Titlebar
           search={isTaskRoute ? search : undefined}
           onSearch={isTaskRoute ? setSearch : undefined}
-          onNew={() => setNewTask(true)}
+          onNew={openNewTask}
+          onOpenCommands={openCommandPalette}
+          onOpenShortcuts={openShortcuts}
+          onToggleSidebar={toggleSidebar}
+          sidebarCollapsed={sidebarCollapsed}
+          shortcutsButtonRef={shortcutsButtonRef}
           onHome={() => navigateTaskCollection("today")}
           onBack={route === "today" ? undefined : goBack}
           syncState={syncState}
         />
-        <div className="shell-grid" data-route={route}>
+        <div
+          className="shell-grid"
+          data-route={route}
+          data-inspector-collapsed={
+            isTaskRoute && inspectorCollapsed ? "true" : undefined
+          }
+          data-sidebar-collapsed={sidebarCollapsed ? "true" : undefined}
+        >
           <Sidebar
             route={route}
             sourceFilter={sourceFilter}
-            counts={sidebarCounts}
+            counts={{
+              ...sidebarCounts,
+              syncIssues:
+                (sidebarCounts.syncIssues ?? 0) + (feishuState === "error" ? 1 : 0),
+            }}
             onRoute={navigateFromSidebar}
             onSource={showSource}
           />
@@ -7242,20 +17991,56 @@ function MainWindow() {
               <TaskListPage
                 route={taskView}
                 controller={controller}
+                planningTasks={timelineController.tasks}
                 search={search}
-                navigationKey={`${taskView}:${sourceFilter ?? "all"}:${taskCollectionEpoch}`}
+                navigationKey={`${taskView}:${taskCollectionEpoch}`}
+                focusTaskId={pendingTaskFocusId}
+                onTaskFocused={handleTaskFocused}
+                inboxTriageRequest={inboxTriageRequest}
+                onInboxTriageRequestHandled={(request) => {
+                  setInboxTriageRequest((current) =>
+                    current === request ? 0 : current,
+                  );
+                }}
+                inboxTriageOpen={inboxTriageOpen}
+                onInboxTriageOpenChange={setInboxTriageOpen}
+                wideDesktop={wideDesktop}
+                sourceFilter={sourceFilter}
                 notify={notify}
-                onNew={() => setNewTask(true)}
+                onNew={openNewTask}
                 onClearSearch={() => setSearch("")}
                 onAskAgent={askAgent}
+                onPlanToday={openTodayPlan}
+                onSourceChange={(source) => navigate(taskView, source, { replace: true })}
+                projects={projectState.projects}
+                lists={listState.lists}
+                calendarEvents={calendarEvents}
+                onOpenTimeline={() => navigate("timeline")}
+                onOpenAll={() => navigateTaskCollection("all")}
               />
-              <TaskInspector
-                task={controller.selected}
-                controller={controller}
-                notify={notify}
-                onAskAgent={askAgent}
-                onClose={() => controller.select(undefined)}
-              />
+              {!inspectorCollapsed && (
+                <TaskInspector
+                  task={controller.selected}
+                  controller={controller}
+                  projects={projectState.projects}
+                  lists={listState.lists}
+                  notify={notify}
+                  onAskAgent={askAgent}
+                  onClose={closeSelectedTask}
+                  onToggleCollapse={collapseSelectedInspector}
+                />
+              )}
+              {inspectorCollapsed && controller.selected && (
+                <button
+                  type="button"
+                  className="inspector-reopen-tab"
+                  aria-label="展开任务详情"
+                  title="展开任务详情"
+                  onClick={() => setInspectorCollapsed(false)}
+                >
+                  <PanelRightOpen size={17} aria-hidden="true" />
+                </button>
+              )}
             </>
           )}
           <div className="route-workspace" hidden={route !== "agent"}>
@@ -7264,14 +18049,160 @@ function MainWindow() {
               notify={notify}
               initialPrompt={agentDraft}
               onPromptConsumed={consumeAgentDraft}
+              initialConversationId={pendingAgentConversationId}
+              onConversationConsumed={() => setPendingAgentConversationId(undefined)}
             />
           </div>
           <div className="route-workspace" hidden={route !== "settings"}>
             <SettingsPage notify={notify} />
           </div>
+          {route === "timeline" && (
+            <div className="route-workspace">
+              <Suspense fallback={<DeferredRouteFallback label="正在打开时间线…" />}>
+                <TimelinePage
+                  tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
+                  loading={timelineController.loading || timelineCompletedController.loading}
+                  error={timelineController.error ?? timelineCompletedController.error}
+                  onRetry={() => {
+                    void timelineController.refresh();
+                    void timelineCompletedController.refresh();
+                  }}
+                  onSelect={(taskId) => {
+                    setPendingTaskId(taskId);
+                    navigateTaskCollection("all", sourceFilter);
+                  }}
+                  onMove={(taskId, patch) => timelineController.update(taskId, patch)}
+                  onUndo={undoTimelineOperation}
+                  notify={notify}
+                  focusDate={timelineFocusDate}
+                  calendarEvents={calendarEvents}
+                  onCalendarEventsChange={updateCalendarEvents}
+                  onCreateFollowUp={(event) => {
+                    setNewTaskPreset(buildCalendarFollowUpDraft(event, dateKey()));
+                    openNewTask();
+                  }}
+                  onExtractActionItems={(event, trigger) => {
+                    const drafts = extractCalendarActionItems(event, dateKey());
+                    if (!drafts.length) {
+                      notify("会议备注中没有识别到明确行动项", "info");
+                      return;
+                    }
+                    calendarActionItemsReturnFocusRef.current = trigger;
+                    setCalendarActionItems({ event, drafts });
+                  }}
+                />
+              </Suspense>
+            </div>
+          )}
+          {route === "projects" && (
+            <div className="route-workspace">
+              <Suspense fallback={<DeferredRouteFallback label="正在打开项目…" />}>
+                <ProjectPage
+                  tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
+                  projects={projectState.projects}
+                  loading={timelineController.loading || timelineCompletedController.loading || projectState.loading}
+                  error={timelineController.error ?? timelineCompletedController.error ?? projectState.error}
+                  onRetry={() => {
+                    void timelineController.refresh();
+                    void timelineCompletedController.refresh();
+                    void projectState.refresh();
+                  }}
+                  onSelect={(task) => {
+                    setPendingTaskId(task.id);
+                    navigateTaskCollection(task.status === "completed" ? "completed" : "all", sourceFilter);
+                  }}
+                  onCreateProject={async (input) => {
+                    if (!window.desktopApi) return;
+                    await window.desktopApi.tasks.createProject(input);
+                    await projectState.refresh();
+                    notify(`项目“${input.name}”已创建`, "success");
+                  }}
+                  onUpdateProject={async (id, patch) => {
+                    if (!window.desktopApi) return;
+                    await window.desktopApi.tasks.updateProject({ id, patch });
+                    await projectState.refresh();
+                    notify("项目已更新", "success");
+                  }}
+                  onDeleteProject={async (id) => {
+                    if (!window.desktopApi) return;
+                    const result = await window.desktopApi.tasks.deleteProject(id);
+                    await projectState.refresh();
+                    notify(result.clearedTaskIds.length > 0 ? `项目已删除，并解除 ${result.clearedTaskIds.length} 项任务关联` : "项目已删除", "success");
+                  }}
+                />
+              </Suspense>
+            </div>
+          )}
+          {route === "lists" && (
+            <div className="route-workspace">
+              <Suspense fallback={<DeferredRouteFallback label="正在打开清单…" />}>
+                <ListPage
+                  tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
+                  lists={listState.lists}
+                  loading={timelineController.loading || timelineCompletedController.loading || listState.loading}
+                  error={timelineController.error ?? timelineCompletedController.error ?? listState.error}
+                  onRetry={() => {
+                    void timelineController.refresh();
+                    void timelineCompletedController.refresh();
+                    void listState.refresh();
+                  }}
+                  onSelect={(task) => {
+                    setPendingTaskId(task.id);
+                    navigateTaskCollection(task.status === "completed" ? "completed" : "all", sourceFilter);
+                  }}
+                  onCreateList={async (input) => {
+                    if (!window.desktopApi) return;
+                    await window.desktopApi.tasks.createList(input);
+                    await listState.refresh();
+                    notify(`清单“${input.name}”已创建`, "success");
+                  }}
+                  onUpdateList={async (id, patch) => {
+                    if (!window.desktopApi) return;
+                    await window.desktopApi.tasks.updateList({ id, patch });
+                    await listState.refresh();
+                    notify("清单已更新", "success");
+                  }}
+                  onDeleteList={async (id) => {
+                    if (!window.desktopApi) return;
+                    const result = await window.desktopApi.tasks.deleteList(id);
+                    await listState.refresh();
+                    notify(result.clearedTaskIds.length > 0 ? `清单已删除，并解除 ${result.clearedTaskIds.length} 项任务关联` : "清单已删除", "success");
+                  }}
+                />
+              </Suspense>
+            </div>
+          )}
           {route === "pet" && (
             <div className="route-workspace">
-              <PetHomePage notify={notify} />
+              <PetHomePage
+                notify={notify}
+                tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
+                projects={projectState.projects}
+                onNavigate={navigateFromSidebar}
+                onPlanTomorrow={() => {
+                  const tomorrow = new Date();
+                  tomorrow.setDate(tomorrow.getDate() + 1);
+                  openDailyPlan(dateKey(tomorrow));
+                }}
+                onNavigateTask={(task) => {
+                  setPendingTaskId(task.id);
+                  navigateTaskCollection(
+                    task.status === "completed" ? "completed" : "all",
+                  );
+                }}
+                onStartFocus={async (task) => {
+                  await timelineController.startFocus(task.id);
+                }}
+                onReviewAction={async (task, action) => {
+                  if (action === "complete") {
+                    await timelineController.toggleComplete(task);
+                  } else if (action === "today") {
+                    await timelineController.moveToToday(task.id);
+                  } else {
+                    await timelineController.startFocus(task.id);
+                  }
+                }}
+              />
             </div>
           )}
           {route === "activity" && (
@@ -7284,12 +18215,116 @@ function MainWindow() {
               <SyncPage notify={notify} />
             </div>
           )}
+          {route === "docs" && (
+            <div className="route-workspace">
+              <Suspense fallback={<DeferredRouteFallback label="正在打开文档中心…" />}>
+                <DocsPage />
+              </Suspense>
+            </div>
+          )}
         </div>
         {newTask && (
           <NewTaskSheet
-            onClose={() => setNewTask(false)}
+            onClose={closeNewTask}
             controller={controller}
+            projects={projectState.projects}
+            lists={listState.lists}
             notify={notify}
+            initialTitle={newTaskPreset?.title}
+            initialNotes={newTaskPreset?.notes}
+            initialPlannedDate={newTaskPreset?.plannedDate}
+          />
+        )}
+        {calendarActionItems && (
+          <CalendarActionItemsSheet
+            event={calendarActionItems.event}
+            drafts={calendarActionItems.drafts}
+            onClose={closeCalendarActionItems}
+            onConfirm={async (items) => {
+              let created = 0;
+              try {
+                for (const item of items) {
+                  await controller.create(
+                    {
+                      title: item.title,
+                      notes: item.notes,
+                      plannedDate: item.plannedDate || undefined,
+                      source: { type: "local" },
+                      sync: { status: "local" },
+                    },
+                    { selectCreated: false },
+                  );
+                  created += 1;
+                }
+              } catch (reason) {
+                const detail = reason instanceof Error ? reason.message : "未知错误";
+                throw new Error(
+                  created > 0
+                    ? `已创建 ${created}/${items.length} 项，剩余行动项未创建：${detail}`
+                    : detail,
+                );
+              }
+              notify(`已创建 ${created} 项会后行动任务`, "success");
+              closeCalendarActionItems();
+            }}
+          />
+        )}
+        {commandPaletteOpen && (
+          <CommandPalette
+            actions={commandPaletteActions}
+            onClose={closeCommandPalette}
+          />
+        )}
+        {shortcutsOpen && <KeyboardShortcutsSheet onClose={closeShortcuts} />}
+        {globalSearchOpen && (
+          <GlobalSearchSheet
+            tasks={globalSearchTasks}
+            projects={projectState.projects}
+            lists={listState.lists}
+            calendarEvents={calendarEvents}
+            conversations={globalSearchConversations}
+            loading={globalSearchLoading}
+            error={globalSearchError}
+            onRetry={() => void loadGlobalSearch()}
+            onClose={closeGlobalSearch}
+            onSelect={handleGlobalSearchSelect}
+          />
+        )}
+        {dailyPlanOpen && (
+          <DailyPlanSheet
+            tasks={dailyPlanTasks}
+            loading={dailyPlanLoading}
+            error={dailyPlanError}
+            date={dailyPlanDate}
+            targetLabel={relativePlanLabel(dailyPlanDate)}
+            onRetry={loadDailyPlan}
+            initialCapacityMinutes={dailyPlanPreset?.capacityMinutes}
+            initialTaskIds={dailyPlanPreset?.taskIds}
+            calendarEvents={calendarEvents}
+            onClose={() => {
+              setDailyPlanOpen(false);
+              setDailyPlanPreset(undefined);
+            }}
+            onApply={async (request) => {
+              const operationId = await controller.applyTodayPlan(request);
+              await loadDailyPlan();
+              return operationId;
+            }}
+            onUndo={async (operationId) => {
+              await controller.undo(operationId);
+              await loadDailyPlan();
+            }}
+            onStartFirst={async (task) => {
+              await controller.startFocus(task.id);
+              notify(`已开始“${task.title}”`, "success");
+              setDailyPlanOpen(false);
+              setDailyPlanPreset(undefined);
+            }}
+            onAskAgent={(prompt) => {
+              setDailyPlanOpen(false);
+              setDailyPlanPreset(undefined);
+              askAgent(prompt);
+            }}
           />
         )}
         {activeReminder && (
@@ -7329,6 +18364,56 @@ function MainWindow() {
 
 function captureFields(text: string) {
   const source: TaskSourceType = text.includes("飞书") ? "feishu" : "local";
+  const durationPattern = /(?:预计|大约|约|用时|耗时|时长|需要)[:：]?\s*(\d+(?:\.\d+)?)\s*(分钟|分|小时|时|m|h)/iu;
+  const shorthandDurationPattern = /(\d+(?:\.\d+)?)\s*(m|h)\b/iu;
+  const durationMatch = text.match(durationPattern) ?? text.match(shorthandDurationPattern);
+  const durationAmount = durationMatch ? Number(durationMatch[1]) : NaN;
+  const durationUnit = durationMatch?.[2]?.toLocaleLowerCase();
+  const durationMinutes = Number.isFinite(durationAmount) && durationAmount > 0
+    ? Math.round(durationUnit === "小时" || durationUnit === "时" || durationUnit === "h" ? durationAmount * 60 : durationAmount)
+    : undefined;
+  const estimatedMinutes = durationMinutes !== undefined && durationMinutes >= 5 && durationMinutes <= 720
+    ? durationMinutes
+    : undefined;
+  const weekdayMap: Record<string, number> = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
+  const recurrenceMonthly = text.match(/每(?:隔\s*)?(\d+)?\s*个?月(?:\s*(\d{1,2})\s*(?:日|号))?/u);
+  const recurrenceWeekly = text.match(/每(?:隔\s*)?(\d+)?\s*周([一二三四五六日天周、，,和\s]*)?/u);
+  const recurrenceDaily = text.match(/每(?:隔\s*)?(\d+)?\s*天/u);
+  const recurrenceWorkday = text.match(/工作日/u);
+  const recurrenceMatch = recurrenceMonthly ?? recurrenceWeekly ?? recurrenceDaily ?? recurrenceWorkday;
+  const recurrence: RecurrenceRule | undefined = recurrenceMonthly
+    ? {
+        frequency: "monthly",
+        interval: Number(recurrenceMonthly[1] ?? 1),
+        ...(recurrenceMonthly[2] ? { dayOfMonth: Number(recurrenceMonthly[2]) } : {}),
+      }
+    : recurrenceWeekly
+      ? {
+          frequency: "weekly",
+          interval: Number(recurrenceWeekly[1] ?? 1),
+          ...(() => {
+            const weekdays = [...(recurrenceWeekly[2] ?? "")]
+              .map((character) => weekdayMap[character])
+              .filter((day): day is number => day !== undefined)
+              .filter((day, index, values) => values.indexOf(day) === index)
+              .sort((left, right) => left - right);
+            return weekdays.length ? { weekdays } : {};
+          })(),
+        }
+      : recurrenceDaily
+        ? { frequency: "daily", interval: Number(recurrenceDaily[1] ?? 1) }
+        : recurrenceWorkday
+          ? { frequency: "weekly", interval: 1, weekdays: [1, 2, 3, 4, 5] }
+          : undefined;
+  const contexts = [
+    ...(text.match(/(?:情境|场景|地点)[:：]\s*([^，,。；;\s]+)/u)?.[1]
+      ? [text.match(/(?:情境|场景|地点)[:：]\s*([^，,。；;\s]+)/u)![1]]
+      : []),
+    ...[...text.matchAll(/@([\p{L}\p{N}_-]{1,40})/gu)].map((match) => match[1]),
+  ].filter((context, index, values) => {
+    const key = context.trim().toLocaleLowerCase();
+    return values.findIndex((candidate) => candidate.trim().toLocaleLowerCase() === key) === index;
+  });
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const date = text.includes("明天")
@@ -7344,30 +18429,76 @@ function captureFields(text: string) {
       )
       .replace(/(?:存|创建|同步|放|添加)到飞书(?:任务)?/gu, "")
       .replace(/(?:存|创建|放|添加)到本地(?:任务)?/gu, "")
+      .replace(/(?:情境|场景|地点)[:：]\s*([^，,。；;\s]+)/gu, "")
+      .replace(/@([\p{L}\p{N}_-]{1,40})/gu, "")
+      .replace(durationPattern, "")
+      .replace(shorthandDurationPattern, "")
+      .replace(recurrenceMatch?.[0] ?? "", "")
       .replace(/并?提前.*?提醒/gu, "")
       .replace(/[，,。]+/gu, " ")
       .replace(/\s+/gu, " ")
       .trim() || text.trim();
-  return { source, date, title };
+  return { source, date, title, contexts, estimatedMinutes, recurrence };
 }
+
+type QuickCaptureDestination = "task" | "inbox" | "diary";
 
 function QuickCaptureWindow() {
   const [text, setText] = useState("");
+  const [recentCaptures, setRecentCaptures] = useState<QuickCaptureHistoryItem[]>(
+    () => readQuickCaptureHistory(),
+  );
+  const [recentContexts, setRecentContexts] = useState<ContextCaptureHistoryItem[]>(
+    () => readContextCaptureHistory(),
+  );
   const [saving, setSaving] = useState(false);
   const [captureError, setCaptureError] = useState("");
+  const [contextSavedNotice, setContextSavedNotice] = useState("");
+  const [captureDestination, setCaptureDestination] =
+    useState<QuickCaptureDestination>("task");
+  const captureIdRef = useRef(`quick-capture-${crypto.randomUUID()}`);
+  const [clipboardContext, setClipboardContext] = useState<{
+    text: string;
+    characters: number;
+    truncated: boolean;
+    capturedAt: string;
+  }>();
+  const [clipboardLoading, setClipboardLoading] = useState(false);
+  const [windowContext, setWindowContext] = useState<{
+    status: "captured" | "unavailable";
+    appName?: string;
+    title?: string;
+    reason?: "unsupported" | "permission-denied" | "empty" | "error";
+    capturedAt: string;
+  }>();
+  const [windowContextLoading, setWindowContextLoading] = useState(false);
+  const [selectedTextContext, setSelectedTextContext] = useState<{
+    status: "captured" | "unavailable";
+    text?: string;
+    characters?: number;
+    truncated?: boolean;
+    capturedAt: string;
+    reason?: "unsupported" | "permission-denied" | "empty" | "error";
+  }>();
+  const [selectedTextLoading, setSelectedTextLoading] = useState(false);
+  const [dropPreview, setDropPreview] = useState<DropContextPreview>();
+  const [dropActive, setDropActive] = useState(false);
   const fallbackFields = useMemo(() => captureFields(text), [text]);
   const [parsed, setParsed] = useState<QuickCaptureResult>();
   const fields =
     parsed?.originalText === text.trim()
       ? {
           source: parsed.source,
-          date: (parsed.privatePlanAt ?? parsed.dueAt)?.slice(0, 10),
+          date: temporalDateKey(parsed.privatePlanAt ?? parsed.dueAt),
           title: parsed.title,
           dueAt: parsed.dueAt,
           privatePlanAt: parsed.privatePlanAt,
           reminderAt: parsed.reminderAt,
           project: parsed.project,
           tags: parsed.tags,
+          contexts: parsed.contexts,
+          estimatedMinutes: parsed.estimatedMinutes,
+          recurrence: parsed.recurrence,
           priority: parsed.priority,
           chips: parsed.chips,
           needsReview: parsed.needsReview,
@@ -7376,16 +18507,71 @@ function QuickCaptureWindow() {
           ...fallbackFields,
           project: undefined,
           tags: [],
+          contexts: fallbackFields.contexts,
           priority: 1 as const,
           chips: [],
           needsReview: false,
         };
   const controller = useTaskController("inbox", "");
+  const taskTemplates = useTaskTemplates();
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    void window.desktopApi?.tasks.getDraft("quick-capture").then((draft) => {
-      if (draft?.text) setText(draft.text);
+  const voice = useVoiceCapture({
+    onFinal: (spoken) =>
+      setText((current) =>
+        current.trim() ? `${current.trim()} ${spoken}` : spoken,
+      ),
+  });
+  const selectedTemplate = taskTemplates.templates.find(
+    (template) => template.id === selectedTemplateId,
+  );
+  const rememberCurrentCapture = (destination: QuickCaptureHistoryDestination) => {
+    const next = rememberQuickCapture({
+      id: captureIdRef.current,
+      text: text.trim(),
+      title: fields.title,
+      destination,
+      createdAt: new Date().toISOString(),
     });
+    setRecentCaptures(next);
+  };
+  const rememberContext = (
+    kind: ContextCaptureHistoryKind,
+    label: string,
+    value: string,
+  ) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    const next = rememberContextCapture({
+      id: `context-${crypto.randomUUID()}`,
+      kind,
+      label: label.trim() || "最近上下文",
+      text: normalized,
+      createdAt: new Date().toISOString(),
+    });
+    setRecentContexts(next);
+    setContextSavedNotice("已保存到最近上下文（仅本机）");
+    window.setTimeout(() => setContextSavedNotice(""), 1800);
+  };
+  const applyContext = (item: ContextCaptureHistoryItem) => {
+    setText((current) =>
+      current.trim() ? `${current}\n${item.text}` : item.text,
+    );
+    inputRef.current?.focus();
+  };
+  const templatePreview = selectedTemplate && fields.title
+    ? previewTaskTemplate(selectedTemplate, fields.title, {
+        date: fields.date ?? dateKey(),
+        dueAt: fields.dueAt,
+      })
+    : undefined;
+  useEffect(() => {
+    void window.desktopApi?.tasks
+      .getDraft("quick-capture")
+      .then((draft) => {
+        if (draft?.text) setText(draft.text);
+      })
+      .catch(() => undefined);
     const unsubscribe = window.desktopApi?.events.onQuickCaptureFocus(() =>
       inputRef.current?.focus(),
     );
@@ -7408,11 +18594,13 @@ function QuickCaptureWindow() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (text)
-        void window.desktopApi?.tasks.saveDraft({
-          id: "quick-capture",
-          kind: "quick-capture",
-          text,
-        });
+        void window.desktopApi?.tasks
+          .saveDraft({
+            id: "quick-capture",
+            kind: "quick-capture",
+            text,
+          })
+          .catch(() => undefined);
     }, 250);
     return () => window.clearTimeout(timer);
   }, [text]);
@@ -7421,47 +18609,136 @@ function QuickCaptureWindow() {
     setSaving(true);
     setCaptureError("");
     try {
+      if (captureDestination === "diary") {
+        const createDiaryFromCapture = window.desktopApi?.pet.createDiaryFromCapture;
+        if (!createDiaryFromCapture) throw new Error("当前版本暂不支持写入日记，请先更新应用");
+        await createDiaryFromCapture({
+          title: fields.title,
+          content: text.trim(),
+          localDate: fields.date ?? dateKey(),
+          captureId: captureIdRef.current,
+        });
+        rememberCurrentCapture("diary");
+        await window.desktopApi?.tasks.deleteDraft("quick-capture");
+        setText("");
+        setSelectedTemplateId("");
+        captureIdRef.current = `quick-capture-${crypto.randomUUID()}`;
+        if (openAfterSave) await window.desktopApi?.shell.showMain("home");
+        window.setTimeout(() => {
+          void window.desktopApi?.shell.hideCurrentWindow().catch(() => undefined);
+        }, 260);
+        return;
+      }
       const feishu =
-        source === "feishu"
+        captureDestination === "task" && source === "feishu"
           ? await window.desktopApi?.feishu.status()
           : undefined;
-      const blockedFeishuMessage = feishuCreationBlockedMessage(source, feishu);
+      const effectiveSource = captureDestination === "inbox" ? "local" : source;
+      const blockedFeishuMessage = feishuCreationBlockedMessage(effectiveSource, feishu);
       if (blockedFeishuMessage) throw new Error(blockedFeishuMessage);
       const priorities: TaskPriority[] = ["low", "medium", "high", "urgent"];
-      const result = await controller.create({
-        title: fields.title,
+      const baseDate =
+        captureDestination === "inbox"
+          ? undefined
+          : temporalDateKey(fields.privatePlanAt) ??
+            (!fields.dueAt ? fields.date : undefined) ??
+            dateKey();
+      const baseInput = {
         source:
-          source === "feishu"
-            ? { type: "feishu", accountId: feishu?.accountId }
-            : { type: "local" },
-        plannedDate:
-          fields.privatePlanAt?.slice(0, 10) ??
-          (!fields.dueAt ? fields.date : undefined),
-        dueAt: fields.dueAt,
-        projectId: fields.project,
-        tags: fields.tags,
-        priority: priorities[fields.priority] ?? "medium",
-        reminders: fields.reminderAt
-          ? [
-              {
-                id: crypto.randomUUID(),
-                at: fields.reminderAt,
-                enabled: true,
-                source: "local",
-              },
-            ]
-          : [],
-        sync: source === "feishu" ? { status: "pending" } : { status: "local" },
-      });
+          effectiveSource === "feishu"
+            ? { type: "feishu" as const, accountId: feishu?.accountId }
+            : { type: "local" as const },
+        projectId: captureDestination === "inbox" ? undefined : fields.project,
+        contexts: fields.contexts,
+        sync: effectiveSource === "feishu" ? { status: "pending" as const } : { status: "local" as const },
+      };
+      const templateInputs = selectedTemplate
+        ? buildTaskTemplateInputs(selectedTemplate, fields.title, {
+            date: baseDate ?? dateKey(),
+            dueAt: fields.dueAt,
+            tags: fields.tags,
+            priority: priorities[fields.priority] ?? "medium",
+            reminderAt: fields.reminderAt,
+          })
+        : [
+            {
+              title: fields.title,
+              plannedDate: baseDate,
+              dueAt: fields.dueAt,
+              tags: fields.tags,
+              estimatedMinutes: fields.estimatedMinutes,
+              recurrence: fields.source === "local" ? fields.recurrence : undefined,
+              priority: priorities[fields.priority] ?? "medium",
+              reminders: fields.reminderAt
+                ? [
+                    {
+                      id: crypto.randomUUID(),
+                      at: fields.reminderAt,
+                      enabled: true,
+                      source: "local" as const,
+                    },
+                  ]
+                : [],
+            },
+          ];
+      const destinationInputs = templateInputs.map((input) =>
+        captureDestination === "inbox"
+          ? {
+              ...input,
+              plannedDate: undefined,
+              dueAt: undefined,
+              reminders: [],
+              recurrence: undefined,
+            }
+          : input,
+      );
+      let firstResult: Awaited<ReturnType<typeof controller.create>>;
+      let createdCount = 0;
+      const createdTemplateStepIds = new Map<string, string>();
+      for (const input of destinationInputs) {
+        try {
+          const templateParentId = parentTaskIdForTemplateInput(
+            input,
+            effectiveSource,
+            createdTemplateStepIds,
+          );
+          const result = await controller.create({
+            ...baseInput,
+            ...input,
+            ...(templateParentId ? { parentId: templateParentId } : {}),
+            source: effectiveSource === "feishu"
+              ? { type: "feishu" as const, accountId: feishu?.accountId }
+              : { type: "local" as const },
+            sync: effectiveSource === "feishu"
+              ? { status: "pending" as const }
+              : { status: "local" as const },
+          });
+          firstResult ??= result;
+          createdCount += 1;
+          const templateStepId = input.customFields?.templateStepId;
+          if (result?.task?.id && typeof templateStepId === "string") {
+            createdTemplateStepIds.set(templateStepId, result.task.id);
+          }
+        } catch (reason) {
+          const detail = reason instanceof Error ? reason.message : "未知错误";
+          if (selectedTemplate && createdCount > 0) {
+            throw new Error(`模板已创建 ${createdCount}/${destinationInputs.length} 项，剩余步骤未创建：${detail}`);
+          }
+          throw reason;
+        }
+      }
       await window.desktopApi?.tasks.deleteDraft("quick-capture");
+      rememberCurrentCapture(captureDestination);
       setText("");
+      setSelectedTemplateId("");
+      captureIdRef.current = `quick-capture-${crypto.randomUUID()}`;
       if (openAfterSave) {
         await window.desktopApi?.shell.showMain(
-          result?.task.id ? `task:${result.task.id}` : "today",
+          firstResult?.task.id ? `task:${firstResult.task.id}` : "today",
         );
       }
       window.setTimeout(() => {
-        void window.desktopApi?.shell.hideCurrentWindow();
+        void window.desktopApi?.shell.hideCurrentWindow().catch(() => undefined);
       }, 260);
     } catch (reason) {
       setCaptureError(
@@ -7471,9 +18748,99 @@ function QuickCaptureWindow() {
       setSaving(false);
     }
   };
+  const readClipboardContext = async () => {
+    if (!window.desktopApi?.shell.readClipboard || clipboardLoading) return;
+    setClipboardLoading(true);
+    setCaptureError("");
+    try {
+      const preview = await window.desktopApi.shell.readClipboard();
+      if (!preview.text.trim()) {
+        setCaptureError("剪贴板里没有可预览的文字");
+        setClipboardContext(undefined);
+      } else {
+        setClipboardContext(preview);
+      }
+    } catch (reason) {
+      setCaptureError(reason instanceof Error ? reason.message : "读取剪贴板失败");
+    } finally {
+      setClipboardLoading(false);
+    }
+  };
+  const readActiveWindowContext = async () => {
+    if (!window.desktopApi?.shell.readActiveWindow || windowContextLoading) return;
+    setWindowContextLoading(true);
+    setCaptureError("");
+    try {
+      setWindowContext(await window.desktopApi.shell.readActiveWindow());
+    } catch (reason) {
+      setWindowContext({
+        status: "unavailable",
+        reason: "error",
+        capturedAt: new Date().toISOString(),
+      });
+      setCaptureError(reason instanceof Error ? reason.message : "读取当前窗口失败");
+    } finally {
+      setWindowContextLoading(false);
+    }
+  };
+  const readSelectedTextContext = async () => {
+    if (!window.desktopApi?.shell.readSelectedText || selectedTextLoading) return;
+    setSelectedTextLoading(true);
+    setCaptureError("");
+    try {
+      setSelectedTextContext(await window.desktopApi.shell.readSelectedText());
+    } catch (reason) {
+      setSelectedTextContext({
+        status: "unavailable",
+        reason: "error",
+        capturedAt: new Date().toISOString(),
+      });
+      setCaptureError(reason instanceof Error ? reason.message : "读取选中文本失败");
+    } finally {
+      setSelectedTextLoading(false);
+    }
+  };
+  const captureDropPreview = (dataTransfer: DataTransfer) =>
+    buildDropContextPreview({
+      plainText: dataTransfer.getData("text/plain"),
+      uriList: dataTransfer.getData("text/uri-list"),
+      files: Array.from(dataTransfer.files).map((file) => ({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+      })),
+    });
+  const applyDropToText = () => {
+    if (!dropPreview) return;
+    const value = dropPreview.kind === "url" ? dropPreview.url : dropPreview.text;
+    if (!value) return;
+    setText((current) => (current.trim() ? `${current}\n${value}` : value));
+    setDropPreview(undefined);
+  };
   return (
     <div className="quick-shell">
-      <div className="quick-panel">
+      <div
+        className={`quick-panel ${dropActive ? "is-drop-active" : ""}`}
+        onDragEnter={(event) => {
+          if (event.dataTransfer.types.some((type) => ["text/plain", "text/uri-list", "Files"].includes(type))) {
+            event.preventDefault();
+            setDropActive(true);
+          }
+        }}
+        onDragOver={(event) => {
+          if (!dropActive) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDropActive(false);
+          setDropPreview(captureDropPreview(event.dataTransfer));
+        }}
+      >
         <div className="quick-input-row drag-region">
           <span className="brand-mark">
             <Command size={18} />
@@ -7488,7 +18855,7 @@ function QuickCaptureWindow() {
             }}
             onKeyDown={(event) => {
               if (event.key === "Escape")
-                void window.desktopApi?.shell.hideCurrentWindow();
+                void window.desktopApi?.shell.hideCurrentWindow().catch(() => undefined);
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 void save(fields.source, event.metaKey || event.ctrlKey);
@@ -7497,6 +18864,55 @@ function QuickCaptureWindow() {
             placeholder="用自然语言新增任务…"
             aria-label="快速录入"
           />
+          <div className="quick-context-actions no-drag">
+            <button
+              type="button"
+              className="quick-context-button"
+              onClick={() => void readClipboardContext()}
+              disabled={clipboardLoading}
+              title="只预览剪贴板文字，不会自动创建任务"
+            >
+              <Clipboard size={15} />
+              {clipboardLoading ? "读取中" : "剪贴板"}
+            </button>
+            <button
+              type="button"
+              className="quick-context-button"
+              onClick={() => void readActiveWindowContext()}
+              disabled={windowContextLoading}
+              title="只读取当前窗口的应用名和标题，不会后台持续监控"
+            >
+              <PanelTop size={15} />
+              {windowContextLoading ? "读取中" : "当前窗口"}
+            </button>
+            <button
+              type="button"
+              className="quick-context-button"
+              onClick={() => void readSelectedTextContext()}
+              disabled={selectedTextLoading}
+              title="全局快捷键打开快速录入时会尝试带入外部选中文本；这里只预览，不会自动创建任务"
+            >
+              <ClipboardCheck size={15} />
+              {selectedTextLoading ? "读取中" : "选中文本"}
+            </button>
+            <button
+              type="button"
+              className={`quick-context-button ${voice.listening ? "is-listening" : ""}`}
+              onClick={voice.toggle}
+              disabled={!voice.supported || saving}
+              title={
+                voice.supported
+                  ? "按住或点击开始语音输入；识别结果仍需你检查后保存"
+                  : "当前环境不支持语音输入"
+              }
+              aria-label={
+                voice.listening ? "停止语音输入" : "开始语音输入"
+              }
+            >
+              <Mic size={15} />
+              {voice.listening ? "停止录音" : "语音"}
+            </button>
+          </div>
           <kbd>↵ 保存 · ⌘/Ctrl ↵ 打开</kbd>
         </div>
         <div className="quick-body">
@@ -7507,6 +18923,48 @@ function QuickCaptureWindow() {
                 : "已理解为一个新任务"
               : "输入自然语言即可开始"}
           </p>
+          {!text && (
+            <>
+              <QuickCaptureHistory
+                items={recentCaptures}
+                onSelect={(item) => {
+                  setText(item.text);
+                  setCaptureDestination(item.destination);
+                  setSelectedTemplateId("");
+                  inputRef.current?.focus();
+                }}
+                onClear={() => {
+                  clearQuickCaptureHistory();
+                  setRecentCaptures([]);
+                }}
+              />
+              <ContextCaptureHistory
+                items={recentContexts}
+                onSelect={applyContext}
+                onClear={() => {
+                  clearContextCaptureHistory();
+                  setRecentContexts([]);
+                }}
+              />
+            </>
+          )}
+          {(voice.interimTranscript || voice.error) && (
+            <div
+              className={`voice-capture-status ${voice.error ? "has-error" : ""}`}
+              aria-live="polite"
+            >
+              <Mic size={14} />
+              <span>
+                {voice.error ?? `正在听：${voice.interimTranscript}`}
+              </span>
+            </div>
+          )}
+          {contextSavedNotice && (
+            <div className="success-note context-capture-saved" role="status">
+              <CheckCircle2 size={15} />
+              {contextSavedNotice}
+            </div>
+          )}
           <div className="chip-row">
             {fields.chips.length ? (
               fields.chips.map((chip) => (
@@ -7522,6 +18980,10 @@ function QuickCaptureWindow() {
                     <Cloud size={14} />
                   ) : chip.id === "source" ? (
                     <Laptop size={14} />
+                  ) : chip.id === "duration" ? (
+                    <Clock3 size={14} />
+                  ) : chip.id === "recurrence" ? (
+                    <RotateCcw size={14} />
                   ) : (
                     <Tag size={14} />
                   )}
@@ -7543,6 +19005,47 @@ function QuickCaptureWindow() {
               </>
             )}
           </div>
+          <div className="quick-template-bar">
+            <label>
+              <WandSparkles size={14} />
+              <span>工作流模板</span>
+              <select
+                aria-label="工作流模板选择"
+                value={selectedTemplateId}
+                disabled={captureDestination === "diary"}
+                onChange={(event) => setSelectedTemplateId(event.target.value)}
+              >
+                <option value="">不使用模板</option>
+                {taskTemplates.templates.map((template) => (
+                  <option value={template.id} key={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedTemplate && (
+              <small>{selectedTemplate.description} · 保存后创建 {selectedTemplate.steps.length} 项</small>
+            )}
+          </div>
+          {templatePreview && (
+            <section className="quick-template-preview" aria-label="工作流模板预览">
+              <div className="context-capture-heading">
+                <div>
+                  <strong><WandSparkles size={14} /> {templatePreview.templateName}</strong>
+                  <small>确认后会创建 {templatePreview.steps.length} 项任务；飞书模板也会逐项显示同步状态</small>
+                </div>
+                <button type="button" className="icon-button" aria-label="关闭模板预览" onClick={() => setSelectedTemplateId("")}><X size={14} /></button>
+              </div>
+              <ol>
+                {templatePreview.steps.map((step) => (
+                  <li key={step.id}>
+                    <span>{step.title}</span>
+                    <small>{step.plannedDate ?? "未安排日期"}{step.estimatedMinutes ? ` · ${step.estimatedMinutes} 分钟` : ""}</small>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
           {text && (
             <div className="capture-preview">
               <span className="brand-mark">
@@ -7553,10 +19056,160 @@ function QuickCaptureWindow() {
                 <small>
                   {fields.date ?? "未安排日期"} ·{" "}
                   {fields.reminderAt ? "包含提醒" : "无提醒"}
+                  {fields.estimatedMinutes ? ` · 预计 ${fields.estimatedMinutes} 分钟` : ""}
+                  {fields.recurrence ? (fields.source === "feishu" ? " · 循环仅本地" : " · 循环") : ""}
                 </small>
               </div>
-              <SourcePill source={fields.source} />
+              <SourcePill
+                source={captureDestination === "task" ? fields.source : "local"}
+              />
             </div>
+          )}
+          {text && (
+            <section className="quick-destination" aria-label="快速捕获保存去向">
+              <div className="quick-destination-heading">
+                <strong>保存到哪里？</strong>
+                <small>
+                  {captureDestination === "task"
+                    ? "按上面的解析创建任务"
+                    : captureDestination === "inbox"
+                      ? "暂存为本地任务，不安排日期"
+                      : "写入 Todo Pet 日记，不创建任务"}
+                </small>
+              </div>
+              <div className="quick-destination-options" role="group" aria-label="保存去向">
+                <button
+                  type="button"
+                  className={captureDestination === "task" ? "is-selected" : ""}
+                  aria-pressed={captureDestination === "task"}
+                  onClick={() => setCaptureDestination("task")}
+                >
+                  <Check size={14} /> 任务
+                </button>
+                <button
+                  type="button"
+                  className={captureDestination === "inbox" ? "is-selected" : ""}
+                  aria-pressed={captureDestination === "inbox"}
+                  onClick={() => setCaptureDestination("inbox")}
+                >
+                  <Inbox size={14} /> 暂存
+                </button>
+                <button
+                  type="button"
+                  className={captureDestination === "diary" ? "is-selected" : ""}
+                  aria-pressed={captureDestination === "diary"}
+                  onClick={() => {
+                    setCaptureDestination("diary");
+                    setSelectedTemplateId("");
+                  }}
+                >
+                  <FileText size={14} /> 日记
+                </button>
+              </div>
+            </section>
+          )}
+          {clipboardContext && (
+            <section className="context-capture-card" aria-label="剪贴板上下文预览">
+              <div className="context-capture-heading">
+                <div>
+                  <strong><Clipboard size={14} /> 剪贴板上下文</strong>
+                  <small>{clipboardContext.characters.toLocaleString()} 个字符 · 仅预览，尚未写入任务</small>
+                </div>
+                <button type="button" className="icon-button" aria-label="关闭剪贴板预览" onClick={() => setClipboardContext(undefined)}><X size={14} /></button>
+              </div>
+              <pre>{clipboardContext.text}</pre>
+              {clipboardContext.truncated && <small className="context-capture-truncated">内容较长，预览已截取前 {clipboardContext.text.length.toLocaleString()} 个字符。</small>}
+              <div className="context-capture-actions">
+                <button type="button" className="soft-button" onClick={() => setText((current) => current.trim() ? `${current}\n${clipboardContext.text}` : clipboardContext.text)}>
+                  带入输入框
+                </button>
+                <button type="button" className="soft-button" onClick={() => rememberContext("clipboard", "剪贴板内容", clipboardContext.text)}>
+                  保存到最近上下文
+                </button>
+              </div>
+            </section>
+          )}
+          {windowContext && (
+            <section className="context-capture-card window-context-card" aria-label="当前窗口上下文预览">
+              <div className="context-capture-heading">
+                <div>
+                  <strong><PanelTop size={14} /> 当前窗口上下文</strong>
+                  <small>仅在你点击时读取，不会持续监控</small>
+                </div>
+                <button type="button" className="icon-button" aria-label="关闭当前窗口预览" onClick={() => setWindowContext(undefined)}><X size={14} /></button>
+              </div>
+              {windowContext.status === "captured" ? (
+                <div className="window-context-values">
+                  <span><b>应用</b>{windowContext.appName ?? "未知应用"}</span>
+                  <span><b>标题</b>{windowContext.title ?? "无窗口标题"}</span>
+                </div>
+              ) : (
+                <p className="context-capture-truncated">暂时无法读取（{windowContext.reason === "permission-denied" ? "需要系统辅助功能权限" : "平台不支持或窗口没有标题"}）。</p>
+              )}
+              {windowContext.status === "captured" && (windowContext.appName || windowContext.title) && (
+                <div className="context-capture-actions">
+                  <button type="button" className="soft-button" onClick={() => setText((current) => {
+                    const contextLine = `处理${windowContext.appName ? `「${windowContext.appName}」` : "当前窗口"}${windowContext.title ? `中的「${windowContext.title}」` : ""}`;
+                    return current.trim() ? `${current}\n${contextLine}` : contextLine;
+                  })}>
+                    带入输入框
+                  </button>
+                  <button type="button" className="soft-button" onClick={() => rememberContext("window", windowContext.appName ?? "当前窗口", `处理${windowContext.appName ? `「${windowContext.appName}」` : "当前窗口"}${windowContext.title ? `中的「${windowContext.title}」` : ""}`)}>
+                    保存到最近上下文
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+          {selectedTextContext && (
+            <section className="context-capture-card selected-text-context-card" aria-label="选中文本上下文预览">
+              <div className="context-capture-heading">
+                <div>
+                  <strong><ClipboardCheck size={14} /> 选中文本上下文</strong>
+                  <small>只在你触发时读取；不会自动创建、发送或上传</small>
+                </div>
+                <button type="button" className="icon-button" aria-label="关闭选中文本预览" onClick={() => setSelectedTextContext(undefined)}><X size={14} /></button>
+              </div>
+              {selectedTextContext.status === "captured" && selectedTextContext.text ? (
+                <>
+                  <pre>{selectedTextContext.text}</pre>
+                  <small>{selectedTextContext.characters?.toLocaleString() ?? selectedTextContext.text.length.toLocaleString()} 个字符{selectedTextContext.truncated ? " · 预览已截取" : ""}</small>
+                  <div className="context-capture-actions">
+                    <button type="button" className="soft-button" onClick={() => setText((current) => current.trim() ? `${current}\n${selectedTextContext.text}` : selectedTextContext.text ?? "")}>带入输入框</button>
+                    <button type="button" className="soft-button" onClick={() => rememberContext("selected-text", "选中文本", selectedTextContext.text ?? "")}>保存到最近上下文</button>
+                  </div>
+                </>
+              ) : (
+                <p className="context-capture-truncated">
+                  暂时没有读到选中文本（{selectedTextContext.reason === "permission-denied" ? "需要系统辅助功能权限" : selectedTextContext.reason === "unsupported" ? "当前平台不支持" : "没有选中内容"}）。建议在其他应用选中文本后使用全局快捷键打开快速录入。
+                </p>
+              )}
+            </section>
+          )}
+          {dropPreview && (
+            <section className="context-capture-card drop-context-card" aria-label="拖入内容预览">
+              <div className="context-capture-heading">
+                <div>
+                  <strong><GripVertical size={14} /> 拖入内容预览 · {dropPreview.label}</strong>
+                  <small>只展示来源，不会自动读取文件、上传或执行操作</small>
+                </div>
+                <button type="button" className="icon-button" aria-label="关闭拖入内容预览" onClick={() => setDropPreview(undefined)}><X size={14} /></button>
+              </div>
+              {dropPreview.kind === "file" || dropPreview.kind === "image" ? (
+                <ul className="drop-context-files">
+                  {dropPreview.files?.map((file, index) => <li key={`${file.name}-${index}`}><FileText size={14} /> <span>{file.name}</span></li>)}
+                </ul>
+              ) : (
+                <pre>{dropPreview.kind === "url" ? dropPreview.url : dropPreview.text}</pre>
+              )}
+              {dropPreview.truncated && <small className="context-capture-truncated">文本较长，预览已截取。</small>}
+              {(dropPreview.kind === "text" || dropPreview.kind === "url") && (
+                <div className="context-capture-actions">
+                  <button type="button" className="soft-button" onClick={applyDropToText}>带入输入框</button>
+                  <button type="button" className="soft-button" onClick={() => rememberContext(dropPreview.kind === "url" ? "url" : "drop-text", dropPreview.label, dropPreview.kind === "url" ? dropPreview.url ?? "" : dropPreview.text ?? "")}>保存到最近上下文</button>
+                </div>
+              )}
+            </section>
           )}
           {captureError && (
             <div className="warning-note">
@@ -7567,31 +19220,435 @@ function QuickCaptureWindow() {
         </div>
         <div className="quick-footer">
           <span>
-            {fields.source === "feishu"
-              ? "将创建到飞书；私人计划仍只保存在本地"
-              : "只保存在当前设备"}
+            {captureDestination === "diary"
+              ? "只保存在当前设备，不会创建任务或同步飞书"
+              : captureDestination === "inbox"
+                ? "只保存在当前设备，稍后再安排日期"
+                : fields.source === "feishu"
+                  ? "将创建到飞书；私人计划仍只保存在本地"
+                  : "只保存在当前设备"}
           </span>
           <span className="footer-spacer" />
-          <button
-            type="button"
-            className="soft-button"
-            onClick={() => void save("local")}
-            disabled={!text || saving}
-          >
-            保存到本地
-          </button>
-          <button
-            type="button"
-            className="primary-button"
-            onClick={() => void save("feishu")}
-            disabled={!text || saving}
-          >
-            创建到飞书
-          </button>
+          {captureDestination === "diary" ? (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void save("local")}
+              disabled={!text || saving}
+            >
+              <FileText size={15} /> 写入日记
+            </button>
+          ) : captureDestination === "inbox" ? (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => void save("local")}
+              disabled={!text || saving}
+            >
+              <Inbox size={15} /> 保存到暂存
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="soft-button"
+                onClick={() => void save("local")}
+                disabled={!text || saving}
+              >
+                保存到本地
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void save("feishu")}
+                disabled={!text || saving}
+              >
+                创建到飞书
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function FloatingPetCoopGame({
+  game,
+  petName,
+  palette,
+  outfit,
+  personality,
+  season,
+  weatherEffect,
+  positionLocked,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  onAction,
+  onComplete,
+  onClose,
+}: {
+  game: FloatingPetGame;
+  petName: string;
+  palette: PetPalette;
+  outfit: PetOutfit;
+  personality: PetPersonality;
+  season?: PetSeason;
+  weatherEffect?: PetWeatherEffect;
+  positionLocked: boolean;
+  onDragStart: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onDragMove: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onDragEnd: (event?: ReactPointerEvent<HTMLButtonElement>) => void;
+  onAction: (action: PetAction, message?: string, durationMs?: number) => void;
+  onComplete: (
+    game: FloatingPetGame,
+    score: number,
+    durationSeconds: number,
+  ) => void;
+  onClose: () => void;
+}) {
+  const startedAtRef = useRef(Date.now());
+  const elapsedBeforePauseRef = useRef(0);
+  const completedRef = useRef(false);
+  const jumpScoreRef = useRef<JumpRopeScore>(emptyJumpRopeScore());
+  const motionTimerRef = useRef<number | undefined>(undefined);
+  const onCompleteRef = useRef(onComplete);
+  const onActionRef = useRef(onAction);
+  const [remaining, setRemaining] = useState(20);
+  const [ropeWindowOpen, setRopeWindowOpen] = useState(false);
+  const [jumpStats, setJumpStats] = useState<JumpRopeScore>(() =>
+    emptyJumpRopeScore(),
+  );
+  const [isJumpPaused, setIsJumpPaused] = useState(false);
+  const [jumpFinished, setJumpFinished] = useState(false);
+  const [stretchStep, setStretchStep] = useState(0);
+  const [stageAction, setStageAction] = useState<PetAction>(
+    game === "jump-rope" ? "jump-rope-ready" : "stretch",
+  );
+  const [stageFeedback, setStageFeedback] = useState("看准绳子");
+  onCompleteRef.current = onComplete;
+  onActionRef.current = onAction;
+
+  const stretchSteps: Array<{
+    title: string;
+    hint: string;
+    action: PetAction;
+  }> = [
+    { title: "抬起肩膀", hint: "吸气，和我一起把肩膀抬高", action: "stretch" },
+    { title: "向左舒展", hint: "慢慢拉长身体左侧", action: "look-left" },
+    { title: "向右舒展", hint: "换边，动作不用追求标准", action: "look-right" },
+    { title: "喝口水", hint: "放松肩膀，喝一口水就完成", action: "drink" },
+  ];
+  useEffect(() => {
+    if (game !== "jump-rope" || isJumpPaused || jumpFinished) return undefined;
+    const updateFrame = () => {
+      const frame = jumpRopeFrame(
+        elapsedBeforePauseRef.current + Date.now() - startedAtRef.current,
+      );
+      setRemaining((current) =>
+        current === frame.remainingSeconds ? current : frame.remainingSeconds,
+      );
+      setRopeWindowOpen((current) =>
+        current === frame.windowOpen ? current : frame.windowOpen,
+      );
+      if (!frame.finished) return;
+      elapsedBeforePauseRef.current = frame.elapsedMs;
+      setRopeWindowOpen(false);
+      setJumpFinished(true);
+      setStageAction("celebrate");
+      setStageFeedback("配合完成！");
+    };
+    updateFrame();
+    const timer = window.setInterval(() => {
+      updateFrame();
+    }, 60);
+    return () => window.clearInterval(timer);
+  }, [game, isJumpPaused, jumpFinished]);
+
+  useEffect(
+    () => () => {
+      if (motionTimerRef.current !== undefined) {
+        window.clearTimeout(motionTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const playStageAction = (action: PetAction, durationMs: number, feedback: string) => {
+    if (motionTimerRef.current !== undefined) {
+      window.clearTimeout(motionTimerRef.current);
+    }
+    setStageAction(action);
+    setStageFeedback(feedback);
+    motionTimerRef.current = window.setTimeout(() => {
+      setStageAction(game === "jump-rope" ? "jump-rope-ready" : "stretch");
+      setStageFeedback(game === "jump-rope" ? "看准绳子" : "慢慢跟上就好");
+      motionTimerRef.current = undefined;
+    }, durationMs);
+  };
+  const readJumpElapsed = () =>
+    elapsedBeforePauseRef.current +
+    (isJumpPaused || jumpFinished ? 0 : Date.now() - startedAtRef.current);
+  const jump = () => {
+    if (isJumpPaused || jumpFinished) return;
+    const liveFrame = jumpRopeFrame(readJumpElapsed());
+    // The visible green window is the source of truth. Recalculating the
+    // phase here can turn a click that landed on a green button into a miss
+    // during the few milliseconds between paint and the event handler.
+    const result = scoreJumpRopeAttempt(jumpScoreRef.current, {
+      ...liveFrame,
+      windowOpen: ropeWindowOpen && !liveFrame.finished,
+    });
+    jumpScoreRef.current = result.score;
+    setJumpStats(result.score);
+    if (result.outcome === "success") {
+      playStageAction("jump-rope", 820, "跳得漂亮！");
+      return;
+    }
+    if (result.outcome === "miss") {
+      playStageAction("head-tilt", 800, "差一点，再看准脚边");
+    }
+  };
+  const toggleJumpPause = () => {
+    if (jumpFinished) return;
+    if (motionTimerRef.current !== undefined) {
+      window.clearTimeout(motionTimerRef.current);
+      motionTimerRef.current = undefined;
+    }
+    if (isJumpPaused) {
+      startedAtRef.current = Date.now();
+      setStageAction("jump-rope-ready");
+      setStageFeedback("看准绳子");
+      setIsJumpPaused(false);
+      return;
+    }
+    elapsedBeforePauseRef.current += Date.now() - startedAtRef.current;
+    setRopeWindowOpen(false);
+    setStageAction("sit");
+    setStageFeedback("暂停中，准备好再继续");
+    setIsJumpPaused(true);
+  };
+  const resetJumpRope = () => {
+    if (motionTimerRef.current !== undefined) {
+      window.clearTimeout(motionTimerRef.current);
+      motionTimerRef.current = undefined;
+    }
+    completedRef.current = false;
+    startedAtRef.current = Date.now();
+    elapsedBeforePauseRef.current = 0;
+    jumpScoreRef.current = emptyJumpRopeScore();
+    setJumpStats(jumpScoreRef.current);
+    setRemaining(20);
+    setRopeWindowOpen(false);
+    setJumpFinished(false);
+    setIsJumpPaused(false);
+    setStageAction("jump-rope-ready");
+    setStageFeedback("看准绳子");
+  };
+  const gameControls = (
+    <div className="pet-game-header-actions">
+      {game === "jump-rope" && !jumpFinished && (
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={isJumpPaused ? "继续跳绳" : "暂停跳绳"}
+          onClick={toggleJumpPause}
+        >
+          {isJumpPaused ? <Play size={16} /> : <Pause size={16} />}
+        </button>
+      )}
+      <button
+        type="button"
+        className="floating-drag-handle pet-game-drag-handle no-drag"
+        title={positionLocked ? "位置已锁定" : "拖动移动"}
+        aria-label={positionLocked ? "宠物位置已锁定" : "拖动 Todo Pet"}
+        disabled={positionLocked}
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+      >
+        <GripVertical size={16} />
+      </button>
+      <button type="button" className="icon-button" aria-label="退出小游戏" onClick={onClose}>
+        <X size={16} />
+      </button>
+    </div>
+  );
+
+  if (game === "stretch-mirror") {
+    const step = stretchSteps[stretchStep];
+    return (
+      <section className="pet-coop-game no-drag" aria-label="镜像伸展小游戏">
+        <header>
+          <div>
+            <span className="pet-game-kicker">和 {petName} 一起动一动</span>
+            <h2>镜像伸展</h2>
+          </div>
+          {gameControls}
+        </header>
+        <div className="pet-stretch-progress" aria-label={`第 ${stretchStep + 1} 步，共 ${stretchSteps.length} 步`}>
+          {stretchSteps.map((item, index) => (
+            <span key={item.title} className={index <= stretchStep ? "active" : ""} />
+          ))}
+        </div>
+        <div className="pet-stretch-mirror">
+          <div className="pet-game-character">
+            <PetCharacter
+              mood="idle"
+              action={stageAction}
+              name={petName}
+              visualStyle="atlas"
+              palette={palette}
+              outfit={outfit}
+              personality={personality}
+              season={season}
+              weatherEffect={weatherEffect}
+            />
+          </div>
+          <div className="pet-stretch-instruction">
+            <Activity size={24} />
+            <strong>{step.title}</strong>
+            <p>{step.hint}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="primary-button pet-coop-primary"
+          onClick={() => {
+            playStageAction(step.action, 1_400, step.hint);
+            onActionRef.current(step.action, step.hint, 1_500);
+            if (stretchStep < stretchSteps.length - 1) {
+              setStretchStep((value) => value + 1);
+              return;
+            }
+            if (completedRef.current) return;
+            completedRef.current = true;
+            onCompleteRef.current("stretch-mirror", stretchSteps.length, 24);
+          }}
+        >
+          <Check size={16} />
+          {stretchStep === stretchSteps.length - 1 ? "一起完成" : "我跟上了"}
+        </button>
+        <small>没有摄像头和动作评分，只需要舒服地跟着做。</small>
+      </section>
+    );
+  }
+
+  if (jumpFinished) {
+    const summary =
+      jumpStats.score >= 14
+        ? "节奏特别合拍"
+        : jumpStats.score >= 8
+          ? "已经找到共同节奏"
+          : "第一次配合也很棒";
+    return (
+      <section
+        className="pet-coop-game pet-jump-rope-game no-drag"
+        aria-label="协作跳绳完成总结"
+      >
+        <header>
+          <div>
+            <span className="pet-game-kicker">20 秒协作完成</span>
+            <h2>{summary}</h2>
+          </div>
+          {gameControls}
+        </header>
+        <div className="pet-game-summary" role="status" aria-live="polite">
+          <PetCharacter
+            mood="happy"
+            action="celebrate"
+            name={petName}
+            visualStyle="atlas"
+            palette={palette}
+            outfit={outfit}
+            personality={personality}
+            season={season}
+            weatherEffect={weatherEffect}
+          />
+          <strong>我们一起跳过了 {jumpStats.score} 下</strong>
+          <p>
+            最长连续 {jumpStats.bestCombo} 下，差一点 {jumpStats.misses} 次。
+            这里不追求满分，只记录我们越来越默契。
+          </p>
+        </div>
+        <div className="pet-game-summary-actions">
+          <button type="button" className="soft-button" onClick={resetJumpRope}>
+            <RotateCcw size={15} /> 再来一次
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => {
+              if (completedRef.current) return;
+              completedRef.current = true;
+              onCompleteRef.current("jump-rope", jumpStats.score, 20);
+            }}
+          >
+            <Check size={15} /> 收下默契奖励
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="pet-coop-game pet-jump-rope-game no-drag" aria-label="协作跳绳小游戏">
+      <header>
+        <div>
+          <span className="pet-game-kicker">20 秒协作挑战</span>
+          <h2>和 {petName} 一起跳绳</h2>
+        </div>
+        {gameControls}
+      </header>
+      <div className={`pet-rope-stage ${ropeWindowOpen ? "is-jump-window" : ""}`}>
+        <div className="pet-game-character">
+          <PetCharacter
+            mood="idle"
+            action={stageAction}
+            name={petName}
+            visualStyle="atlas"
+            palette={palette}
+            outfit={outfit}
+            personality={personality}
+            season={season}
+            weatherEffect={weatherEffect}
+          />
+        </div>
+        <div className="pet-rope-cue">
+          <strong>{stageAction === "jump-rope" ? stageFeedback : ropeWindowOpen ? "现在跳！" : stageFeedback}</strong>
+          <small>绳子到脚边时点击，宠物才会越过绳子</small>
+        </div>
+      </div>
+      <button
+        type="button"
+        className={`pet-jump-button ${ropeWindowOpen ? "is-ready" : ""}`}
+        aria-label="让宠物跳起来"
+        aria-keyshortcuts="Space Enter"
+        disabled={isJumpPaused}
+        autoFocus
+        onClick={jump}
+      >
+        <Sparkles size={18} /> {isJumpPaused ? "暂停中" : "点击或按空格起跳"}
+      </button>
+      <div className="pet-game-score" aria-live="polite">
+        <span><strong>{remaining}</strong> 秒</span>
+        <span><strong>{jumpStats.score}</strong> 次成功</span>
+        <span><strong>{jumpStats.combo}</strong> 连跳</span>
+        <span><strong>{jumpStats.misses}</strong> 次差一点</span>
+      </div>
+    </section>
+  );
+}
+
+interface FocusShieldNotice {
+  appName: string;
+  matchedLabel: string;
+  paused: boolean;
+  kind: "pet" | "task";
+  taskId?: string;
+  at: number;
 }
 
 function FloatingWindow() {
@@ -7602,13 +19659,18 @@ function FloatingWindow() {
   const allController = useTaskController("all", "");
   const [expanded, setExpanded] = useState(false);
   const hoverExpandTimerRef = useRef<number | undefined>(undefined);
+  const hoverLeaveTimerRef = useRef<number | undefined>(undefined);
   const compactActivateTimerRef = useRef<number | undefined>(undefined);
   const contextMenuReturnExpandedRef = useRef(false);
+  const contextMenuReturnPetOnlyRef = useRef(false);
+  const interactionReturnExpandedRef = useRef(false);
+  const interactionReturnPetOnlyRef = useRef(false);
   const hoverExpandDelayMsRef = useRef(
     defaultSettings.floating.hoverExpandDelayMs,
   );
   const floatingSettingsLoadedRef = useRef(false);
   const hoveringFloatingRef = useRef(false);
+  const lastFloatingPointerRef = useRef({ x: -1, y: -1 });
   const expandTriggerRef = useRef<"hover" | "click" | undefined>(undefined);
   const [hoverExpandDelayMs, setHoverExpandDelayMs] = useState(
     defaultSettings.floating.hoverExpandDelayMs,
@@ -7620,32 +19682,163 @@ function FloatingWindow() {
   const [privacyMode, setPrivacyMode] = useState(false);
   const [floatingLocked, setFloatingLocked] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuFirstItemRef = useRef<HTMLButtonElement>(null);
+  const contextMenuReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const [interactionWheelOpen, setInteractionWheelOpen] = useState(false);
+  const petInteractionTriggerRef = useRef<HTMLButtonElement>(null);
+  const [floatingGame, setFloatingGame] = useState<FloatingPetGame>();
   const [isFloatingHovered, setIsFloatingHovered] = useState(false);
+  const [petOnly, setPetOnly] = useState(readFloatingPetOnly);
+  const [edgePeekMode, setEdgePeekMode] = useState(readFloatingEdgePeekMode);
+  const edgePeekModeRef = useRef(edgePeekMode);
+  const edgePeekDockTimerRef = useRef<number | undefined>(undefined);
+  const [edgePeekDocked, setEdgePeekDocked] = useState(false);
+  const [edgePeeked, setEdgePeeked] = useState(false);
+  const [reactionBubbleCollapsed, setReactionBubbleCollapsed] = useState(false);
+  const [taskBubbleCollapsed, setTaskBubbleCollapsed] = useState(false);
+  const [focusBubbleCollapsed, setFocusBubbleCollapsed] = useState(false);
+  const [focusShieldBubbleCollapsed, setFocusShieldBubbleCollapsed] = useState(false);
+  const [externalAgentBubbleCollapsed, setExternalAgentBubbleCollapsed] =
+    useState(false);
+  const [focusShieldNotice, setFocusShieldNotice] =
+    useState<FocusShieldNotice>();
+  const focusShieldDismissedUntilRef = useRef(0);
+  const focusShieldMatchRef = useRef<string | undefined>(undefined);
+  const [heldTaskBubbleCollapsed, setHeldTaskBubbleCollapsed] = useState(false);
+  const [heldTaskId, setHeldTaskId] = useState<string>();
+  const [taskDropActive, setTaskDropActive] = useState(false);
+  const [draggedTaskId, setDraggedTaskId] = useState<string>();
+  const [activeTaskDropTarget, setActiveTaskDropTarget] =
+    useState<PetTaskDropTargetId>();
+  const [petDropActive, setPetDropActive] = useState(false);
+  const [petDropPreview, setPetDropPreview] = useState<DropContextPreview>();
+  const [petContextSavedNotice, setPetContextSavedNotice] = useState("");
+  const [selectedTextPreview, setSelectedTextPreview] = useState<{
+    status: "captured" | "unavailable";
+    text?: string;
+    characters?: number;
+    truncated?: boolean;
+    capturedAt: string;
+    reason?: "unsupported" | "permission-denied" | "empty" | "error";
+  }>();
+  const [selectedTextLoading, setSelectedTextLoading] = useState(false);
+  const [petWindowDragging, setPetWindowDragging] = useState(false);
+  const floatingDragPointerRef = useRef<number | undefined>(undefined);
+  const petAvatarPointerRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startScreenX: number;
+    startScreenY: number;
+    lastScreenX: number;
+    lastScreenY: number;
+    dragging: boolean;
+  } | undefined>(undefined);
+  const suppressPetAvatarClickRef = useRef(false);
+  const suppressPetAvatarClickTimerRef = useRef<number | undefined>(undefined);
   const [tab, setTab] = useState<PetTab>(readFloatingTab);
+  const [petSmartViews, setPetSmartViews] = useState<SmartViewDefinition[]>(() => readSmartViews());
+  const [petSmartViewId, setPetSmartViewId] = useState<string | undefined>(readFloatingSmartView);
   const [input, setInput] = useState("");
+  const [recentContexts, setRecentContexts] = useState<ContextCaptureHistoryItem[]>(
+    () => readContextCaptureHistory(),
+  );
   const [creatingFloatingTask, setCreatingFloatingTask] = useState(false);
   const floatingCreateRef = useRef(false);
   const [activity, setActivity] = useState<AuditRecord[]>([]);
+  const [externalAgentActivity, setExternalAgentActivity] =
+    useState<AgentActivitySnapshot>();
   const [feishuStatus, setFeishuStatus] = useState<FeishuStatusView>();
   const [now, setNow] = useState(Date.now());
   const [petSettings, setPetSettings] = useState(defaultSettings);
+  const [proactiveTask, setProactiveTask] = useState<PetNextTask>();
+  const proactiveMessageRef = useRef<string | undefined>(undefined);
+  const installedActionPacks = useInstalledPetActionPacks();
   const [focusBusy, setFocusBusy] = useState(false);
   const [focusError, setFocusError] = useState("");
+  const focusEnvironmentSoundRef = useRef<FocusEnvironmentSound | undefined>(
+    undefined,
+  );
+  const prefersReducedMotion = usePrefersReducedMotion();
   const petData = usePetData();
   const miniContentRef = useRef<HTMLDivElement>(null);
   const chatFollowsOutputRef = useRef(true);
   const petFocus = petData.snapshot?.focus;
+  const focusEnvironmentSound =
+    petFocus?.status === "running" && petFocus.phase === "focus"
+      ? petSettings.focus.environmentSound
+      : "off";
   const focusedTask = todayController.tasks.find(
     (task) => task.id === petFocus?.taskId || task.focusStartedAt,
   );
+  const focusShieldTask = allController.tasks.find(
+    (task) => task.status === "open" && Boolean(task.focusStartedAt),
+  ) ?? todayController.tasks.find(
+    (task) => task.status === "open" && Boolean(task.focusStartedAt),
+  );
+  const focusShieldKind: "pet" | "task" | undefined =
+    petFocus?.status === "running" && petFocus.phase === "focus"
+      ? "pet"
+      : focusShieldTask
+        ? "task"
+        : undefined;
+  const focusShieldActive = Boolean(focusShieldKind);
   const carousel = useFloatingTodayCarousel(
     todayController.tasks,
     focusedTask,
-    isFloatingHovered || expanded || contextMenuOpen || privacyMode,
+    isFloatingHovered || expanded || contextMenuOpen || interactionWheelOpen || Boolean(floatingGame) || privacyMode,
   );
   // The compact completion action follows the visible title. A rotating task
   // bubble must never complete a different, hidden task.
   const current = carousel.task;
+  const petTaskSpeechText = current
+    ? privacyMode
+      ? `${petName}提醒你：有一项私人任务需要处理。`
+      : `${petName}提醒你：当前任务是“${current.title}”。${current.dueAt ? `截止时间是 ${formatDateTime(current.dueAt)}。` : ""}`
+    : `${petName}说：今天可以轻松一点。`;
+  const currentTaskTheme: TaskThemeActionPack | undefined = current
+    ? inferTaskTheme(current)
+    : undefined;
+  const heldTask = heldTaskId
+    ? [...allController.tasks, ...todayController.tasks].find(
+        (task) => task.id === heldTaskId,
+      )
+    : undefined;
+  const petAppearance = petData.snapshot?.appearance ?? {
+    palette: "lavender" as const,
+    outfit: "none" as const,
+    roomTheme: "cloud-room" as const,
+    decorations: ["cloud-lamp"],
+  };
+  const petPersonality: PetPersonality =
+    petData.snapshot?.profile.personality ?? "gentle";
+  const personalityActionPack =
+    petPersonality === "energetic" || petPersonality === "playful"
+      ? "playful"
+      : petPersonality === "calm" || petPersonality === "quiet"
+        ? "calm"
+        : petSettings.pet.actionPack;
+  const customIdleProfile = useMemo<PetIdleActionProfile | undefined>(() => {
+    const pack = installedActionPacks.activePack;
+    if (!pack) return undefined;
+    return {
+      actions: pack.idleActions,
+      cooldownMs: pack.cooldownMs,
+      weights: pack.actionWeights,
+    };
+  }, [installedActionPacks.activePack]);
+  const petSeasonEvent = petSettings.pet.seasonalEvents
+    ? petSeasonalEventForDate()
+    : undefined;
+  const petWeatherEffect = petSettings.weather.enabled
+    ? petWeatherEffectFor(petData.weather)
+    : undefined;
+  const petWeatherChip =
+    !petOnly && !floatingGame && petSettings.weather.enabled
+      ? buildPetWeatherChip(petData.weather, privacyMode)
+      : undefined;
+  const petSeason = petSeasonEvent?.season;
   const floatingChat = useAgentChat({
     initialMessage:
       "我可以直接在这里查询、创建和整理任务；需要确认的操作也会留在这个小窗口里。",
@@ -7667,9 +19860,266 @@ function FloatingWindow() {
     },
   });
   useEffect(() => {
+    const refreshRecentContexts = () =>
+      setRecentContexts(readContextCaptureHistory());
+    window.addEventListener(
+      CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+      refreshRecentContexts,
+    );
+    window.addEventListener("storage", refreshRecentContexts);
+    return () => {
+      window.removeEventListener(
+        CONTEXT_CAPTURE_HISTORY_CHANGED_EVENT,
+        refreshRecentContexts,
+      );
+      window.removeEventListener("storage", refreshRecentContexts);
+    };
+  }, []);
+  const voice = useVoiceCapture({
+    onFinal: (spoken) => {
+      if (tab === "chat") {
+        floatingChat.setInput((current) =>
+          current.trim() ? `${current.trim()} ${spoken}` : spoken,
+        );
+      } else {
+        setInput((current) =>
+          current.trim() ? `${current.trim()} ${spoken}` : spoken,
+        );
+      }
+    },
+  });
+  const readSelectedTextPreview = async () => {
+    if (!window.desktopApi?.shell.readSelectedText || selectedTextLoading) return;
+    setSelectedTextLoading(true);
+    try {
+      setSelectedTextPreview(await window.desktopApi.shell.readSelectedText());
+    } finally {
+      setSelectedTextLoading(false);
+    }
+  };
+  const rememberFloatingContext = (
+    kind: ContextCaptureHistoryKind,
+    label: string,
+    value: string,
+  ) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    rememberContextCapture({
+      id: `context-${crypto.randomUUID()}`,
+      kind,
+      label: label.trim() || "最近上下文",
+      text: normalized,
+      createdAt: new Date().toISOString(),
+    });
+    setPetContextSavedNotice("已保存到最近上下文（仅本机）");
+    window.setTimeout(() => setPetContextSavedNotice(""), 1_800);
+  };
+  const openTodayTaskCount = todayController.tasks.filter(
+    (task) => task.status === "open" && !task.deletedAt,
+  ).length;
+  const overdueCount = todayController.tasks.filter(
+    (task) => isOpenTaskOverdue(task),
+  ).length;
+  const petBehavior = usePetBehavior(
+    {
+      reducedMotion: prefersReducedMotion,
+      focus: petFocus
+        ? { phase: petFocus.phase, status: petFocus.status }
+        : undefined,
+      syncing: feishuStatus?.state === "syncing",
+      syncError: feishuStatus?.state === "error",
+      agentSending: floatingChat.isSending,
+      agentRunState: floatingChat.runState,
+      externalAgent: petSettings.agentActivity.showInPet
+        ? externalAgentActivity
+        : undefined,
+      approvalPending: Boolean(floatingChat.approval),
+      overdueCount,
+      openTaskCount: openTodayTaskCount,
+      taskDropActive,
+      taskTheme: currentTaskTheme?.id,
+    },
+    petName,
+    petSettings.pet.interactionsEnabled,
+    personalityActionPack,
+    customIdleProfile,
+  );
+  const petBehaviorRef = useRef(petBehavior);
+  petBehaviorRef.current = petBehavior;
+  useEffect(() => {
+    if (
+      !window.desktopApi ||
+      !petSettings.pet.inputReactionsEnabled ||
+      petSettings.pet.vacationMode
+    ) {
+      return undefined;
+    }
+    return window.desktopApi.events.onPetInputActivity((event) => {
+      petBehaviorRef.current.act(
+        event.kind === "typing" ? "type" : "read",
+        undefined,
+        event.kind === "typing" ? 2_200 : 3_200,
+      );
+    });
+  }, [petSettings.pet.inputReactionsEnabled]);
+  useEffect(() => {
+    if (petBehavior.message) setReactionBubbleCollapsed(false);
+    if (
+      proactiveTask &&
+      proactiveMessageRef.current !== petBehavior.message
+    ) {
+      proactiveMessageRef.current = undefined;
+      setProactiveTask(undefined);
+    }
+  }, [petBehavior.message, proactiveTask]);
+  const previousExternalAgentStateRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const key = externalAgentActivity
+      ? `${externalAgentActivity.agentId ?? "agent"}:${externalAgentActivity.state}`
+      : undefined;
+    if (
+      key &&
+      previousExternalAgentStateRef.current !== undefined &&
+      previousExternalAgentStateRef.current !== key
+    ) {
+      setExternalAgentBubbleCollapsed(false);
+    }
+    previousExternalAgentStateRef.current = key;
+  }, [externalAgentActivity?.agentId, externalAgentActivity?.state]);
+  useEffect(() => {
+    // Mini/edge mode should stay quiet for ordinary work, but an external
+    // Agent asking for attention or reporting an error is a useful alert.
+    // Briefly reveal the pet so the status bubble is readable, then return to
+    // the user's edge position if they have not moved over the surface.
+    if (
+      !edgePeekModeRef.current ||
+      !edgePeekDocked ||
+      !petOnly ||
+      !externalAgentActivity ||
+      !["attention", "notification", "error"].includes(externalAgentActivity.state)
+    ) {
+      return undefined;
+    }
+    revealEdgePeek();
+    const timer = window.setTimeout(() => {
+      if (!hoveringFloatingRef.current) scheduleEdgePeekDock();
+    }, 5_200);
+    return () => window.clearTimeout(timer);
+  }, [edgePeekDocked, externalAgentActivity?.lastEventAt, externalAgentActivity?.state, petOnly]);
+  useEffect(() => {
+    if (focusShieldNotice) setFocusShieldBubbleCollapsed(false);
+  }, [focusShieldNotice?.at]);
+  useEffect(() => {
+    if (!privacyMode && !petSettings.pet.vacationMode) return;
+    proactiveMessageRef.current = undefined;
+    setProactiveTask(undefined);
+    petBehavior.dismiss();
+  }, [petSettings.pet.vacationMode, privacyMode]);
+  useEffect(() => {
+    const engine = new FocusEnvironmentSound();
+    focusEnvironmentSoundRef.current = engine;
+    return () => {
+      engine.dispose();
+      if (focusEnvironmentSoundRef.current === engine) {
+        focusEnvironmentSoundRef.current = undefined;
+      }
+    };
+  }, []);
+  useEffect(() => {
+    focusEnvironmentSoundRef.current?.setKind(focusEnvironmentSound);
+  }, [focusEnvironmentSound]);
+  useEffect(() => {
+    if (heldTaskId) setHeldTaskBubbleCollapsed(false);
+  }, [heldTaskId]);
+  useEffect(() => {
+    void window.desktopApi?.shell.setFloatingPetOnly(petOnly).catch(() => undefined);
+  }, []);
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+  const previousSyncStateRef = useRef<FeishuStatusView["state"] | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    const previous = previousSyncStateRef.current;
+    previousSyncStateRef.current = feishuStatus?.state;
+    if (previous === "syncing" && feishuStatus?.state === "connected") {
+      petBehavior.act("sync-success", "同步完成，任务已经搬好啦。", 3_000);
+    }
+  }, [feishuStatus?.state]);
+  const lastProactiveAtRef = useRef(0);
+  useEffect(() => {
+    if (!floatingSettingsLoadedRef.current) return undefined;
+    if (
+      shouldSuppressPetProactive({
+        settings: petSettings,
+        now: new Date(),
+        focusActive: Boolean(petFocus),
+        fullscreen: Boolean(document.fullscreenElement),
+      })
+    ) {
+      return undefined;
+    }
+    const hour = new Date().getHours();
+    const delay = hour >= 6 && hour < 11 ? 8_000 : 45_000;
+    const showSuggestion = () => {
+      if (
+        shouldSuppressPetProactive({
+          settings: petSettings,
+          now: new Date(),
+          focusActive: Boolean(petFocus),
+          fullscreen: Boolean(document.fullscreenElement),
+        })
+      ) return;
+      if (!proactiveBudgetAvailable(
+        petData.snapshot?.proactiveMessages ?? [],
+        petSettings.pet.proactiveDailyLimit,
+        new Date(),
+      )) return;
+      const intervalMs = petSettings.pet.proactiveIntervalMinutes * 60_000;
+      if (
+        lastProactiveAtRef.current > 0 &&
+        Date.now() - lastProactiveAtRef.current < intervalMs - 1_000
+      ) return;
+      const suggestion = buildPetProactiveSuggestion({
+        now: new Date(),
+        tasks: allController.tasks,
+        weather: petData.weather,
+        petName,
+        syncProblem: feishuStatus?.state === "error",
+        privacyMode,
+        urgencyWeights: petSettings.planning.urgencyWeights,
+      });
+      lastProactiveAtRef.current = Date.now();
+      proactiveMessageRef.current = suggestion.message;
+      setProactiveTask(suggestion.nextTask);
+      petBehavior.act(suggestion.action, suggestion.message, 8_000);
+      void window.desktopApi?.pet
+        .recordProactiveMessage({
+          kind: suggestion.kind,
+          reason: suggestion.message,
+        })
+        .catch(() => undefined);
+    };
+    const timer = window.setTimeout(showSuggestion, delay);
+    const interval = window.setInterval(
+      showSuggestion,
+      petSettings.pet.proactiveIntervalMinutes * 60_000,
+    );
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [
+    allController.tasks,
+    feishuStatus?.state,
+    petData.weather,
+    petData.snapshot?.proactiveMessages,
+    petFocus,
+    petName,
+    petSettings,
+  ]);
   useEffect(() => {
     try {
       localStorage.setItem(floatingTabStorageKey, tab);
@@ -7678,25 +20128,62 @@ function FloatingWindow() {
       // works if a platform policy blocks local storage.
     }
     if (window.desktopApi && floatingSettingsLoadedRef.current) {
-      void window.desktopApi.settings.get().then((settings) => {
-        if (settings.floating.selectedTab === tab) return;
-        return window.desktopApi?.settings.replace({
-          ...settings,
-          floating: { ...settings.floating, selectedTab: tab },
-        });
-      });
+      void window.desktopApi.settings
+        .get()
+        .then((settings) => {
+          if (settings.floating.selectedTab === tab) return;
+          return window.desktopApi?.settings.replace({
+            ...settings,
+            floating: { ...settings.floating, selectedTab: tab },
+          });
+        })
+        .catch(() => undefined);
     }
   }, [tab]);
+  useEffect(() => {
+    const syncSmartViews = () => setPetSmartViews(readSmartViews());
+    // MainWindow and FloatingWindow have separate React trees but share the
+    // same origin storage. The storage event keeps the pet's picker current
+    // when a view is created or removed in the main app.
+    window.addEventListener("storage", syncSmartViews);
+    return () => window.removeEventListener("storage", syncSmartViews);
+  }, []);
+  useEffect(() => {
+    if (petSmartViewId && !petSmartViews.some((view) => view.id === petSmartViewId)) {
+      setPetSmartViewId(undefined);
+    }
+  }, [petSmartViewId, petSmartViews]);
+  useEffect(() => {
+    try {
+      if (petSmartViewId) localStorage.setItem(floatingSmartViewStorageKey, petSmartViewId);
+      else localStorage.removeItem(floatingSmartViewStorageKey);
+    } catch {
+      // A blocked storage area only loses the convenience of remembering the
+      // picker; the current view remains fully usable.
+    }
+  }, [petSmartViewId]);
   useEffect(
     () => () => {
       hoveringFloatingRef.current = false;
       if (hoverExpandTimerRef.current !== undefined) {
         window.clearTimeout(hoverExpandTimerRef.current);
       }
+      if (hoverLeaveTimerRef.current !== undefined) {
+        window.clearTimeout(hoverLeaveTimerRef.current);
+      }
       if (compactActivateTimerRef.current !== undefined) {
         window.clearTimeout(compactActivateTimerRef.current);
       }
+      if (edgePeekDockTimerRef.current !== undefined) {
+        window.clearTimeout(edgePeekDockTimerRef.current);
+      }
+      if (suppressPetAvatarClickTimerRef.current !== undefined) {
+        window.clearTimeout(suppressPetAvatarClickTimerRef.current);
+      }
       contextMenuReturnExpandedRef.current = false;
+      contextMenuReturnPetOnlyRef.current = false;
+      interactionReturnExpandedRef.current = false;
+      interactionReturnPetOnlyRef.current = false;
     },
     [],
   );
@@ -7718,18 +20205,41 @@ function FloatingWindow() {
       // Settings load asynchronously on every floating renderer. If the
       // pointer entered before that read completed (or the delay is edited
       // while the pointer is still there), the old timer must not win.
-      if (
-        delayChanged &&
-        hoverExpandTimerRef.current !== undefined
-      ) {
-        window.clearTimeout(hoverExpandTimerRef.current);
-        hoverExpandTimerRef.current = undefined;
-        if (hoveringFloatingRef.current) scheduleHoverExpand();
+      if (delayChanged) {
+        if (hoverExpandTimerRef.current !== undefined) {
+          window.clearTimeout(hoverExpandTimerRef.current);
+          hoverExpandTimerRef.current = undefined;
+        }
+        // A native transparent window can emit a transient mouseleave while
+        // its settings are broadcast (the window manager reapplies bounds).
+        // `:hover` is the authoritative DOM signal in that case, so re-arm
+        // the new delay even when the React-side flag briefly went stale.
+        const stackIsHovered = document
+          .querySelector<HTMLElement>(".floating-stack")
+          ?.matches(":hover");
+        if (hoveringFloatingRef.current || stackIsHovered) scheduleHoverExpand();
       }
     };
-    void window.desktopApi.settings.get().then(apply);
+    void window.desktopApi.settings.get().then(apply).catch(() => undefined);
     return window.desktopApi.events.onSettingsChanged(apply);
   }, []);
+  useEffect(() => {
+    if (
+      !floatingSettingsLoadedRef.current ||
+      !edgePeekMode ||
+      expanded ||
+      !petOnly ||
+      !petSettings.floating.enabled
+    ) {
+      return;
+    }
+    void window.desktopApi?.shell
+      .setFloatingEdgeDocked(true)
+      .then((accepted) => {
+        if (accepted) setEdgePeekDocked(true);
+      })
+      .catch(() => undefined);
+  }, [edgePeekMode, expanded, petOnly, petSettings.floating.enabled]);
   const refreshContext = useCallback(async () => {
     if (!window.desktopApi) return;
     const [records, status] = await Promise.all([
@@ -7741,12 +20251,20 @@ function FloatingWindow() {
   }, []);
   useEffect(() => {
     void refreshContext();
+    void window.desktopApi?.agentActivity
+      .snapshot()
+      .then(setExternalAgentActivity)
+      .catch(() => undefined);
     const offAgent = window.desktopApi?.events.onAgentEvent((event) => {
       if (event.type !== "model-delta") void refreshContext();
     });
+    const offExternalAgent = window.desktopApi?.events.onAgentActivity(
+      setExternalAgentActivity,
+    );
     const offFeishu = window.desktopApi?.events.onFeishuStatus(setFeishuStatus);
     return () => {
       offAgent?.();
+      offExternalAgent?.();
       offFeishu?.();
     };
   }, [refreshContext]);
@@ -7758,9 +20276,21 @@ function FloatingWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [expanded, floatingChat.messages, tab]);
+  const activePetSmartView = petSmartViews.find((view) => view.id === petSmartViewId);
+  const petSmartViewTasks = useMemo(
+    () =>
+      activePetSmartView
+        ? filterTasksForPetView(allController.tasks, activePetSmartView, new Date(now))
+        : allController.tasks,
+    [activePetSmartView, allController.tasks, now],
+  );
   const isTaskTab = tab === "all" || tab === "today";
   const displayedTaskController =
     tab === "all" ? allController : todayController;
+  const displayedTaskList =
+    tab === "all" && activePetSmartView
+      ? petSmartViewTasks
+      : displayedTaskController.tasks;
   const elapsed = current
     ? current.focusElapsedSeconds +
       (current.focusStartedAt
@@ -7784,6 +20314,13 @@ function FloatingWindow() {
       : petFocus?.phase === "long-break"
         ? "长休息"
         : "专注";
+  const petFocusSpeechText = petFocus
+    ? `${petName}陪你${focusPhaseLabel}。${petFocus.taskTitle && !privacyMode ? `当前任务是“${petFocus.taskTitle}”。` : privacyMode ? "当前关联的是私人任务。" : ""}`
+    : "";
+  const focusEnvironmentSoundLabel =
+    environmentSoundOptions.find(
+      (option) => option.value === petSettings.focus.environmentSound,
+    )?.label ?? "关闭";
   const titleFor = (task?: Task) =>
     task ? (privacyMode ? "私人任务" : task.title) : "今天已清空";
   const submit = async (suggestion?: string) => {
@@ -7797,12 +20334,54 @@ function FloatingWindow() {
       floatingCreateRef.current = true;
       setCreatingFloatingTask(true);
       try {
-        await todayController.create({
-          title: text,
-          plannedDate: dateKey(),
+        let parsed: QuickCaptureResult | undefined;
+        try {
+          parsed = await window.desktopApi?.capture.parse(text);
+        } catch {
+          // A parser failure should never block a plain title capture.
+        }
+        const priorities: TaskPriority[] = [
+          "low",
+          "medium",
+          "high",
+          "urgent",
+        ];
+        const title = parsed?.title?.trim() || text;
+        const plannedDate =
+          temporalDateKey(parsed?.privatePlanAt) ?? dateKey();
+        const createController = tab === "all" ? allController : todayController;
+        await createController.create({
+          title,
+          plannedDate,
+          dueAt: parsed?.dueAt,
+          tags: parsed?.tags,
+          contexts: parsed?.contexts,
+          estimatedMinutes: parsed?.estimatedMinutes,
+          recurrence: parsed?.recurrence,
+          priority: priorities[parsed?.priority ?? 1] ?? "medium",
+          reminders: parsed?.reminderAt
+            ? [
+                {
+                  id: crypto.randomUUID(),
+                  at: parsed.reminderAt,
+                  enabled: true,
+                  source: "local" as const,
+                },
+              ]
+            : [],
+          // The pet panel is deliberately local-only. A phrase such as
+          // “存到飞书” can still be parsed for its title, but must not turn a
+          // compact gesture into an implicit remote write.
           source: { type: "local" },
         });
         setInput("");
+        petBehavior.act("celebrate", `记下啦：${title}`, 2_400);
+      } catch (reason) {
+        petBehavior.act(
+          "sync-error",
+          reason instanceof Error ? reason.message : "新增任务失败，请再试一次。",
+          4_000,
+        );
       } finally {
         floatingCreateRef.current = false;
         setCreatingFloatingTask(false);
@@ -7815,10 +20394,89 @@ function FloatingWindow() {
       await floatingChat.send(text);
     }
   };
+  function clearEdgePeekDockTimer(): void {
+    if (edgePeekDockTimerRef.current === undefined) return;
+    window.clearTimeout(edgePeekDockTimerRef.current);
+    edgePeekDockTimerRef.current = undefined;
+  }
+  function revealEdgePeek(): void {
+    clearEdgePeekDockTimer();
+    if (!edgePeekDocked || edgePeeked) return;
+    void window.desktopApi?.shell
+      .peekFloatingEdge()
+      .then((accepted) => {
+        if (accepted) setEdgePeeked(true);
+      })
+      .catch(() => undefined);
+  }
+  function dockEdgePeek(): void {
+    clearEdgePeekDockTimer();
+    if (
+      !edgePeekModeRef.current ||
+      expanded ||
+      contextMenuOpen ||
+      interactionWheelOpen ||
+      Boolean(floatingGame) ||
+      !window.desktopApi
+    ) {
+      return;
+    }
+    void window.desktopApi.shell
+      .setFloatingEdgeDocked(true)
+      .then((accepted) => {
+        if (accepted) {
+          setEdgePeekDocked(true);
+          setEdgePeeked(false);
+        }
+      })
+      .catch(() => undefined);
+  }
+  function scheduleEdgePeekDock(): void {
+    clearEdgePeekDockTimer();
+    if (!edgePeekModeRef.current || expanded || !petOnly) return;
+    edgePeekDockTimerRef.current = window.setTimeout(() => {
+      edgePeekDockTimerRef.current = undefined;
+      dockEdgePeek();
+    }, 360);
+  }
+  function toggleEdgePeekMode(): void {
+    const next = !edgePeekModeRef.current;
+    edgePeekModeRef.current = next;
+    setEdgePeekMode(next);
+    try {
+      localStorage.setItem(floatingEdgePeekStorageKey, String(next));
+    } catch {
+      // The mode remains available for this run when storage is unavailable.
+    }
+    if (next) {
+      // Edge mode is the compact mini surface; closing an expanded rail first
+      // prevents the native window from parking a large panel off-screen.
+      if (expanded || !petOnly) collapsePetTaskRail();
+      window.setTimeout(dockEdgePeek, 0);
+      petBehavior.act("task-plan", "我先靠在屏幕边上，随时等你叫我。", 2_600);
+    } else {
+      clearEdgePeekDockTimer();
+      setEdgePeekDocked(false);
+      setEdgePeeked(false);
+      void window.desktopApi?.shell.setFloatingEdgeDocked(false).catch(() => undefined);
+      petBehavior.act("wave", "我回来啦，还是会一直陪着你。", 2_600);
+    }
+    setContextMenuOpen(false);
+  }
   function setPanelExpanded(
     value: boolean,
     trigger: "hover" | "click" = "click",
   ) {
+    if (value) revealEdgePeek();
+    if (value && petOnly) {
+      setPetOnly(false);
+      try {
+        localStorage.setItem(floatingPetOnlyStorageKey, "false");
+      } catch {
+        // The in-memory mode still works if persistence is unavailable.
+      }
+      void window.desktopApi?.shell.setFloatingPetOnly(false).catch(() => undefined);
+    }
     if (hoverExpandTimerRef.current !== undefined) {
       window.clearTimeout(hoverExpandTimerRef.current);
       hoverExpandTimerRef.current = undefined;
@@ -7827,43 +20485,201 @@ function FloatingWindow() {
       window.clearTimeout(compactActivateTimerRef.current);
       compactActivateTimerRef.current = undefined;
     }
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = undefined;
+    }
     if (!value) {
       setContextMenuOpen(false);
+      setInteractionWheelOpen(false);
+      setFloatingGame(undefined);
       contextMenuReturnExpandedRef.current = false;
+      interactionReturnExpandedRef.current = false;
     }
     expandTriggerRef.current = value ? trigger : undefined;
     setExpanded(value);
-    void window.desktopApi?.shell.setFloatingExpanded(value);
+    void window.desktopApi?.shell.setFloatingExpanded(value).catch(() => undefined);
+  }
+  function collapsePetTaskRail(): void {
+    if (hoverExpandTimerRef.current !== undefined) {
+      window.clearTimeout(hoverExpandTimerRef.current);
+      hoverExpandTimerRef.current = undefined;
+    }
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = undefined;
+    }
+    if (compactActivateTimerRef.current !== undefined) {
+      window.clearTimeout(compactActivateTimerRef.current);
+      compactActivateTimerRef.current = undefined;
+    }
+    clearEdgePeekDockTimer();
+    setContextMenuOpen(false);
+    setInteractionWheelOpen(false);
+    setFloatingGame(undefined);
+    setExpanded(false);
+    expandTriggerRef.current = undefined;
+    setPetOnly(true);
+    try {
+      localStorage.setItem(floatingPetOnlyStorageKey, "true");
+    } catch {
+      // The in-memory mode still works if persistence is unavailable.
+    }
+    void window.desktopApi?.shell.setFloatingPetOnly(true).catch(() => undefined);
+    if (edgePeekModeRef.current) window.setTimeout(dockEdgePeek, 0);
+  }
+  function expandPetTaskRail(): void {
+    revealEdgePeek();
+    setPetOnly(false);
+    try {
+      localStorage.setItem(floatingPetOnlyStorageKey, "false");
+    } catch {
+      // The in-memory mode still works if persistence is unavailable.
+    }
+    void window.desktopApi?.shell.setFloatingPetOnly(false).catch(() => undefined);
   }
   function closeFloatingContextMenu(): void {
     const returnToExpandedPanel = contextMenuReturnExpandedRef.current;
+    const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
+    const returnFocus = contextMenuReturnFocusRef.current;
     contextMenuReturnExpandedRef.current = false;
+    contextMenuReturnPetOnlyRef.current = false;
+    contextMenuReturnFocusRef.current = undefined;
     setContextMenuOpen(false);
+    if (returnToPetOnly) {
+      collapsePetTaskRail();
+      restoreFloatingContextFocus(returnFocus);
+      return;
+    }
     if (!returnToExpandedPanel) setPanelExpanded(false);
+    restoreFloatingContextFocus(returnFocus);
+  }
+  function restoreFloatingContextFocus(returnFocus: HTMLElement | undefined): void {
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (
+        !returnFocus.isConnected ||
+        returnFocus.hasAttribute("disabled") ||
+        returnFocus.getAttribute("aria-disabled") === "true"
+      ) {
+        return;
+      }
+      returnFocus.focus({ preventScroll: true });
+    });
+  }
+  function openPetInteractionWheel(): void {
+    interactionReturnExpandedRef.current = expanded;
+    interactionReturnPetOnlyRef.current = petOnly;
+    setContextMenuOpen(false);
+    setFloatingGame(undefined);
+    setInteractionWheelOpen(true);
+    if (!expanded) setPanelExpanded(true, "click");
+  }
+  function closePetInteractionSurface(): void {
+    const returnToExpandedPanel = interactionReturnExpandedRef.current;
+    const returnToPetOnly = interactionReturnPetOnlyRef.current;
+    interactionReturnExpandedRef.current = false;
+    interactionReturnPetOnlyRef.current = false;
+    setInteractionWheelOpen(false);
+    setFloatingGame(undefined);
+    const restoreTriggerFocus = () => {
+      window.requestAnimationFrame(() => petInteractionTriggerRef.current?.focus());
+    };
+    if (returnToPetOnly) {
+      collapsePetTaskRail();
+      restoreTriggerFocus();
+      return;
+    }
+    if (!returnToExpandedPanel) setPanelExpanded(false);
+    restoreTriggerFocus();
+  }
+  function performWheelInteraction(kind: PetInteractionKind): void {
+    triggerPetInteraction(kind);
+    closePetInteractionSurface();
+  }
+  function triggerPetInteraction(kind: PetInteractionKind): void {
+    petBehavior.interact(kind);
+    void window.desktopApi?.pet
+      .interact(kind)
+      .then(() => petData.refresh())
+      .catch((reason) => {
+        petBehavior.act(
+          "sync-error",
+          reason instanceof Error ? reason.message : "这次互动暂时没有记住，稍后再试。",
+          4_000,
+        );
+      });
+  }
+  function startFloatingPetGame(game: FloatingPetGame): void {
+    setInteractionWheelOpen(false);
+    setFloatingGame(game);
+    petBehavior.act(
+      game === "jump-rope" ? "wave" : "stretch",
+      game === "jump-rope" ? "准备好了吗？看准绳子一起跳！" : "我做一拍，你跟一拍。",
+      2_400,
+    );
+  }
+  function completeFloatingPetGame(
+    game: FloatingPetGame,
+    score: number,
+    durationSeconds: number,
+  ): void {
+    void window.desktopApi?.pet
+      .recordMiniGame({ game, score, durationSeconds })
+      .then(() => petData.refresh())
+      .catch((reason) => {
+        petBehavior.act(
+          "sync-error",
+          reason instanceof Error ? reason.message : "这次互动暂时没有记住，稍后再试。",
+          4_000,
+        );
+      });
+    petBehavior.celebrate(
+      game === "jump-rope"
+        ? `我们一起跳了 ${score} 下！配合越来越好啦。`
+        : "伸展完成，肩膀和眼睛都松一松。",
+    );
+    closePetInteractionSurface();
   }
   function openFloatingContextMenu(
     event: ReactMouseEvent<HTMLElement>,
   ): void {
     event.preventDefault();
     event.stopPropagation();
+    revealEdgePeek();
+    const activeElement = document.activeElement;
+    contextMenuReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : petInteractionTriggerRef.current ?? undefined;
     contextMenuReturnExpandedRef.current = expanded;
+    contextMenuReturnPetOnlyRef.current = petOnly;
     setContextMenuOpen(true);
     if (!expanded) setPanelExpanded(true, "click");
   }
-  function showMainFromFloatingMenu(route: MainRoute): void {
+  function showMainFromFloatingMenu(route: MainRoute | "plan-today"): void {
+    const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
     contextMenuReturnExpandedRef.current = false;
+    contextMenuReturnPetOnlyRef.current = false;
+    contextMenuReturnFocusRef.current = undefined;
     setContextMenuOpen(false);
-    setPanelExpanded(false);
-    void window.desktopApi?.shell.showMain(route);
+    if (returnToPetOnly) collapsePetTaskRail();
+    else setPanelExpanded(false);
+    void window.desktopApi?.shell.showMain(route).catch(() => undefined);
   }
   function showQuickCaptureFromFloatingMenu(): void {
+    const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
     contextMenuReturnExpandedRef.current = false;
+    contextMenuReturnPetOnlyRef.current = false;
+    contextMenuReturnFocusRef.current = undefined;
     setContextMenuOpen(false);
-    setPanelExpanded(false);
-    void window.desktopApi?.shell.showQuickCapture();
+    if (returnToPetOnly) collapsePetTaskRail();
+    else setPanelExpanded(false);
+    void window.desktopApi?.shell.showQuickCapture().catch(() => undefined);
   }
   function openFloatingChatFromMenu(): void {
     contextMenuReturnExpandedRef.current = false;
+    contextMenuReturnFocusRef.current = undefined;
     setContextMenuOpen(false);
     chatFollowsOutputRef.current = true;
     setTab("chat");
@@ -7884,7 +20700,46 @@ function FloatingWindow() {
           },
         }),
       )
+      .catch(() => undefined)
       .finally(closeFloatingContextMenu);
+  }
+  function togglePetVacationMode(enabled: boolean): void {
+    if (!window.desktopApi) return;
+    void window.desktopApi.settings
+      .get()
+      .then((settings) =>
+        window.desktopApi!.settings.replace({
+          ...settings,
+          pet: { ...settings.pet, vacationMode: enabled },
+        }),
+      )
+      .catch(() => undefined)
+      .finally(closeFloatingContextMenu);
+  }
+  function toggleBossMode(enabled: boolean): void {
+    if (!window.desktopApi) return;
+    if (contextMenuOpen) closeFloatingContextMenu();
+    void window.desktopApi.settings
+      .get()
+      .then((settings) =>
+        window.desktopApi!.settings.replace(withBossMode(settings, enabled)),
+      )
+      .then(() => {
+        if (enabled) {
+          // The settings write hides the native window through the main
+          // process. Collapse local surfaces first so re-showing from the
+          // tray never restores an expanded panel or a stale menu.
+          setContextMenuOpen(false);
+          contextMenuReturnFocusRef.current = undefined;
+          setInteractionWheelOpen(false);
+          setFloatingGame(undefined);
+          setExpanded(false);
+        }
+      })
+      .catch(() => {
+        // The settings page and tray retain the same escape hatch; a failed
+        // toggle must not leave the floating UI in a half-updated state.
+      });
   }
   function mutePetUntil(until: Date): void {
     if (!window.desktopApi) return;
@@ -7900,6 +20755,7 @@ function FloatingWindow() {
         }),
       )
       .then(() => window.desktopApi?.notifications.refresh())
+      .catch(() => undefined)
       .finally(closeFloatingContextMenu);
   }
   function mutePetForOneHour(): void {
@@ -7910,6 +20766,190 @@ function FloatingWindow() {
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(0, 0, 0, 0);
     mutePetUntil(tomorrow);
+  }
+  function performPetInteraction(kind: PetInteractionKind): void {
+    triggerPetInteraction(kind);
+    closeFloatingContextMenu();
+  }
+  function beginFloatingHandleDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (floatingLocked || event.button !== 0) return;
+    // A drag is an explicit gesture; never let the delayed hover expansion
+    // race it and resize/repaint the native floating window underneath the
+    // pointer. This also prevents a synthetic click after pointerup from
+    // reopening the panel unexpectedly.
+    cancelHoverExpand();
+    event.preventDefault();
+    event.stopPropagation();
+    floatingDragPointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setPetWindowDragging(true);
+    petBehavior.startDragging();
+    void window.desktopApi?.shell
+      .beginFloatingDrag(event.screenX, event.screenY)
+      .catch(() => {
+        floatingDragPointerRef.current = undefined;
+        setPetWindowDragging(false);
+        petBehavior.stopDragging();
+      });
+  }
+  function updateFloatingHandleDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (floatingDragPointerRef.current !== event.pointerId) return;
+    event.preventDefault();
+    void window.desktopApi?.shell
+      .updateFloatingDrag(event.screenX, event.screenY)
+      .catch(() => undefined);
+  }
+  function finishFloatingHandleDrag(
+    event?: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (
+      event &&
+      floatingDragPointerRef.current !== undefined &&
+      floatingDragPointerRef.current !== event.pointerId
+    ) return;
+    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    floatingDragPointerRef.current = undefined;
+    setPetWindowDragging(false);
+    petBehavior.stopDragging();
+    void window.desktopApi?.shell.endFloatingDrag().catch(() => undefined);
+  }
+  function beginPetAvatarPointer(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    if (floatingLocked || event.button !== 0) return;
+    // Keep the compact pet stable while the pointer gesture is being
+    // classified as a click vs. a drag. A pending 1s hover timer must not
+    // expand the window in the middle of that gesture.
+    cancelHoverExpand();
+    // A click on the compact pet is an explicit reopen gesture. Cancel a
+    // delayed hover-leave collapse before the pointer session starts so the
+    // pending timer cannot close the panel between pointerdown and the
+    // deferred single-click expansion.
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = undefined;
+    }
+    petAvatarPointerRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startScreenX: event.screenX,
+      startScreenY: event.screenY,
+      lastScreenX: event.screenX,
+      lastScreenY: event.screenY,
+      dragging: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function updatePetAvatarPointer(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    const session = petAvatarPointerRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    session.lastScreenX = event.screenX;
+    session.lastScreenY = event.screenY;
+    if (!session.dragging) {
+      const distance = Math.hypot(
+        event.clientX - session.startClientX,
+        event.clientY - session.startClientY,
+      );
+      if (distance < 6) return;
+      session.dragging = true;
+      suppressPetAvatarClickRef.current = true;
+      floatingDragPointerRef.current = event.pointerId;
+      setPetWindowDragging(true);
+      petBehavior.startDragging();
+      void window.desktopApi?.shell
+        .beginFloatingDrag(session.startScreenX, session.startScreenY)
+        .then((started) => {
+          const current = petAvatarPointerRef.current;
+          if (!started) {
+            if (current?.pointerId === event.pointerId) {
+              current.dragging = false;
+              floatingDragPointerRef.current = undefined;
+              suppressPetAvatarClickRef.current = false;
+              setPetWindowDragging(false);
+              petBehavior.stopDragging();
+            }
+            return;
+          }
+          if (!current || current.pointerId !== event.pointerId || !current.dragging) {
+            void window.desktopApi?.shell.endFloatingDrag().catch(() => undefined);
+            return;
+          }
+          void window.desktopApi?.shell.updateFloatingDrag(
+            current.lastScreenX,
+            current.lastScreenY,
+          ).catch(() => undefined);
+        })
+        .catch(() => {
+          const current = petAvatarPointerRef.current;
+          if (!current || current.pointerId !== event.pointerId) return;
+          petAvatarPointerRef.current = undefined;
+          floatingDragPointerRef.current = undefined;
+          suppressPetAvatarClickRef.current = false;
+          setPetWindowDragging(false);
+          petBehavior.stopDragging();
+        });
+    } else {
+      void window.desktopApi?.shell
+        .updateFloatingDrag(event.screenX, event.screenY)
+        .catch(() => undefined);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  function finishPetAvatarPointer(
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void {
+    const session = petAvatarPointerRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    petAvatarPointerRef.current = undefined;
+    if (session.dragging) {
+      event.preventDefault();
+      event.stopPropagation();
+      finishFloatingHandleDrag(event);
+      if (suppressPetAvatarClickTimerRef.current !== undefined) {
+        window.clearTimeout(suppressPetAvatarClickTimerRef.current);
+      }
+      // Keep the synthetic click generated after pointerup suppressed until
+      // it is consumed by the button's click handler. A zero-delay timer can
+      // run before Chromium dispatches that click, so the drag would
+      // accidentally reopen the pet panel.
+      suppressPetAvatarClickTimerRef.current = window.setTimeout(() => {
+        suppressPetAvatarClickRef.current = false;
+        suppressPetAvatarClickTimerRef.current = undefined;
+      }, 180);
+      return;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+  async function toggleTaskFromPet(
+    controller: TaskController,
+    task: Task,
+  ): Promise<void> {
+    const completing = task.status === "open";
+    await controller.toggleComplete(task);
+    if (completing) {
+      petBehavior.taskComplete(
+        privacyMode ? "盖章完成，真不错。" : `盖章完成：${task.title}`,
+      );
+    }
+  }
+  function showPetActionError(reason: unknown, fallback: string): void {
+    petBehavior.act(
+      "sync-error",
+      reason instanceof Error ? reason.message : fallback,
+      4_000,
+    );
   }
   async function runFocusAction(operation: () => Promise<unknown>) {
     setFocusBusy(true);
@@ -7928,34 +20968,320 @@ function FloatingWindow() {
   function startPetFocus(
     mode: "pomodoro" | "count-up",
     focusMinutes = petSettings.focus.focusMinutes,
+    taskOverride?: Task,
   ): void {
-    const task = current;
+    const task = taskOverride ?? current;
+    const requestedEnvironmentSound = petSettings.focus.environmentSound;
+    // Prime Web Audio inside the user gesture. This keeps ambience reliable
+    // even when the persistent floating renderer is not the focused window.
+    if (requestedEnvironmentSound !== "off") {
+      focusEnvironmentSoundRef.current?.setKind(requestedEnvironmentSound);
+    }
     void runFocusAction(async () => {
-      await window.desktopApi?.pet.startFocus({
-        mode,
-        taskId: task?.id,
-        taskTitle: task?.title,
-        preset: {
-          focusMinutes,
-          shortBreakMinutes: petSettings.focus.shortBreakMinutes,
-          longBreakMinutes: petSettings.focus.longBreakMinutes,
-          cycles: petSettings.focus.cycles,
-        },
-        autoStartBreak: petSettings.focus.autoStartBreak,
-        autoStartNextRound: petSettings.focus.autoStartNextRound,
+      try {
+        await window.desktopApi?.pet.startFocus({
+          mode,
+          taskId: task?.id,
+          taskTitle: task?.title,
+          preset: {
+            focusMinutes,
+            shortBreakMinutes: petSettings.focus.shortBreakMinutes,
+            longBreakMinutes: petSettings.focus.longBreakMinutes,
+            cycles: petSettings.focus.cycles,
+          },
+          autoStartBreak: petSettings.focus.autoStartBreak,
+          autoStartNextRound: petSettings.focus.autoStartNextRound,
+        });
+      } catch (error) {
+        focusEnvironmentSoundRef.current?.setKind("off");
+        throw error;
+      }
+    });
+  }
+  function controllerForPetTask(task: Task): TaskController {
+    return todayController.tasks.some((candidate) => candidate.id === task.id)
+      ? todayController
+      : allController;
+  }
+  async function pauseFocusForShield(): Promise<
+    { kind: "pet" } | { kind: "task"; taskId: string } | undefined
+  > {
+    if (!window.desktopApi || !focusShieldKind) return undefined;
+    if (focusShieldKind === "pet" && petFocus?.status === "running" && petFocus.phase === "focus") {
+      await window.desktopApi.pet.pauseFocus("专注守护");
+      return { kind: "pet" };
+    }
+    const task = focusShieldTask;
+    if (!task) return undefined;
+    await controllerForPetTask(task).pauseFocus(task.id);
+    return { kind: "task", taskId: task.id };
+  }
+  async function resumeFocusForShield(notice: FocusShieldNotice): Promise<void> {
+    if (!window.desktopApi) return;
+    if (notice.kind === "pet") {
+      await window.desktopApi.pet.resumeFocus();
+      return;
+    }
+    if (notice.taskId) {
+      const task = [...allController.tasks, ...todayController.tasks].find(
+        (candidate) => candidate.id === notice.taskId,
+      );
+      if (task) await controllerForPetTask(task).startFocus(task.id);
+    }
+  }
+  useEffect(() => {
+    const mode = petSettings.focus.shieldMode;
+    const applications = petSettings.focus.shieldApplications;
+    if (
+      mode === "off" ||
+      applications.length === 0 ||
+      !window.desktopApi?.shell.readActiveWindow
+    ) {
+      focusShieldMatchRef.current = undefined;
+      setFocusShieldNotice(undefined);
+      return undefined;
+    }
+    if (!focusShieldActive) {
+      focusShieldMatchRef.current = undefined;
+      setFocusShieldNotice((current) => (current?.paused ? current : undefined));
+      return undefined;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    const check = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        if (
+          shouldSuppressPetProactive({
+            settings: petSettings,
+            now: new Date(),
+            focusActive: false,
+            fullscreen: Boolean(document.fullscreenElement),
+          })
+        ) {
+          focusShieldMatchRef.current = undefined;
+          setFocusShieldNotice(undefined);
+          return;
+        }
+        const context = await window.desktopApi!.shell.readActiveWindow();
+        if (cancelled) return;
+        const appName = context.status === "captured" ? context.appName?.trim() : undefined;
+        const matchedLabel = appName
+          ? matchesShieldApplication(appName, applications)
+          : undefined;
+        if (!appName || !matchedLabel) {
+          focusShieldMatchRef.current = undefined;
+          setFocusShieldNotice(undefined);
+          return;
+        }
+        if (Date.now() < focusShieldDismissedUntilRef.current) return;
+        const matchKey = `${focusShieldKind}:${appName.toLocaleLowerCase()}`;
+        if (focusShieldMatchRef.current === matchKey) return;
+        focusShieldMatchRef.current = matchKey;
+        if (mode === "pause") {
+          const paused = await pauseFocusForShield();
+          if (!paused || cancelled) return;
+          if (paused.kind === "pet") await petData.refresh();
+          setFocusShieldNotice({
+            appName,
+            matchedLabel,
+            paused: true,
+            kind: paused.kind,
+            taskId: paused.kind === "task" ? paused.taskId : undefined,
+            at: Date.now(),
+          });
+          petBehavior.act(
+            "focus",
+            privacyMode
+              ? "我先帮你暂停一下，等你准备好再继续。"
+              : `我先帮你暂停一下（检测到 ${matchedLabel}）。`,
+            5_000,
+          );
+        } else {
+          setFocusShieldNotice({
+            appName,
+            matchedLabel,
+            paused: false,
+            kind: focusShieldKind ?? "pet",
+            taskId: focusShieldKind === "task" ? focusShieldTask?.id : undefined,
+            at: Date.now(),
+          });
+          petBehavior.act(
+            "focus",
+            privacyMode
+              ? "检测到分心应用，专注还在继续。"
+              : `我看到你打开了 ${matchedLabel}，专注还在继续。`,
+            5_000,
+          );
+        }
+      } catch (reason) {
+        focusShieldMatchRef.current = undefined;
+        if (!cancelled) {
+          petBehavior.act(
+            "sync-error",
+            reason instanceof Error ? reason.message : "专注守护暂时无法读取前台应用。",
+            4_000,
+          );
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => void check(), FOCUS_SHIELD_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    allController.tasks,
+    petSettings.focus.shieldApplications,
+    focusShieldActive,
+    focusShieldKind,
+    focusShieldTask,
+    petBehavior,
+    petData.refresh,
+    petFocus,
+    petSettings,
+    petSettings.focus.shieldMode,
+    petSettings.focus.shieldApplications,
+    privacyMode,
+    todayController.tasks,
+  ]);
+  function dismissFocusShieldNotice(): void {
+    focusShieldDismissedUntilRef.current = Date.now() + FOCUS_SHIELD_DISMISS_MS;
+    focusShieldMatchRef.current = undefined;
+    setFocusShieldNotice(undefined);
+  }
+  function pauseFocusFromShieldNotice(): void {
+    const current = focusShieldNotice;
+    if (!current || current.paused) return;
+    void runFocusAction(async () => {
+      const paused = await pauseFocusForShield();
+      if (!paused) throw new Error("当前没有正在进行的专注");
+      setFocusShieldNotice({
+        ...current,
+        paused: true,
+        kind: paused.kind,
+        taskId: paused.kind === "task" ? paused.taskId : undefined,
+        at: Date.now(),
       });
     });
   }
+  function resumeFocusFromShieldNotice(): void {
+    const current = focusShieldNotice;
+    if (!current || !current.paused) return;
+    void runFocusAction(async () => {
+      await resumeFocusForShield(current);
+      focusShieldMatchRef.current = undefined;
+      setFocusShieldNotice(undefined);
+    });
+  }
+  async function handlePetTaskDrop(
+    targetId: PetTaskDropTargetId,
+    taskId: string,
+  ): Promise<void> {
+    const target = getPetTaskDropTarget(targetId);
+    const task = [...allController.tasks, ...todayController.tasks].find(
+      (candidate) => candidate.id === taskId,
+    );
+    setTaskDropActive(false);
+    setActiveTaskDropTarget(undefined);
+    setDraggedTaskId(undefined);
+    if (!target || !task) {
+      petBehavior.act("task-plan", "这张任务卡跑得太快啦，再试一次。", 3_000);
+      return;
+    }
+    try {
+      if (target.id === "focus") {
+        startPetFocus("pomodoro", petSettings.focus.focusMinutes, task);
+        petBehavior.act("focus", "收到，搬到专注里一起做。", 3_000);
+        setHeldTaskId(undefined);
+        return;
+      }
+      if (target.id === "complete") {
+        await toggleTaskFromPet(controllerForPetTask(task), task);
+        setHeldTaskId(undefined);
+        return;
+      }
+      setHeldTaskId(task.id);
+      petBehavior.act("task-plan", "先放在手边，等你准备好再继续。", 3_000);
+    } catch (reason) {
+      setHeldTaskId(task.id);
+      petBehavior.act(
+        "sync-error",
+        reason instanceof Error ? reason.message : "这张任务卡暂时搬不动。",
+        4_000,
+      );
+    }
+  }
+  function dismissPetReaction(): void {
+    proactiveMessageRef.current = undefined;
+    setProactiveTask(undefined);
+    petBehavior.dismiss();
+  }
+  function taskForProactiveSuggestion(): Task | undefined {
+    if (!proactiveTask) return undefined;
+    return [...allController.tasks, ...todayController.tasks].find(
+      (task) => task.id === proactiveTask.taskId,
+    );
+  }
+  function openProactiveTask(): void {
+    const task = taskForProactiveSuggestion();
+    dismissPetReaction();
+    if (!task) return;
+    setTab("all");
+    allController.select(task.id);
+    setPanelExpanded(true, "click");
+  }
+  function startProactiveTaskFocus(): void {
+    const task = taskForProactiveSuggestion();
+    dismissPetReaction();
+    if (task) startPetFocus("pomodoro", petSettings.focus.focusMinutes, task);
+  }
+  useDialogFocus(
+    contextMenuRef,
+    contextMenuFirstItemRef,
+    closeFloatingContextMenu,
+    contextMenuOpen,
+  );
   useEffect(() => {
-    if (!contextMenuOpen) return undefined;
+    if (!interactionWheelOpen && !floatingGame) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      closeFloatingContextMenu();
+      closePetInteractionSurface();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [contextMenuOpen]);
+  }, [interactionWheelOpen, floatingGame, expanded]);
+  useEffect(() => {
+    if (!petWindowDragging) return undefined;
+    const finish = () => {
+      if (floatingDragPointerRef.current === undefined) return;
+      floatingDragPointerRef.current = undefined;
+      petAvatarPointerRef.current = undefined;
+      if (suppressPetAvatarClickTimerRef.current !== undefined) {
+        window.clearTimeout(suppressPetAvatarClickTimerRef.current);
+      }
+      suppressPetAvatarClickTimerRef.current = window.setTimeout(() => {
+        suppressPetAvatarClickRef.current = false;
+        suppressPetAvatarClickTimerRef.current = undefined;
+      }, 180);
+      setPetWindowDragging(false);
+      petBehavior.stopDragging();
+      void window.desktopApi?.shell.endFloatingDrag().catch(() => undefined);
+    };
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("blur", finish, { once: true });
+    const safetyTimer = window.setTimeout(finish, 8_500);
+    return () => {
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("blur", finish);
+      window.clearTimeout(safetyTimer);
+    };
+  }, [petWindowDragging]);
   function openMainFromCompact(): void {
     if (compactActivateTimerRef.current !== undefined) {
       window.clearTimeout(compactActivateTimerRef.current);
@@ -7973,7 +21299,15 @@ function FloatingWindow() {
           : tab === "home"
             ? "pet"
             : "all";
-    void window.desktopApi?.shell.showMain(route);
+    const showMain = () => {
+      void window.desktopApi?.shell.showMain(route).catch(() => undefined);
+    };
+    showMain();
+    // A hidden main BrowserWindow can be between renderer commits when the
+    // compact pet is double-clicked. The preload already deduplicates route
+    // commands, so a short idempotent retry makes the direct-entry gesture
+    // reliable without creating a second window or changing the destination.
+    window.setTimeout(showMain, 120);
   }
   function handleCompactActivate(
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -7995,7 +21329,7 @@ function FloatingWindow() {
     }, 240);
   }
   function scheduleHoverExpand() {
-    if (expanded || hoverExpandTimerRef.current !== undefined) return;
+    if (petOnly || expanded || hoverExpandTimerRef.current !== undefined) return;
     hoverExpandTimerRef.current = window.setTimeout(() => {
       hoverExpandTimerRef.current = undefined;
       if (!hoveringFloatingRef.current) return;
@@ -8003,6 +21337,11 @@ function FloatingWindow() {
     }, hoverExpandDelayMsRef.current);
   }
   const beginHoverExpand = () => {
+    revealEdgePeek();
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
+      hoverLeaveTimerRef.current = undefined;
+    }
     hoveringFloatingRef.current = true;
     setIsFloatingHovered(true);
     scheduleHoverExpand();
@@ -8012,13 +21351,42 @@ function FloatingWindow() {
     window.clearTimeout(hoverExpandTimerRef.current);
     hoverExpandTimerRef.current = undefined;
   };
-  const endHoverInteraction = () => {
+  const endHoverInteraction = (clientX: number, clientY: number) => {
+    lastFloatingPointerRef.current = { x: clientX, y: clientY };
     hoveringFloatingRef.current = false;
     setIsFloatingHovered(false);
     cancelHoverExpand();
-    if (expandTriggerRef.current === "hover") {
-      setPanelExpanded(false);
+    if (hoverLeaveTimerRef.current !== undefined) {
+      window.clearTimeout(hoverLeaveTimerRef.current);
     }
+    // Resizing the native transparent window from compact to expanded can
+    // briefly dispatch mouseleave even though the pointer is still over the
+    // newly revealed panel. Give the window geometry time to settle, then
+    // verify the pointer is really outside the entire floating surface.
+    hoverLeaveTimerRef.current = window.setTimeout(() => {
+      hoverLeaveTimerRef.current = undefined;
+      const { x, y } = lastFloatingPointerRef.current;
+      const withinViewport =
+        x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight;
+      const pointedElement = withinViewport
+        ? document.elementFromPoint(x, y)
+        : null;
+      const floatingStack = document.querySelector<HTMLElement>(".floating-stack");
+      // Native transparent-window resizing can leave the last client
+      // coordinate stale for one event loop turn. The browser's live :hover
+      // state is stronger evidence than that old coordinate and prevents a
+      // visible panel from collapsing while the pointer is still over it.
+      if (
+        floatingStack?.matches(":hover") ||
+        pointedElement?.closest(".floating-stack")
+      ) {
+        hoveringFloatingRef.current = true;
+        setIsFloatingHovered(true);
+        return;
+      }
+      if (expandTriggerRef.current === "hover") setPanelExpanded(false);
+      if (edgePeekModeRef.current && petOnly && !expanded) scheduleEdgePeekDock();
+    }, 180);
   };
   const syncLabel = feishuStatus?.connected
     ? feishuStatus.state === "syncing"
@@ -8027,11 +21395,15 @@ function FloatingWindow() {
     : feishuStatus?.configured
       ? "飞书等待重新连接"
       : "飞书未连接 · 本地任务正常";
-  const overdueCount = todayController.tasks.filter(
-    (task) =>
-      task.status === "open" &&
-      Boolean(task.dueAt && task.dueAt.slice(0, 10) < dateKey()),
-  ).length;
+  const externalAgentActive = Boolean(
+    externalAgentActivity &&
+      externalAgentActivity.activeSessionCount > 0 &&
+      externalAgentActivity.state !== "idle" &&
+      externalAgentActivity.state !== "sleeping",
+  );
+  const externalAgentStateLabel = externalAgentActivity
+    ? externalAgentStateLabels[externalAgentActivity.state]
+    : "待机";
   const petMood: PetMood = petFocus?.status === "running"
     ? "focus"
     : feishuStatus?.state === "syncing"
@@ -8043,7 +21415,8 @@ function FloatingWindow() {
           : "idle";
   return (
     <div
-      className={`floating-shell pet-shell ${expanded ? "is-expanded" : "is-compact"} ${privacyMode ? "privacy-mode" : ""} ${floatingLocked ? "position-locked" : ""} ${petFocus?.status === "running" ? "focus-mode" : ""}`}
+      className={`floating-shell pet-shell ${expanded ? "is-expanded" : "is-compact"} ${petOnly ? "is-pet-only" : ""} ${privacyMode ? "privacy-mode" : ""} ${floatingLocked ? "position-locked" : ""} ${petFocus ? "has-focus-session" : ""} ${petFocus?.status === "running" ? "focus-mode" : ""} ${petBehavior.message ? "has-pet-reaction" : ""} ${petBehavior.message && reactionBubbleCollapsed ? "pet-reaction-collapsed" : ""} ${externalAgentActive ? "has-external-agent" : ""} ${externalAgentActive && externalAgentBubbleCollapsed ? "external-agent-collapsed" : ""} ${edgePeekMode ? "edge-peek-mode" : ""} ${edgePeekDocked ? "edge-peek-docked" : ""} ${petWindowDragging ? "is-pet-dragging" : ""} ${interactionWheelOpen ? "has-interaction-wheel" : ""} ${floatingGame ? "has-coop-game" : ""} ${petDropActive ? "is-pet-drop-active" : ""} pet-motion-${petSettings.pet.animationIntensity}`}
+      data-pet-action={petBehavior.action}
       style={
         {
           "--pet-scale": Math.max(75, Math.min(125, scalePercent)) / 100,
@@ -8054,109 +21427,816 @@ function FloatingWindow() {
         className="floating-stack"
         data-expand-trigger={expandTriggerRef.current ?? "closed"}
         onMouseEnter={beginHoverExpand}
-        onMouseOut={(event) => {
-          const next = event.relatedTarget;
-          if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
-            endHoverInteraction();
+        onMouseMove={(event) => {
+          lastFloatingPointerRef.current = {
+            x: event.clientX,
+            y: event.clientY,
+          };
+          // Recover a hover session after a transparent-window resize or a
+          // compositor-level pointer transition. Moving inside the surface
+          // is proof that the pointer is still over Todo Pet, so the latest
+          // configured delay should be scheduled again.
+          if (!hoveringFloatingRef.current) {
+            revealEdgePeek();
+            hoveringFloatingRef.current = true;
+            setIsFloatingHovered(true);
+            scheduleHoverExpand();
           }
         }}
+        onMouseLeave={(event) =>
+          endHoverInteraction(event.clientX, event.clientY)
+        }
       >
         <div
-          // The pet and its task bubble form one native drag surface. Buttons
-          // opt out so task controls and panel expansion remain clickable.
-          className="pet-compact drag-region"
+          // The native window remains transparent. Only the pet and its two
+          // speech bubbles are painted; controls opt out of the drag surface.
+          className="pet-compact"
           onContextMenu={openFloatingContextMenu}
         >
-          <span
-            className="floating-drag-handle drag-region"
-            title={floatingLocked ? "位置已锁定" : "拖动移动"}
-            aria-hidden="true"
+          {petBehavior.message && (
+            <div
+              className={`pet-reaction-bubble no-drag ${reactionBubbleCollapsed ? "is-collapsed" : ""}`}
+              role="status"
+              aria-live="polite"
+            >
+              <button
+                type="button"
+                className="pet-reaction-bubble-toggle"
+                aria-expanded={!reactionBubbleCollapsed}
+                aria-label={reactionBubbleCollapsed ? "展开宠物消息气泡" : "折叠宠物消息气泡"}
+                onClick={() => setReactionBubbleCollapsed((value) => !value)}
+              >
+                <span><Sparkles size={12} /> {petName}有话说</span>
+                <ChevronDown size={14} />
+              </button>
+              {!reactionBubbleCollapsed && (
+                <div className="pet-reaction-bubble-body">
+                  <span>{petBehavior.message}</span>
+                  {proactiveTask && !privacyMode && (
+                    <div className="pet-proactive-task-card" role="group" aria-label="宠物推荐的下一项任务">
+                      <small>{proactiveTask.reason}</small>
+                      <strong>{proactiveTask.taskTitle}</strong>
+                      <div className="pet-proactive-task-actions">
+                        <button type="button" onClick={startProactiveTaskFocus}>
+                          <Focus size={13} /> 开始专注
+                        </button>
+                        <button type="button" onClick={openProactiveTask}>
+                          <ExternalLink size={13} /> 查看任务
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="pet-quick-replies">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        dismissPetReaction();
+                        setTab(openTodayTaskCount ? "today" : "all");
+                        setPanelExpanded(true, "click");
+                      }}
+                    >
+                      好，一起看看
+                    </button>
+                    <button type="button" onClick={dismissPetReaction}>
+                      稍后
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {(petSeasonEvent || petWeatherChip) && (
+            <div className="pet-utility-chips no-drag" aria-label="宠物桌面提示">
+              {petSeasonEvent && (
+                <span
+                  className="pet-season-chip"
+                  role="status"
+                  title={petSeasonEvent.message}
+                  aria-label={`${petSeasonEvent.label}：${petSeasonEvent.message}`}
+                >
+                  {petSeasonEvent.icon} {petSeasonEvent.label}
+                </span>
+              )}
+              {petWeatherChip && (
+                <button
+                  type="button"
+                  className={`pet-weather-chip ${petWeatherChip.severe ? "is-severe" : ""}`}
+                  aria-label={petWeatherChip.ariaLabel}
+                  aria-live="polite"
+                  title="打开天气卡片"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setTab("home");
+                    setPanelExpanded(true, "click");
+                  }}
+                >
+                  <span className="pet-weather-chip-icon" aria-hidden="true">
+                    {petWeatherChip.icon}
+                  </span>
+                  <span className="pet-weather-chip-copy">
+                    <strong>{petWeatherChip.label}</strong>
+                    <small>{petWeatherChip.detail}</small>
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
+          {!floatingGame && (
+            <button
+              type="button"
+              className="floating-drag-handle no-drag"
+              title={floatingLocked ? "位置已锁定" : "拖动移动"}
+              aria-label={floatingLocked ? "宠物位置已锁定" : "拖动 Todo Pet"}
+              disabled={floatingLocked}
+              onPointerDown={beginFloatingHandleDrag}
+              onPointerMove={updateFloatingHandleDrag}
+              onPointerUp={finishFloatingHandleDrag}
+              onPointerCancel={finishFloatingHandleDrag}
+            >
+              <GripVertical size={15} />
+            </button>
+          )}
+          {!floatingGame && !interactionWheelOpen && (
+            <button
+              type="button"
+              className={`pet-task-rail-toggle no-drag ${petOnly ? "is-expand" : "is-collapse"}`}
+              aria-label={petOnly ? "展开宠物任务栏" : "收起宠物任务栏"}
+              title={petOnly ? "展开任务栏" : "只保留宠物"}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (petOnly) expandPetTaskRail();
+                else collapsePetTaskRail();
+              }}
+            >
+              {petOnly ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+            </button>
+          )}
+          <button
+            ref={petInteractionTriggerRef}
+            type="button"
+            className={`pet-interaction-trigger no-drag ${interactionWheelOpen ? "is-open" : ""}`}
+            aria-label={interactionWheelOpen ? "关闭宠物互动轮盘" : `和${petName}互动`}
+            aria-expanded={interactionWheelOpen}
+            title="互动与小游戏"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (interactionWheelOpen) closePetInteractionSurface();
+              else openPetInteractionWheel();
+            }}
           >
-            <GripVertical size={15} />
-          </span>
+            {interactionWheelOpen ? <X size={15} /> : <Heart size={15} />}
+          </button>
           <button
             type="button"
             className="pet-avatar-button floating-expand-trigger no-drag"
-            aria-label={`与${petName}互动`}
+            aria-label={`${petOnly ? `互动 ${petName}` : expanded ? `收起 ${petName}` : `展开 ${petName}`}，按住拖动可移动位置`}
             aria-expanded={expanded}
             title={
-              expanded
-                ? "点击收起"
-                : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
+              petOnly
+                ? "点击互动，拖动移动，双击打开主窗口"
+                : expanded
+                ? "点击收起，拖动可移动"
+                : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开，拖动可移动，双击打开主窗口`
             }
+            onPointerDown={beginPetAvatarPointer}
+            onPointerMove={updatePetAvatarPointer}
+            onPointerUp={finishPetAvatarPointer}
+            onPointerCancel={finishPetAvatarPointer}
+            onDragEnter={(event) => {
+              const isTask = event.dataTransfer.types.includes("application/x-todo-agent-task");
+              const isExternal = event.dataTransfer.types.some((type) => ["text/plain", "text/uri-list", "Files"].includes(type));
+              if (!isTask && !isExternal) return;
+              event.preventDefault();
+              if (isTask) setTaskDropActive(true);
+              else setPetDropActive(true);
+            }}
+            onDragOver={(event) => {
+              const isTask = event.dataTransfer.types.includes("application/x-todo-agent-task");
+              const isExternal = event.dataTransfer.types.some((type) => ["text/plain", "text/uri-list", "Files"].includes(type));
+              if (!isTask && !isExternal) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = isTask ? "move" : "copy";
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setTaskDropActive(false);
+                setPetDropActive(false);
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const taskId = event.dataTransfer.getData("application/x-todo-agent-task");
+              setTaskDropActive(false);
+              setPetDropActive(false);
+              if (taskId) {
+                setHeldTaskId(taskId);
+                petBehavior.taskDrop();
+                if (petOnly) expandPetTaskRail();
+                return;
+              }
+              const preview = buildDropContextPreview({
+                plainText: event.dataTransfer.getData("text/plain"),
+                uriList: event.dataTransfer.getData("text/uri-list"),
+                files: Array.from(event.dataTransfer.files).map((file) => ({
+                  name: file.name,
+                  type: file.type,
+                  size: file.size,
+                })),
+              });
+              if (preview) {
+                setPetDropPreview(preview);
+                setPanelExpanded(true, "click");
+                petBehavior.act("inspect", "我先把这份内容放在这里看看。", 4_000);
+              }
+            }}
             onClick={(event) => {
-              if (expanded) {
-                setPanelExpanded(false, "click");
+              if (suppressPetAvatarClickRef.current) {
+                event.preventDefault();
+                event.stopPropagation();
+                suppressPetAvatarClickRef.current = false;
+                if (suppressPetAvatarClickTimerRef.current !== undefined) {
+                  window.clearTimeout(suppressPetAvatarClickTimerRef.current);
+                  suppressPetAvatarClickTimerRef.current = undefined;
+                }
                 return;
               }
               if (petSettings.pet.interactionsEnabled) {
-                void window.desktopApi?.pet.interact("avatar-click");
+                const character = event.currentTarget.querySelector<HTMLElement>(
+                  ".pet-character",
+                );
+                const kind = petInteractionFromPoint(
+                  event.clientX,
+                  event.clientY,
+                  (character ?? event.currentTarget).getBoundingClientRect(),
+                );
+                triggerPetInteraction(kind);
+              }
+              if (petOnly) {
+                if (event.detail > 1) openMainFromCompact();
+                return;
+              }
+              if (expanded) {
+                setPanelExpanded(false, "click");
+                return;
               }
               handleCompactActivate(event);
             }}
           >
             <PetCharacter
               mood={petMood}
+              emotion={petBehavior.emotion}
+              action={petBehavior.action}
+              actionKey={petBehavior.actionKey}
               name={petName}
+              visualStyle="atlas"
               scalePercent={expanded ? 100 : scalePercent}
               compact
+              interactive
+              palette={petAppearance.palette}
+              outfit={petAppearance.outfit}
+              personality={petPersonality}
+              season={petSeason}
+              weatherEffect={petWeatherEffect}
             />
           </button>
-          <button
-            type="button"
-            className="pet-task-bubble floating-summary no-drag"
-            aria-label={expanded ? `收起 ${petName}` : `展开 ${petName}`}
-            aria-expanded={expanded}
-            title={
-              expanded
-                ? "点击收起"
-                : `停留 ${hoverExpandDelayMs / 1000} 秒或单击展开 · 双击打开主窗口`
-            }
-            onClick={(event) => {
-              if (expanded) {
-                setPanelExpanded(false, "click");
-                return;
-              }
-              handleCompactActivate(event);
-            }}
-          >
-            <div className="floating-copy">
-              <FloatingTodayCarousel
-                task={current}
-                index={carousel.index}
-                count={carousel.count}
-                paused={carousel.paused}
-                static={carousel.static}
-                privacyMode={privacyMode}
-              />
-              <small>
-                {current
-                  ? `${current.focusStartedAt ? `${petName}陪你专注` : `${petName}提醒你`} · ${current.source.type === "feishu" ? "飞书" : "本地"}${privacyMode ? " · 隐私模式" : ""}`
-                  : `${petName}说：今天可以轻松一点`}
-              </small>
-            </div>
-            <span className="focus-time">
-              {petFocus
-                ? clockDuration(petFocusClock)
-                : current
-                  ? humanDuration(elapsed)
-                  : "✓"}
-            </span>
-          </button>
-          {current && (
-            <button
-              type="button"
-              className="icon-button pet-complete-button no-drag"
-              disabled={!canToggleTaskCompletion(current)}
-              aria-label={
-                privacyMode ? "完成当前私人任务" : `完成${current.title}`
-              }
-              onClick={() => void todayController.toggleComplete(current)}
+          {taskDropActive && draggedTaskId && (
+            <div
+              className="pet-task-drop-zones no-drag"
+              role="group"
+              aria-label="把任务交给宠物"
             >
-              <Check size={17} />
-            </button>
+              <span className="pet-task-drop-zones-hint">把任务交给我</span>
+              {petTaskDropTargets.map((target) => (
+                <button
+                  type="button"
+                  key={target.id}
+                  className={`pet-task-drop-zone ${activeTaskDropTarget === target.id ? "is-active" : ""} is-${target.id}`}
+                  data-drop-target={target.id}
+                  aria-label={`${target.label}：${target.hint}`}
+                  title={target.hint}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setActiveTaskDropTarget(target.id);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    setActiveTaskDropTarget(target.id);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      setActiveTaskDropTarget(undefined);
+                    }
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const taskId =
+                      event.dataTransfer.getData("application/x-todo-agent-task") ||
+                      draggedTaskId;
+                    if (taskId) void handlePetTaskDrop(target.id, taskId);
+                  }}
+                >
+                  <span>{target.label}</span>
+                  <small>{target.hint}</small>
+                </button>
+              ))}
+            </div>
           )}
+          {interactionWheelOpen && (
+            <PetInteractionWheel
+              petName={petName}
+              onInteract={performWheelInteraction}
+              onStartGame={startFloatingPetGame}
+              onClose={closePetInteractionSurface}
+            />
+          )}
+          <div className="pet-bubble-stack no-drag">
+            {externalAgentActive && externalAgentActivity && (
+              <section
+                className={`pet-speech-bubble pet-agent-activity-bubble ${externalAgentBubbleCollapsed ? "is-collapsed" : ""}`}
+                aria-label="外部 Agent 活动"
+                role="status"
+                aria-live="polite"
+              >
+                <button
+                  type="button"
+                  className="pet-bubble-toggle pet-agent-activity-toggle"
+                  aria-expanded={!externalAgentBubbleCollapsed}
+                  aria-label={
+                    externalAgentBubbleCollapsed
+                      ? "展开外部 Agent 活动气泡"
+                      : "折叠外部 Agent 活动气泡"
+                  }
+                  onClick={() =>
+                    setExternalAgentBubbleCollapsed((value) => !value)
+                  }
+                >
+                  <span className="pet-bubble-label">
+                    <Sparkles size={14} />
+                    {externalAgentActivity.agentName ?? "外部 Agent"}
+                    <small>
+                      {externalAgentStateLabel} · {externalAgentActivity.activeSessionCount} 个会话
+                    </small>
+                  </span>
+                  <ChevronDown size={15} />
+                </button>
+                {!externalAgentBubbleCollapsed && (
+                  <div className="pet-agent-activity-body">
+                    <p>
+                      {externalAgentActivity.state === "notification"
+                        ? "它在等待你确认下一步。"
+                        : externalAgentActivity.state === "error"
+                          ? "它遇到了一点问题，建议回到对应终端查看详情。"
+                          : externalAgentActivity.liveSubagentCount > 0
+                            ? `正在同时处理 ${externalAgentActivity.liveSubagentCount} 个子任务。`
+                            : `${externalAgentActivity.agentName ?? "Agent"} 正在${externalAgentStateLabel}。`}
+                    </p>
+                    <div className="pet-agent-activity-meta">
+                      {externalAgentActivity.toolName && (
+                        <span>工具 · {externalAgentActivity.toolName}</span>
+                      )}
+                      {externalAgentActivity.model && (
+                        <span>模型 · {externalAgentActivity.model}</span>
+                      )}
+                      {externalAgentActivity.workspace && (
+                        <span>工作区 · {externalAgentActivity.workspace}</span>
+                      )}
+                    </div>
+                    {externalAgentActivity.sessions.length > 1 && (
+                      <div className="pet-agent-session-list" aria-label="活动会话列表">
+                        {externalAgentActivity.sessions.slice(0, 4).map((session) => (
+                          <span key={`${session.agentId}:${session.sessionId}`}>
+                            <i data-state={session.state} />
+                            {session.agentName} · {externalAgentStateLabels[session.state]}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="pet-agent-activity-actions">
+                      <button
+                        type="button"
+                        className="soft-button pet-agent-activity-open"
+                        onClick={() => {
+                          setTab("chat");
+                          setPanelExpanded(true, "click");
+                        }}
+                      >
+                        <MessageCircle size={13} /> 在这里查看 Agent
+                      </button>
+                      <button
+                        type="button"
+                        className="soft-button pet-agent-activity-open"
+                        onClick={() => {
+                          setContextMenuOpen(false);
+                          setPanelExpanded(false);
+                          void window.desktopApi?.shell
+                            .showMain("activity")
+                            .catch(() => undefined);
+                        }}
+                      >
+                        <Activity size={13} /> 查看活动面板
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+            {petContextSavedNotice && (
+              <div className="success-note context-capture-saved pet-context-saved-note" role="status">
+                <CheckCircle2 size={14} />
+                {petContextSavedNotice}
+              </div>
+            )}
+            {petDropPreview && (
+              <section className="pet-speech-bubble pet-drop-preview-bubble" aria-label="宠物收到的拖入内容">
+                <div className="pet-drop-preview-header">
+                  <span><Sparkles size={13} /> 我收到了一份{petDropPreview.label}</span>
+                  <button type="button" className="icon-button" aria-label="关闭宠物拖入预览" onClick={() => setPetDropPreview(undefined)}><X size={14} /></button>
+                </div>
+                {petDropPreview.kind === "file" || petDropPreview.kind === "image" ? (
+                  <div className="pet-drop-file-list">
+                    {petDropPreview.files?.map((file, index) => <span key={`${file.name}-${index}`}><FileText size={13} /> {file.name}</span>)}
+                  </div>
+                ) : (
+                  <p>{petDropPreview.kind === "url" ? petDropPreview.url : petDropPreview.text}</p>
+                )}
+                <small>只做预览，不会自动上传或创建任务。</small>
+                {(petDropPreview.kind === "text" || petDropPreview.kind === "url") && (
+                  <div className="context-capture-actions pet-context-actions">
+                    <button type="button" className="soft-button" onClick={() => {
+                      const value = petDropPreview.kind === "url" ? petDropPreview.url : petDropPreview.text;
+                      if (value) {
+                        setInput((current) => current.trim() ? `${current}\n${value}` : value);
+                        setTab("chat");
+                      }
+                      setPetDropPreview(undefined);
+                    }}>带入聊聊</button>
+                    <button type="button" className="soft-button" onClick={() => rememberFloatingContext(
+                      petDropPreview.kind === "url" ? "url" : "drop-text",
+                      petDropPreview.label,
+                      petDropPreview.kind === "url" ? petDropPreview.url ?? "" : petDropPreview.text ?? "",
+                    )}>保存到最近上下文</button>
+                  </div>
+                )}
+              </section>
+            )}
+            {selectedTextPreview && (
+              <section className="pet-speech-bubble selected-text-preview-bubble" aria-label="宠物收到的选中文本预览">
+                <div className="pet-drop-preview-header">
+                  <span><ClipboardCheck size={13} /> 选中文本上下文</span>
+                  <button type="button" className="icon-button" aria-label="关闭选中文本预览" onClick={() => setSelectedTextPreview(undefined)}><X size={14} /></button>
+                </div>
+                {selectedTextPreview.status === "captured" && selectedTextPreview.text ? (
+                  <>
+                    <p>{selectedTextPreview.text}</p>
+                    <small>仅预览 · {selectedTextPreview.characters?.toLocaleString() ?? selectedTextPreview.text.length.toLocaleString()} 个字符{selectedTextPreview.truncated ? " · 已截取" : ""}</small>
+                    <div className="context-capture-actions pet-context-actions">
+                      <button type="button" className="soft-button" onClick={() => {
+                        const value = selectedTextPreview.text ?? "";
+                        if (value) {
+                          if (tab === "chat") floatingChat.setInput((current) => current.trim() ? `${current}\n${value}` : value);
+                          else setInput((current) => current.trim() ? `${current}\n${value}` : value);
+                          setTab("chat");
+                        }
+                        setSelectedTextPreview(undefined);
+                      }}>带入聊聊</button>
+                      <button type="button" className="soft-button" onClick={() => rememberFloatingContext("selected-text", "选中文本", selectedTextPreview.text ?? "")}>保存到最近上下文</button>
+                    </div>
+                  </>
+                ) : (
+                  <small>暂时没有读到选中文本；请在其他应用选中文本后使用全局快捷键打开小窗。</small>
+                )}
+              </section>
+            )}
+            {heldTask && (
+              <section
+                className={`pet-speech-bubble pet-held-task ${heldTaskBubbleCollapsed ? "is-collapsed" : ""}`}
+                aria-label="交给宠物的任务"
+              >
+                <button
+                  type="button"
+                  className="pet-bubble-toggle"
+                  aria-expanded={!heldTaskBubbleCollapsed}
+                  aria-label={heldTaskBubbleCollapsed ? "展开交给宠物的任务气泡" : "折叠交给宠物的任务气泡"}
+                  onClick={() => setHeldTaskBubbleCollapsed((value) => !value)}
+                >
+                  <span className="pet-bubble-label">
+                    <Sparkles size={13} />
+                    我接住了
+                  </span>
+                  <ChevronDown size={15} />
+                </button>
+                {!heldTaskBubbleCollapsed && (
+                  <div className="pet-held-task-body">
+                    <strong>{privacyMode ? "私人任务" : heldTask.title}</strong>
+                    <div className="pet-held-task-actions">
+                  <button
+                    type="button"
+                    disabled={!canToggleTaskCompletion(heldTask)}
+                    onClick={() => {
+                      const controller = tab === "today" ? todayController : allController;
+                      void toggleTaskFromPet(controller, heldTask)
+                        .then(() => {
+                          petBehavior.taskComplete();
+                          setHeldTaskId(undefined);
+                        })
+                        .catch((reason) =>
+                          showPetActionError(reason, "这张任务暂时无法完成，请稍后再试。"),
+                        );
+                    }}
+                  >
+                    <Check size={13} /> 完成
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void allController.moveToToday(heldTask.id)
+                        .then(() => {
+                          petBehavior.act("task-plan", "已经放进今天。", 3_000);
+                          setHeldTaskId(undefined);
+                        })
+                        .catch((reason) =>
+                          showPetActionError(reason, "这张任务暂时无法安排到今天。"),
+                        );
+                    }}
+                  >
+                    <Sun size={13} /> 今天
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      startPetFocus("pomodoro", petSettings.focus.focusMinutes, heldTask);
+                      setHeldTaskId(undefined);
+                    }}
+                  >
+                    <Focus size={13} /> 专注
+                  </button>
+                  <button type="button" aria-label="放下任务" onClick={() => setHeldTaskId(undefined)}>
+                    <X size={13} />
+                  </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+            <section
+              className={`pet-speech-bubble pet-task-bubble ${taskBubbleCollapsed ? "is-collapsed" : ""}`}
+              aria-label="当前任务气泡"
+            >
+              <button
+                type="button"
+                className="pet-bubble-toggle"
+                aria-expanded={!taskBubbleCollapsed}
+                aria-label={taskBubbleCollapsed ? "展开任务气泡" : "折叠任务气泡"}
+                onClick={() => setTaskBubbleCollapsed((value) => !value)}
+              >
+                <span className="pet-bubble-label">
+                  <ListChecks size={13} />
+                  当前任务
+                  <small>{carousel.count ? `${carousel.index + 1}/${carousel.count}` : "已清空"}</small>
+                </span>
+                <ChevronDown size={15} />
+              </button>
+              {!taskBubbleCollapsed && (
+                <div className="pet-task-bubble-body">
+                  <button
+                    type="button"
+                    className="floating-summary"
+                    aria-label="打开当前任务列表"
+                    title={expanded ? "切换到任务列表" : "单击展开任务列表 · 双击打开主窗口"}
+                    onClick={(event) => {
+                      if (expanded) {
+                        setTab("today");
+                        return;
+                      }
+                      handleCompactActivate(event);
+                    }}
+                  >
+                    <div className="floating-copy">
+                      <FloatingTodayCarousel
+                        task={current}
+                        index={carousel.index}
+                        count={carousel.count}
+                        paused={carousel.paused}
+                        static={carousel.static}
+                        privacyMode={privacyMode}
+                      />
+                      <small>
+                        {current
+                          ? `${petName}提醒你 ${current.source.type === "feishu" ? "飞书任务" : "本地任务"}${privacyMode ? "（隐私模式）" : ""}`
+                          : `${petName}说：今天可以轻松一点`}
+                        {current && currentTaskTheme && currentTaskTheme.id !== "general" && (
+                          <span className="pet-task-theme"> · {currentTaskTheme.label}</span>
+                        )}
+                      </small>
+                    </div>
+                    <span className="focus-time">
+                      {current ? humanDuration(elapsed) : "✓"}
+                    </span>
+                  </button>
+                  <SpeechOutputButton
+                    text={petTaskSpeechText}
+                    label="朗读"
+                    ariaLabel="朗读当前任务"
+                    className="agent-speak-button pet-speech-button"
+                  />
+                  {current && (
+                    <button
+                      type="button"
+                      className="icon-button pet-complete-button"
+                      disabled={!canToggleTaskCompletion(current)}
+                      aria-label={
+                        privacyMode ? "完成当前私人任务" : `完成${current.title}`
+                      }
+                      onClick={() =>
+                        void toggleTaskFromPet(todayController, current).catch((reason) =>
+                          showPetActionError(reason, "当前任务暂时无法完成，请稍后再试。"),
+                        )
+                      }
+                    >
+                      <Check size={17} />
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
+            {petFocus && (
+              <section
+                className={`pet-speech-bubble pet-focus-bubble ${focusBubbleCollapsed ? "is-collapsed" : ""}`}
+                aria-label="专注计时气泡"
+              >
+                <button
+                  type="button"
+                  className="pet-bubble-toggle pet-focus-bubble-toggle"
+                  aria-expanded={!focusBubbleCollapsed}
+                  aria-label={focusBubbleCollapsed ? "展开专注气泡" : "折叠专注气泡"}
+                  onClick={() => setFocusBubbleCollapsed((value) => !value)}
+                >
+                  <span className="pet-bubble-label">
+                    <Focus size={14} />
+                    {focusPhaseLabel}
+                    <small>
+                      第 {petFocus.cycle}/{petFocus.preset.cycles} 轮
+                      {focusEnvironmentSound !== "off"
+                        ? ` · ${focusEnvironmentSoundLabel}`
+                        : ""}
+                    </small>
+                  </span>
+                  <strong>{clockDuration(petFocusClock)}</strong>
+                  <ChevronDown size={15} />
+                </button>
+                {!focusBubbleCollapsed && (
+                  <div className="pet-focus-bubble-body">
+                    <p>
+                      {petFocus.taskTitle
+                        ? privacyMode
+                          ? "私人任务"
+                          : petFocus.taskTitle
+                        : petFocus.phase === "focus"
+                          ? "我陪你把这一段时间守住"
+                          : "站起来走走，喝口水吧"}
+                    </p>
+                    <div className="pet-focus-bubble-actions">
+                      <SpeechOutputButton
+                        text={petFocusSpeechText}
+                        label="朗读"
+                        ariaLabel="朗读专注状态"
+                        className="agent-speak-button pet-speech-button"
+                      />
+                      {petFocus.status === "awaiting-completion" ? (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={focusBusy}
+                          aria-label={petFocus.phase === "focus" ? "开始专注休息" : "开始下一轮专注"}
+                          onClick={() =>
+                            void runFocusAction(() =>
+                              window.desktopApi!.pet.advanceFocus(),
+                            )
+                          }
+                        >
+                          <Play size={14} />
+                          {petFocus.phase === "focus" ? "休息" : "下一轮"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={focusBusy}
+                          aria-label={petFocus.status === "running" ? "暂停专注计时" : "继续专注计时"}
+                          onClick={() =>
+                            void runFocusAction(() =>
+                              petFocus.status === "running"
+                                ? window.desktopApi!.pet.pauseFocus()
+                                : window.desktopApi!.pet.resumeFocus(),
+                            )
+                          }
+                        >
+                          {petFocus.status === "running" ? <Pause size={14} /> : <Play size={14} />}
+                          {petFocus.status === "running" ? "暂停" : "继续"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="soft-button"
+                        disabled={focusBusy}
+                        aria-label="结束专注计时"
+                        onClick={() =>
+                          void runFocusAction(() =>
+                            window.desktopApi!.pet.finishFocus("abandoned"),
+                          )
+                        }
+                      >
+                        <Square size={13} />
+                        结束
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+            {focusShieldNotice && (
+              <section
+                className={`pet-speech-bubble pet-focus-shield-bubble ${focusShieldNotice.paused ? "is-paused" : ""} ${focusShieldBubbleCollapsed ? "is-collapsed" : ""}`}
+                aria-label="专注守护提示"
+              >
+                <button
+                  type="button"
+                  className="pet-bubble-toggle pet-focus-shield-toggle"
+                  aria-expanded={!focusShieldBubbleCollapsed}
+                  aria-label={focusShieldBubbleCollapsed ? "展开专注守护气泡" : "折叠专注守护气泡"}
+                  onClick={() => setFocusShieldBubbleCollapsed((value) => !value)}
+                >
+                  <span className="pet-bubble-label">
+                    {focusShieldNotice.paused ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+                    专注守护
+                    <small>{focusShieldNotice.paused ? "已暂停" : "温和提醒"}</small>
+                  </span>
+                  <span className="pet-focus-shield-app">
+                    {privacyMode ? "其他应用" : focusShieldNotice.matchedLabel}
+                  </span>
+                  <ChevronDown size={15} />
+                </button>
+                {!focusShieldBubbleCollapsed && <div className="pet-focus-shield-body">
+                  <p>
+                    {focusShieldNotice.paused
+                      ? "我先替你按下暂停，准备好后再继续。"
+                      : `检测到 ${privacyMode ? "其他应用" : focusShieldNotice.matchedLabel}，专注还在继续。`}
+                  </p>
+                  <div className="pet-focus-shield-actions">
+                    {focusShieldNotice.paused ? (
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={focusBusy}
+                        onClick={resumeFocusFromShieldNotice}
+                      >
+                        <Play size={13} /> 继续专注
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={focusBusy}
+                        onClick={pauseFocusFromShieldNotice}
+                      >
+                        <Pause size={13} /> 暂停这次专注
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="soft-button"
+                      disabled={focusBusy}
+                      onClick={dismissFocusShieldNotice}
+                    >
+                      {focusShieldNotice.paused ? "稍后再说" : "暂时忽略"}
+                    </button>
+                  </div>
+                </div>}
+              </section>
+            )}
+          </div>
         </div>
+        {floatingGame && (
+          <FloatingPetCoopGame
+            key={floatingGame}
+            game={floatingGame}
+            petName={petName}
+            palette={petAppearance.palette}
+            outfit={petAppearance.outfit}
+            personality={petPersonality}
+            season={petSeason}
+            weatherEffect={petWeatherEffect}
+            positionLocked={floatingLocked}
+            onDragStart={beginFloatingHandleDrag}
+            onDragMove={updateFloatingHandleDrag}
+            onDragEnd={finishFloatingHandleDrag}
+            onAction={petBehavior.act}
+            onComplete={completeFloatingPetGame}
+            onClose={closePetInteractionSurface}
+          />
+        )}
         {contextMenuOpen && (
           <>
             <button
@@ -8170,9 +22250,11 @@ function FloatingWindow() {
               }}
             />
             <div
+              ref={contextMenuRef}
               className="floating-context-menu no-drag"
               role="menu"
               aria-label="Todo Pet 快捷菜单"
+              tabIndex={-1}
               onContextMenu={(event) => event.preventDefault()}
             >
               <div className="floating-context-heading">
@@ -8182,6 +22264,7 @@ function FloatingWindow() {
               <button
                 type="button"
                 role="menuitem"
+                ref={contextMenuFirstItemRef}
                 onClick={() => showMainFromFloatingMenu("today")}
               >
                 <Sun size={16} />
@@ -8200,11 +22283,95 @@ function FloatingWindow() {
               <button
                 type="button"
                 role="menuitem"
+                onClick={showQuickCaptureFromFloatingMenu}
+              >
+                <History size={16} />
+                <span>最近捕获</span>
+                <small>打开本机回用记录</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
                 onClick={openFloatingChatFromMenu}
               >
                 <MessageCircle size={16} />
                 <span>在此处对话</span>
                 <small>打开 Agent</small>
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={petSettings.pet.meetingMode}
+                onClick={() => toggleBossMode(!petSettings.pet.meetingMode)}
+              >
+                <EyeOff size={16} />
+                <span>{petSettings.pet.meetingMode ? "退出 Boss Mode" : "进入 Boss Mode"}</span>
+                <small>{petSettings.pet.meetingMode ? "从托盘恢复" : "隐藏宠物并暂停宠物主动消息"}</small>
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={petSettings.pet.vacationMode}
+                onClick={() => togglePetVacationMode(!petSettings.pet.vacationMode)}
+              >
+                <Sun size={16} />
+                <span>{petSettings.pet.vacationMode ? "结束休假模式" : "进入休假模式"}</span>
+                <small>{petSettings.pet.vacationMode ? "恢复宠物主动陪伴" : "保留宠物，暂停主动消息"}</small>
+              </button>
+              <div className="floating-context-divider" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("pet")}
+              >
+                <Heart size={16} />
+                <span>摸摸{petName}</span>
+                <small>增加默契</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("play")}
+              >
+                <CircleDot size={16} />
+                <span>玩一会儿</span>
+                <small>毛线球</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("high-five")}
+              >
+                <Sparkles size={16} />
+                <span>击个掌</span>
+                <small>庆祝一下</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("rest")}
+              >
+                <Activity size={16} />
+                <span>一起休息</span>
+                <small>喝水伸展</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("morning")}
+              >
+                <Sun size={16} />
+                <span>早间问候</span>
+                <small>看看今天</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => performPetInteraction("evening")}
+              >
+                <Clock3 size={16} />
+                <span>晚间收尾</span>
+                <small>温柔复盘</small>
               </button>
               <div className="floating-context-divider" role="separator" />
               <button
@@ -8226,6 +22393,16 @@ function FloatingWindow() {
                 <LockKeyhole size={16} />
                 <span>{floatingLocked ? "解锁位置" : "锁定位置"}</span>
                 <small>{floatingLocked ? "不可拖动" : "防止误拖"}</small>
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={edgePeekMode}
+                onClick={toggleEdgePeekMode}
+              >
+                <PanelTop size={16} />
+                <span>{edgePeekMode ? "退出边缘收纳" : "边缘收纳"}</span>
+                <small>{edgePeekMode ? "移到屏幕边缘，移入自动探头" : "靠边隐藏，只留一小截宠物"}</small>
               </button>
               <button type="button" role="menuitem" onClick={mutePetForOneHour}>
                 <Bell size={16} />
@@ -8249,7 +22426,7 @@ function FloatingWindow() {
             </div>
           </>
         )}
-        {expanded && !contextMenuOpen && (
+        {expanded && !contextMenuOpen && !interactionWheelOpen && !floatingGame && (
           <div className="mini-panel">
             <div className="mini-tabs">
               <button
@@ -8300,6 +22477,22 @@ function FloatingWindow() {
                 <ExternalLink size={15} />
               </button>
             </div>
+            {tab === "all" && petSmartViews.length > 0 && (
+              <div className="mini-saved-view-picker">
+                <label htmlFor="pet-saved-view">任务视图</label>
+                <select
+                  id="pet-saved-view"
+                  value={petSmartViewId ?? ""}
+                  aria-label="选择 Todo Pet 任务视图"
+                  onChange={(event) => setPetSmartViewId(event.target.value || undefined)}
+                >
+                  <option value="">全部任务</option>
+                  {petSmartViews.map((view) => (
+                    <option key={view.id} value={view.id}>{view.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div
               ref={miniContentRef}
               className={`mini-content ${tab === "chat" ? "mini-chat-content" : ""}`}
@@ -8316,16 +22509,57 @@ function FloatingWindow() {
               aria-relevant={tab === "chat" ? "additions text" : undefined}
               aria-busy={tab === "chat" && floatingChat.isSending}
             >
+              {tab === "today" && (
+                <div className="mini-daily-plan-entry">
+                  <span className="mini-daily-plan-icon" aria-hidden="true">
+                    <CalendarDays size={16} />
+                  </span>
+                  <div>
+                    <strong>今天先做什么？</strong>
+                    <small>
+                      {openTodayTaskCount
+                        ? `${openTodayTaskCount} 项待办，按时间重新挑选`
+                        : "从全部任务里挑出今天的重点"}
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    className="soft-button"
+                    onClick={() => showMainFromFloatingMenu("plan-today")}
+                  >
+                    安排
+                  </button>
+                </div>
+              )}
               {isTaskTab &&
-                displayedTaskController.tasks.map((task) => (
-                  <div className="mini-task" key={task.id}>
+                displayedTaskList.map((task) => (
+                  <div
+                    className="mini-task"
+                    key={task.id}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData("application/x-todo-agent-task", task.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      setDraggedTaskId(task.id);
+                      setTaskDropActive(true);
+                      setActiveTaskDropTarget(undefined);
+                      petBehavior.act("task-carry", "把任务拖到我身上，我来接住。", 8_000);
+                    }}
+                    onDragEnd={() => {
+                      setTaskDropActive(false);
+                      setDraggedTaskId(undefined);
+                      setActiveTaskDropTarget(undefined);
+                    }}
+                  >
                     <input
                       className="task-checkbox"
                       type="checkbox"
                       checked={task.status === "completed"}
                       disabled={!canToggleTaskCompletion(task)}
                       onChange={() =>
-                        void displayedTaskController.toggleComplete(task)
+                        void toggleTaskFromPet(displayedTaskController, task).catch((reason) =>
+                          showPetActionError(reason, "这张任务暂时无法完成，请稍后再试。"),
+                        )
                       }
                       aria-label={
                         privacyMode ? "完成私人任务" : `完成${task.title}`
@@ -8339,9 +22573,15 @@ function FloatingWindow() {
                     </small>
                   </div>
                 ))}
-              {isTaskTab && !displayedTaskController.tasks.length && (
+              {isTaskTab && !displayedTaskList.length && (
                 <div className="empty-state">
-                  <p>{tab === "all" ? "还没有未完成任务" : "今天没有待办"}</p>
+                  <p>
+                    {tab === "all"
+                      ? activePetSmartView
+                        ? `“${activePetSmartView.name}”里没有未完成任务`
+                        : "还没有未完成任务"
+                      : "今天没有待办"}
+                  </p>
                 </div>
               )}
               {tab === "chat" &&
@@ -8368,7 +22608,7 @@ function FloatingWindow() {
                     >
                       {message.role === "assistant" ? (
                         message.text ? (
-                          <AgentMarkdown text={message.text} />
+                          <AgentMarkdown text={message.text} streaming={message.streaming} />
                         ) : (
                           <span className="streaming-indicator" role="status">
                             <i />
@@ -8382,6 +22622,24 @@ function FloatingWindow() {
                       )}
                     </div>
                   ))}
+                  {!floatingChat.input.trim() &&
+                    !floatingChat.isSending &&
+                    recentContexts.length > 0 && (
+                      <ContextCaptureHistory
+                        items={recentContexts}
+                        onSelect={(item) =>
+                          floatingChat.setInput((current) =>
+                            current.trim()
+                              ? `${current}\n\n${item.text}`
+                              : item.text,
+                          )
+                        }
+                        onClear={() => {
+                          clearContextCaptureHistory();
+                          setRecentContexts([]);
+                        }}
+                      />
+                    )}
                   {floatingChat.approval && (
                     <div
                       className="mini-approval"
@@ -8468,7 +22726,17 @@ function FloatingWindow() {
                 <div className="pet-focus-view">
                   <PetCharacter
                     mood={petFocus?.status === "running" ? "focus" : "idle"}
+                    emotion={petBehavior.emotion}
+                    action={petBehavior.action}
+                    actionKey={petBehavior.actionKey}
                     name={petName}
+                    visualStyle="atlas"
+                    interactive
+                    palette={petAppearance.palette}
+                    outfit={petAppearance.outfit}
+                    personality={petPersonality}
+                    season={petSeason}
+                    weatherEffect={petWeatherEffect}
                   />
                   <p className="pet-focus-kicker">
                     {petFocus
@@ -8577,8 +22845,22 @@ function FloatingWindow() {
               )}
               {tab === "home" && (
                 <div className="pet-home-view">
+                  <BuddyInteractions mini />
                   <div className="pet-home-hero">
-                    <PetCharacter mood={petMood} name={petName} />
+                    <PetCharacter
+                      mood={petMood}
+                      emotion={petBehavior.emotion}
+                      action={petBehavior.action}
+                      actionKey={petBehavior.actionKey}
+                      name={petName}
+                      visualStyle="atlas"
+                      interactive
+                      palette={petAppearance.palette}
+                      outfit={petAppearance.outfit}
+                      personality={petPersonality}
+                      season={petSeason}
+                      weatherEffect={petWeatherEffect}
+                    />
                     <div>
                       <span>Todo Pet</span>
                       <h3>{petName}的小窝</h3>
@@ -8639,6 +22921,18 @@ function FloatingWindow() {
             </div>
             {(isTaskTab || tab === "chat") && !privacyMode && (
               <div className="mini-composer">
+                {tab === 'chat' && <AgentContextControls chat={floatingChat} compact />}
+                {(voice.interimTranscript || voice.error) && (
+                  <div
+                    className={`voice-capture-status mini-voice-status ${voice.error ? "has-error" : ""}`}
+                    aria-live="polite"
+                  >
+                    <Mic size={13} />
+                    <span>
+                      {voice.error ?? `正在听：${voice.interimTranscript}`}
+                    </span>
+                  </div>
+                )}
                 {isTaskTab ? (
                   <input
                     value={input}
@@ -8652,7 +22946,7 @@ function FloatingWindow() {
                         void submit();
                       }
                     }}
-                    placeholder="新增一个本地任务…"
+                    placeholder="新增任务，例如：明天整理周报 p1 #工作 45m"
                     aria-label="新增本地任务"
                   />
                 ) : (
@@ -8691,8 +22985,8 @@ function FloatingWindow() {
                     }
                     void submit();
                   }}
-                  aria-label={
-                    isTaskTab
+                    aria-label={
+                      isTaskTab
                       ? creatingFloatingTask
                         ? "正在新增任务"
                         : "新增任务"
@@ -8707,6 +23001,30 @@ function FloatingWindow() {
                     <ArrowUp size={16} />
                   )}
                 </button>
+                <button
+                  type="button"
+                  className={`icon-button voice-capture-button ${voice.listening ? "is-listening" : ""}`}
+                  disabled={!voice.supported || creatingFloatingTask || floatingChat.isSending}
+                  onClick={voice.toggle}
+                  aria-label={voice.listening ? "停止语音输入" : "开始语音输入"}
+                  title={
+                    voice.supported
+                      ? "识别结果会先放入输入框，不会自动发送"
+                      : "当前环境不支持语音输入"
+                  }
+                >
+                  <Mic size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button context-capture-button"
+                  onClick={() => void readSelectedTextPreview()}
+                  disabled={selectedTextLoading || creatingFloatingTask || floatingChat.isSending}
+                  aria-label="读取选中文本"
+                  title="全局快捷键打开小窗时会尝试带入外部选中文本；这里只预览"
+                >
+                  <ClipboardCheck size={15} />
+                </button>
               </div>
             )}
           </div>
@@ -8719,6 +23037,7 @@ function FloatingWindow() {
 export function App() {
   const kind =
     new URLSearchParams(window.location.search).get("window") ?? "main";
+  if (kind === 'screen-region') return <ScreenRegionSelector />;
   if (kind === "quick") return <QuickCaptureWindow />;
   if (kind === "floating") return <FloatingWindow />;
   return <MainWindow />;

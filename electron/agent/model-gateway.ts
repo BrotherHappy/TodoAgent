@@ -34,7 +34,10 @@ const responseSchema = z
               .object({
                 role: z.literal("assistant").optional(),
                 content: z.string().nullable().optional(),
-                tool_calls: z.array(toolCallSchema).optional(),
+                // OpenAI-compatible gateways differ here: some omit
+                // `tool_calls` when there are no calls, while others return
+                // an explicit JSON null. Both mean the same thing.
+                tool_calls: z.array(toolCallSchema).nullable().optional(),
               })
               .passthrough(),
           })
@@ -67,18 +70,22 @@ const streamChunkSchema = z
                   z
                     .object({
                       index: z.number().int().nonnegative(),
-                      id: z.string().optional(),
-                      type: z.literal("function").optional(),
+                      // OpenAI-compatible providers commonly send these
+                      // fields only on the first tool-call fragment, then
+                      // explicitly use null on continuation fragments.
+                      id: z.string().nullable().optional(),
+                      type: z.literal("function").nullable().optional(),
                       function: z
                         .object({
-                          name: z.string().optional(),
-                          arguments: z.string().optional(),
+                          name: z.string().nullable().optional(),
+                          arguments: z.string().nullable().optional(),
                         })
                         .passthrough()
                         .optional(),
                     })
                     .passthrough(),
                 )
+                .nullable()
                 .optional(),
             })
             .passthrough()
@@ -291,7 +298,9 @@ const sanitize = (input: string, secrets: string[] = []): string => {
 const buildEndpoint = (baseUrl: string): URL => {
   let normalized: URL;
   try {
-    normalized = new URL(baseUrl);
+    // Settings can come from a paste or an older build.  Ignore accidental
+    // surrounding whitespace before resolving the OpenAI-compatible path.
+    normalized = new URL(baseUrl.trim());
   } catch {
     throw new ModelGatewayError(
       "INVALID_BASE_URL",
@@ -334,6 +343,7 @@ const withStrictMode = (
 });
 
 export class OpenAIChatCompletionsGateway {
+  private readonly options: ModelGatewayOptions;
   private readonly endpoint: URL;
   private readonly fetchFn: FetchLike;
   private readonly logger?: SafeModelLogger;
@@ -343,8 +353,17 @@ export class OpenAIChatCompletionsGateway {
   private readonly retryBaseDelayMs: number;
   private readonly maxResponseBytes: number;
 
-  constructor(private readonly options: ModelGatewayOptions) {
-    this.endpoint = buildEndpoint(options.baseUrl);
+  constructor(options: ModelGatewayOptions) {
+    // Model names and bearer values are opaque identifiers, but surrounding
+    // whitespace is never meaningful to either protocol.  Trimming here also
+    // repairs credentials entered before the renderer started normalizing
+    // pasted values, without exposing or rewriting the stored secret.
+    this.options = {
+      ...options,
+      baseUrl: options.baseUrl.trim(),
+      model: options.model.trim(),
+    };
+    this.endpoint = buildEndpoint(this.options.baseUrl);
     this.fetchFn = options.fetch ?? fetch;
     this.logger = options.logger;
     this.strictTools = options.strictTools ?? true;
@@ -384,7 +403,7 @@ export class OpenAIChatCompletionsGateway {
     externalSignal?: AbortSignal,
     onTextDelta?: (delta: string) => void,
   ): Promise<ModelCompletion> {
-    const apiKey = await this.#resolveApiKey();
+    const apiKey = (await this.#resolveApiKey())?.trim();
 
     const tools = request.tools.map((tool) =>
       withStrictMode(tool, this.strictTools),

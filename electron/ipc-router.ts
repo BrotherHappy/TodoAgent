@@ -7,13 +7,16 @@ import {
   type FeishuDesktopApi,
   type NotificationDesktopApi,
   type PetDesktopApi,
+  type SelectedTextContextView,
 } from "../src/shared/desktop-api";
+import type { TaskAttachment } from "../src/shared/models";
 import {
   FLOATING_HOVER_EXPAND_DELAY_MAX_MS,
   FLOATING_HOVER_EXPAND_DELAY_MIN_MS,
   type AppSettings,
 } from "../src/shared/settings";
 import type { AgentDesktopService } from "./agent/agent-desktop-service";
+import type { AgentActivityBridge } from "./agent/agent-activity-bridge";
 import type { SettingsService } from "./services/settings-service";
 import type { TaskService } from "./services/task-service";
 import { parseQuickCapture } from "./services/quick-capture-parser";
@@ -22,9 +25,71 @@ import {
   parseReminderActionInput,
 } from "./services/reminder-action-input";
 import { rendererUrlIsTrusted } from "./trusted-renderer";
+import { todayPlanRequestSchema } from "../src/shared/today-plan-contract";
 
 const idSchema = z.string().trim().min(1).max(512);
 const routeSchema = z.string().trim().min(1).max(80).optional();
+const localAttachmentSchema = z
+  .object({
+    id: idSchema,
+    localPath: z.string().trim().min(1).max(8_192),
+  })
+  .strict();
+
+const taskAutomationConditionBranchSchema = z
+  .object({
+    source: z.enum(["local", "feishu"]).optional(),
+    projectId: idSchema.max(80).optional(),
+    listId: idSchema.max(80).optional(),
+    sectionId: idSchema.max(80).optional(),
+    tag: z.string().trim().min(1).max(40).optional(),
+    context: z.string().trim().min(1).max(40).optional(),
+  })
+  .strict();
+
+const taskAutomationConditionSchema = taskAutomationConditionBranchSchema
+  .extend({
+    anyOf: z.array(taskAutomationConditionBranchSchema).min(1).max(5).optional(),
+  })
+  .strict();
+
+const taskAutomationActionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("set-flagged"), value: z.boolean() }).strict(),
+  z.object({ kind: z.literal("set-project"), value: z.string().trim().min(1).max(80).nullable() }).strict(),
+  z.object({ kind: z.literal("set-list"), value: z.string().trim().min(1).max(80).nullable() }).strict(),
+  z.object({ kind: z.literal("set-section"), value: z.string().trim().min(1).max(80).nullable() }).strict(),
+  z.object({
+    kind: z.literal("set-defer-until"),
+    value: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/u), z.null()]),
+  }).strict(),
+  z.object({ kind: z.literal("add-tag"), value: z.string().trim().min(1).max(40) }).strict(),
+  z.object({ kind: z.literal("remove-tag"), value: z.string().trim().min(1).max(40) }).strict(),
+  z.object({ kind: z.literal("add-context"), value: z.string().trim().min(1).max(40) }).strict(),
+  z.object({ kind: z.literal("remove-context"), value: z.string().trim().min(1).max(40) }).strict(),
+]);
+
+const taskAutomationRuleSchema = z
+  .object({
+    id: idSchema.max(160),
+    name: z.string().trim().min(1).max(80),
+    enabled: z.boolean(),
+    trigger: z.enum(["task-created", "task-completed", "manual", "scheduled", "deadline-approaching"]),
+    condition: taskAutomationConditionSchema,
+    action: taskAutomationActionSchema,
+    schedule: z
+      .object({
+        frequency: z.enum(["daily", "weekly"]),
+        time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u),
+        weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+        lastRunAt: z.string().datetime().optional(),
+      })
+      .strict()
+      .optional(),
+    deadlineWindowMinutes: z.number().int().min(5).max(10_080).optional(),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
 
 const settingsSchema = z
   .object({
@@ -44,6 +109,21 @@ const settingsSchema = z
         quietHoursEnabled: z.boolean(),
         quietHoursStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u),
         quietHoursEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u),
+        dailyTaskReminderLimit: z.number().int().min(0).max(50),
+        taskIgnoreBackoffEnabled: z.boolean(),
+        taskReminderMinIntervalMinutes: z.number().int().min(0).max(1_440),
+        taskReminderSourceMode: z
+          .object({
+            local: z.enum(["normal", "important-only", "off"]),
+            feishu: z.enum(["normal", "important-only", "off"]),
+          })
+          .strict(),
+        taskReminderProjectMode: z
+          .record(
+            z.string().trim().min(1).max(512),
+            z.enum(["normal", "important-only", "off"]),
+          )
+          .refine((value) => Object.keys(value).length <= 100, "最多配置 100 个项目提醒策略"),
         mutedUntil: z.string().datetime().optional(),
       })
       .strict(),
@@ -66,6 +146,7 @@ const settingsSchema = z
           z.string(),
           z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
         ),
+        mousePassthrough: z.boolean().default(false),
       })
       .strict(),
     focus: z
@@ -83,6 +164,20 @@ const settingsSchema = z
           "cafe",
           "white-noise",
         ]),
+        shieldMode: z.enum(["off", "gentle", "pause"]).default("off"),
+        shieldApplications: z.array(z.string().trim().min(1).max(80)).max(12).default([]),
+      })
+      .strict(),
+    planning: z
+      .object({
+        urgencyWeights: z
+          .object({
+            deadline: z.number().int().min(0).max(100),
+            plannedToday: z.number().int().min(0).max(100),
+            priority: z.number().int().min(0).max(100),
+            quickWin: z.number().int().min(0).max(100),
+          })
+          .strict(),
       })
       .strict(),
     weather: z
@@ -99,24 +194,109 @@ const settingsSchema = z
       .object({
         interactionsEnabled: z.boolean(),
         proactiveMessages: z.boolean(),
+        inputReactionsEnabled: z.boolean().default(false),
+        vacationMode: z.boolean().default(false),
         wellbeingReminders: z.boolean(),
         autoDiary: z.boolean(),
         relationshipMemory: z.boolean(),
+        actionPack: z.enum(["balanced", "calm", "playful", "focused"]),
+        animationIntensity: z.enum(["gentle", "lively"]),
+        proactiveIntervalMinutes: z.number().int().min(15).max(240),
+        proactiveDailyLimit: z.number().int().min(0).max(20),
+        meetingMode: z.boolean(),
+        seasonalEvents: z.boolean(),
       })
       .strict(),
     ai: z
       .object({
+        protocol: z.enum(['openai-compatible', 'ollama']).optional(),
         enabled: z.boolean(),
         endpoint: z.string().trim().url().max(2_048),
         model: z.string().trim().max(240),
         // A renderer from the immediately preceding build may not have this
         // field yet; preserving Bearer as the default never weakens auth.
         authMode: z.enum(["bearer", "none"]).default("bearer"),
+        routing: z.enum(["primary-only", "fallback-on-error", "local-only"]).default("primary-only"),
+        fallback: z
+          .object({
+            protocol: z.enum(['openai-compatible', 'ollama']).optional(),
+            enabled: z.boolean(),
+            endpoint: z.string().trim().url().max(2_048),
+            model: z.string().trim().max(240),
+            authMode: z.enum(["bearer", "none"]).default("none"),
+            pricing: z
+              .object({
+                promptUsdPerMillionTokens: z.number().finite().min(0).max(100_000),
+                completionUsdPerMillionTokens: z.number().finite().min(0).max(100_000),
+              })
+              .strict()
+              .default({
+                promptUsdPerMillionTokens: 0,
+                completionUsdPerMillionTokens: 0,
+              }),
+            credentialId: z.string().trim().min(1).max(512).optional(),
+          })
+          .strict()
+          .default({
+            enabled: false,
+            endpoint: "http://127.0.0.1:11434/v1",
+            model: "llama3.2",
+            authMode: "none",
+            pricing: {
+              promptUsdPerMillionTokens: 0,
+              completionUsdPerMillionTokens: 0,
+            },
+          }),
         timeoutMs: z.number().int().min(1_000).max(300_000),
         retries: z.number().int().min(0).max(5),
         dailyTokenLimit: z.number().int().min(0).max(100_000_000),
         dailyCostLimit: z.number().finite().min(0).max(100_000),
+        pricing: z
+          .object({
+            promptUsdPerMillionTokens: z.number().finite().min(0).max(100_000),
+            completionUsdPerMillionTokens: z.number().finite().min(0).max(100_000),
+          })
+          .strict(),
         credentialId: z.string().trim().min(1).max(512).optional(),
+      })
+      .strict(),
+    agentActivity: z
+      .object({
+        enabled: z.boolean(),
+        port: z.number().int().min(0).max(65_535),
+        allowedAgents: z
+          .array(
+            z.enum([
+              "claude-code",
+              "codex",
+              "copilot-cli",
+              "gemini-cli",
+              "antigravity-cli",
+              "cursor-agent",
+              "codebuddy",
+              "workbuddy",
+              "kiro-cli",
+              "kimi-cli",
+              "qwen-code",
+              "zcode",
+              "codewhale",
+              "openclaw",
+              "hermes",
+              "opencode",
+              "mimocode",
+              "pi",
+              "qoder",
+              "qoderwork",
+              "qwenwork",
+              "reasonix-cli",
+              "traecode",
+              "deepseek-harness",
+              "custom",
+            ]),
+          )
+          .max(32),
+        staleAfterSeconds: z.number().int().min(15).max(3_600),
+        showInPet: z.boolean(),
       })
       .strict(),
     feishu: z
@@ -150,6 +330,15 @@ const settingsSchema = z
         chatHistory: z.boolean(),
       })
       .strict(),
+    agentCapabilities: z
+      .object({
+        taskManagement: z.boolean(),
+        feishuSync: z.boolean(),
+        webResearch: z.boolean(),
+        filesAndTerminal: z.boolean(),
+        clipboardAndScreen: z.boolean(),
+      })
+      .strict(),
     persona: z
       .object({
         preset: z.enum(["minimal", "warm", "calm", "strict"]),
@@ -158,8 +347,10 @@ const settingsSchema = z
         responseLength: z.enum(["short", "balanced", "detailed"]),
         proactiveLevel: z.enum(["quiet", "balanced", "active"]),
         reminderStrength: z.enum(["gentle", "normal", "firm"]),
+        syncWithPet: z.boolean().optional(),
       })
       .strict(),
+    automations: z.array(taskAutomationRuleSchema).max(50).default([]),
     permissionMode: z.enum(["read-only", "standard", "full-access"]),
     onboardingComplete: z.boolean(),
   })
@@ -175,8 +366,15 @@ const credentialSchema = z
 
 export interface DesktopIpcDependencies {
   tasks: TaskService;
+  taskAttachments?: {
+    choose(): Promise<TaskAttachment[]>;
+    open(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<void>;
+    preview(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<import("../src/shared/models").TaskAttachmentPreview>;
+    remove(attachment: Pick<TaskAttachment, "id" | "localPath">): Promise<void>;
+  };
   settings: SettingsService;
   agent: AgentDesktopService;
+  agentActivity?: AgentActivityBridge;
   feishu: FeishuDesktopApi;
   notifications: NotificationDesktopApi;
   pet: PetDesktopApi;
@@ -184,10 +382,19 @@ export interface DesktopIpcDependencies {
   devServerUrl?: string;
   rendererPath: string;
   getInfo: () => AppInfo;
+  readClipboard: () => { text: string; characters: number; truncated: boolean; capturedAt: string };
+  readActiveWindow: () => { status: "captured" | "unavailable"; appName?: string; title?: string; reason?: "unsupported" | "permission-denied" | "empty" | "error"; capturedAt: string } | Promise<{ status: "captured" | "unavailable"; appName?: string; title?: string; reason?: "unsupported" | "permission-denied" | "empty" | "error"; capturedAt: string }>;
+  readSelectedText: () => SelectedTextContextView | Promise<SelectedTextContextView>;
   showMain: (route?: string) => void;
   showQuickCapture: () => void;
   setFloatingVisible: (visible: boolean) => Promise<AppSettings>;
   setFloatingExpanded: (expanded: boolean) => void;
+  setFloatingPetOnly: (petOnly: boolean) => void;
+  setFloatingEdgeDocked: (docked: boolean) => boolean;
+  peekFloatingEdge: () => boolean;
+  beginFloatingDrag: (screenX: number, screenY: number) => boolean;
+  updateFloatingDrag: (screenX: number, screenY: number) => boolean;
+  endFloatingDrag: () => void;
   setLaunchAtLogin: (enabled: boolean) => Promise<AppSettings>;
   openExternal: (url: string) => Promise<void>;
   onTasksChanged: () => void;
@@ -277,6 +484,9 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.taskReopen, (_event, input) =>
     changed(() => dependencies.tasks.reopenTask(idSchema.parse(input))),
   );
+  handle(DESKTOP_CHANNELS.taskSkipRecurring, (_event, input) =>
+    changed(() => dependencies.tasks.skipRecurringTask(idSchema.parse(input))),
+  );
   handle(DESKTOP_CHANNELS.taskMoveToToday, (_event, input) => {
     const request = z
       .object({
@@ -301,19 +511,151 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.taskResetFocus, (_event, input) =>
     changed(() => dependencies.tasks.resetFocus(idSchema.parse(input))),
   );
+  handle(DESKTOP_CHANNELS.taskRecordWorkLog, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        minutes: z.number().int().min(1).max(720),
+        endedAt: z.string().datetime().optional(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() =>
+      dependencies.tasks.recordWorkLog(request.id, {
+        minutes: request.minutes,
+        endedAt: request.endedAt,
+      }),
+    );
+  });
   handle(DESKTOP_CHANNELS.taskReorderToday, (_event, input) =>
     changed(() =>
       dependencies.tasks.reorderToday(z.array(idSchema).max(500).parse(input)),
     ),
   );
+  handle(DESKTOP_CHANNELS.taskApplyTodayPlan, (_event, input) => {
+    const request = todayPlanRequestSchema.parse(input);
+    return changed(() => dependencies.tasks.applyTodayPlan(request));
+  });
+  handle(DESKTOP_CHANNELS.taskApplyBulkAction, (_event, input) => {
+    const request = z
+      .object({
+        ids: z.array(idSchema).min(1).max(500),
+        action: z.discriminatedUnion("kind", [
+          z.object({ kind: z.literal("complete"), completedAt: z.string().datetime().optional() }).strict(),
+          z.object({ kind: z.literal("reopen") }).strict(),
+          z.object({
+            kind: z.literal("move-to-today"),
+            date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+          }).strict(),
+          z.object({ kind: z.literal("trash") }).strict(),
+          z.object({ kind: z.literal("restore") }).strict(),
+        ]),
+        baselines: z.array(
+          z.object({ id: idSchema, updatedAt: z.string().datetime() }).strict(),
+        ).max(500).optional(),
+      })
+      .strict()
+      .refine((value) => new Set(value.ids).size === value.ids.length, {
+        message: "Batch task ids must be unique.",
+        path: ["ids"],
+      })
+      .refine(
+        (value) =>
+          value.baselines === undefined ||
+          (value.baselines.length === value.ids.length &&
+            new Set(value.baselines.map((baseline) => baseline.id)).size ===
+              value.baselines.length &&
+            value.ids.every((id) => value.baselines!.some((baseline) => baseline.id === id))),
+        {
+          message: "Batch baselines must include every selected task.",
+          path: ["baselines"],
+        },
+      )
+      .parse(input);
+    return changed(() => dependencies.tasks.applyBulkTaskAction(request));
+  });
+  handle(DESKTOP_CHANNELS.taskApplyAutomation, async (_event, input) => {
+    const request = z
+      .object({
+        ids: z.array(idSchema).min(1).max(500),
+        ruleId: idSchema,
+        baselines: z
+          .array(
+            z
+              .object({ id: idSchema, updatedAt: z.string().datetime() })
+              .strict(),
+          )
+          .max(500)
+          .optional(),
+      })
+      .strict()
+      .refine((value) => new Set(value.ids).size === value.ids.length, {
+        message: "自动化任务不能重复选择。",
+        path: ["ids"],
+      })
+      .refine(
+        (value) =>
+          value.baselines === undefined ||
+          (value.baselines.length === value.ids.length &&
+            new Set(value.baselines.map((baseline) => baseline.id)).size ===
+              value.baselines.length &&
+            value.ids.every((id) =>
+              value.baselines!.some((baseline) => baseline.id === id),
+            )),
+        {
+          message: "自动化基线必须覆盖全部选中任务。",
+          path: ["baselines"],
+        },
+      )
+      .parse(input);
+    const rule = dependencies.settings
+      .get()
+      .automations.find((candidate) => candidate.id === request.ruleId);
+    if (!rule || !rule.enabled || rule.trigger !== "manual") {
+      throw new Error("MANUAL_AUTOMATION_UNAVAILABLE");
+    }
+    return changed(() =>
+      dependencies.tasks.applyTaskAutomation({
+        ids: request.ids,
+        rule,
+        baselines: request.baselines,
+      }),
+    );
+  });
   handle(DESKTOP_CHANNELS.taskTrash, (_event, input) =>
     changed(() => dependencies.tasks.moveToTrash(idSchema.parse(input))),
   );
   handle(DESKTOP_CHANNELS.taskRestore, (_event, input) =>
     changed(() => dependencies.tasks.restoreTask(idSchema.parse(input))),
   );
-  handle(DESKTOP_CHANNELS.taskPurge, (_event, input) =>
-    changed(() => dependencies.tasks.purgeTask(idSchema.parse(input))),
+  handle(DESKTOP_CHANNELS.taskPurge, async (_event, input) => {
+    const id = idSchema.parse(input);
+    const existing = await dependencies.tasks.getTask(id, true);
+    const result = await changed(() => dependencies.tasks.purgeTask(id));
+    if (existing && dependencies.taskAttachments) {
+      await Promise.all(
+        existing.attachments
+          .filter((attachment) => attachment.localPath)
+          .map((attachment) => dependencies.taskAttachments!.remove(attachment).catch(() => undefined)),
+      );
+    }
+    return result;
+  });
+  handle(DESKTOP_CHANNELS.taskHistory, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        limit: z.number().int().min(1).max(100).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.tasks.getTaskHistory(request.id, request.limit);
+  });
+  handle(DESKTOP_CHANNELS.taskLatestUndoableOperation, () =>
+    dependencies.tasks.getLatestUndoableOperation(),
+  );
+  handle(DESKTOP_CHANNELS.taskLatestRedoableOperation, () =>
+    dependencies.tasks.getLatestRedoableOperation(),
   );
   handle(DESKTOP_CHANNELS.taskUndo, (_event, input) =>
     changed(() =>
@@ -321,6 +663,95 @@ export function registerDesktopIpc(
         input === undefined ? undefined : idSchema.parse(input),
       ),
     ),
+  );
+  handle(DESKTOP_CHANNELS.taskRedo, (_event, input) =>
+    changed(() =>
+      dependencies.tasks.redo(
+        input === undefined ? undefined : idSchema.parse(input),
+      ),
+    ),
+  );
+  handle(DESKTOP_CHANNELS.taskChooseAttachments, () => {
+    if (!dependencies.taskAttachments) throw new Error("TASK_ATTACHMENTS_UNAVAILABLE");
+    return dependencies.taskAttachments.choose();
+  });
+  handle(DESKTOP_CHANNELS.taskOpenAttachment, (_event, input) => {
+    if (!dependencies.taskAttachments) throw new Error("TASK_ATTACHMENTS_UNAVAILABLE");
+    return dependencies.taskAttachments.open(localAttachmentSchema.parse(input));
+  });
+  handle(DESKTOP_CHANNELS.taskPreviewAttachment, (_event, input) => {
+    if (!dependencies.taskAttachments) throw new Error("TASK_ATTACHMENTS_UNAVAILABLE");
+    return dependencies.taskAttachments.preview(localAttachmentSchema.parse(input));
+  });
+  handle(DESKTOP_CHANNELS.taskDeleteAttachment, (_event, input) => {
+    if (!dependencies.taskAttachments) throw new Error("TASK_ATTACHMENTS_UNAVAILABLE");
+    return dependencies.taskAttachments.remove(localAttachmentSchema.parse(input));
+  });
+  handle(DESKTOP_CHANNELS.projectList, (_event, input) =>
+    dependencies.tasks.listProjects(z.boolean().optional().parse(input) ?? false),
+  );
+  handle(DESKTOP_CHANNELS.projectCreate, (_event, input) => {
+    const request = z
+      .object({
+        name: z.string().trim().min(1).max(80),
+        color: z.enum(["violet", "blue", "green", "amber", "rose", "slate"]).optional(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() => dependencies.tasks.createProject(request));
+  });
+  handle(DESKTOP_CHANNELS.projectUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            name: z.string().trim().min(1).max(80).optional(),
+            color: z.enum(["violet", "blue", "green", "amber", "rose", "slate"]).optional(),
+            archived: z.boolean().optional(),
+            privateOrder: z.number().finite().nonnegative().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() => dependencies.tasks.updateProject(request.id, request.patch));
+  });
+  handle(DESKTOP_CHANNELS.projectDelete, (_event, input) =>
+    changed(() => dependencies.tasks.deleteProject(idSchema.parse(input))),
+  );
+  handle(DESKTOP_CHANNELS.listList, (_event, input) =>
+    dependencies.tasks.listLists(z.boolean().optional().parse(input) ?? false),
+  );
+  handle(DESKTOP_CHANNELS.listCreate, (_event, input) => {
+    const request = z
+      .object({
+        name: z.string().trim().min(1).max(80),
+        color: z.enum(["violet", "blue", "green", "amber", "rose", "slate"]).optional(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() => dependencies.tasks.createList(request));
+  });
+  handle(DESKTOP_CHANNELS.listUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            name: z.string().trim().min(1).max(80).optional(),
+            color: z.enum(["violet", "blue", "green", "amber", "rose", "slate"]).optional(),
+            archived: z.boolean().optional(),
+            privateOrder: z.number().finite().nonnegative().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return changed(() => dependencies.tasks.updateList(request.id, request.patch));
+  });
+  handle(DESKTOP_CHANNELS.listDelete, (_event, input) =>
+    changed(() => dependencies.tasks.deleteList(idSchema.parse(input))),
   );
   handle(DESKTOP_CHANNELS.draftSave, (_event, input) =>
     dependencies.tasks.saveDraft(input as never),
@@ -365,8 +796,39 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.credentialDelete, (_event, input) =>
     dependencies.settings.deleteCredential(idSchema.parse(input)),
   );
+  handle(DESKTOP_CHANNELS.agentActivityStatus, () =>
+    dependencies.agentActivity?.status() ?? {
+      enabled: false,
+      running: false,
+      tokenAvailable: false,
+      runtimePath: "",
+      activeSessions: 0,
+      state: "idle",
+    },
+  );
+  handle(DESKTOP_CHANNELS.agentActivitySetup, async () => {
+    if (!dependencies.agentActivity) throw new Error("AGENT_ACTIVITY_UNAVAILABLE");
+    await dependencies.agentActivity.start();
+    return dependencies.agentActivity.setup();
+  });
+  handle(DESKTOP_CHANNELS.agentActivityRotateToken, async () => {
+    if (!dependencies.agentActivity) throw new Error("AGENT_ACTIVITY_UNAVAILABLE");
+    return dependencies.agentActivity.rotateToken();
+  });
+  handle(DESKTOP_CHANNELS.agentActivitySnapshot, () =>
+    dependencies.agentActivity?.snapshot() ?? {
+      version: 1,
+      state: "idle",
+      activeSessionCount: 0,
+      liveSubagentCount: 0,
+      sessions: [],
+    },
+  );
 
   handle(DESKTOP_CHANNELS.shellGetInfo, () => dependencies.getInfo());
+  handle(DESKTOP_CHANNELS.shellReadClipboard, () => dependencies.readClipboard());
+  handle(DESKTOP_CHANNELS.shellReadActiveWindow, () => dependencies.readActiveWindow());
+  handle(DESKTOP_CHANNELS.shellReadSelectedText, () => dependencies.readSelectedText());
   handle(DESKTOP_CHANNELS.shellShowMain, (_event, input) =>
     dependencies.showMain(routeSchema.parse(input)),
   );
@@ -382,13 +844,39 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.shellSetFloatingExpanded, (_event, input) =>
     dependencies.setFloatingExpanded(z.boolean().parse(input)),
   );
+  handle(DESKTOP_CHANNELS.shellSetFloatingPetOnly, (_event, input) =>
+    dependencies.setFloatingPetOnly(z.boolean().parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.shellSetFloatingEdgeDocked, (_event, input) =>
+    dependencies.setFloatingEdgeDocked(z.boolean().parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.shellPeekFloatingEdge, () =>
+    dependencies.peekFloatingEdge(),
+  );
+  const floatingPointerSchema = z
+    .object({
+      screenX: z.number().finite().min(-100_000).max(100_000),
+      screenY: z.number().finite().min(-100_000).max(100_000),
+    })
+    .strict();
+  handle(DESKTOP_CHANNELS.shellBeginFloatingDrag, (_event, input) => {
+    const pointer = floatingPointerSchema.parse(input);
+    return dependencies.beginFloatingDrag(pointer.screenX, pointer.screenY);
+  });
+  handle(DESKTOP_CHANNELS.shellUpdateFloatingDrag, (_event, input) => {
+    const pointer = floatingPointerSchema.parse(input);
+    return dependencies.updateFloatingDrag(pointer.screenX, pointer.screenY);
+  });
+  handle(DESKTOP_CHANNELS.shellEndFloatingDrag, () =>
+    dependencies.endFloatingDrag(),
+  );
   handle(DESKTOP_CHANNELS.shellSetLaunchAtLogin, (_event, input) =>
     dependencies.setLaunchAtLogin(z.boolean().parse(input)),
   );
   handle(DESKTOP_CHANNELS.shellOpenExternal, (_event, input) => {
     const value = z.string().trim().min(1).max(2_048).parse(input);
     const parsed = new URL(value);
-    if (!["https:", "mailto:"].includes(parsed.protocol))
+    if (!["http:", "https:", "mailto:"].includes(parsed.protocol))
       throw new Error("UNSAFE_EXTERNAL_URL");
     return dependencies.openExternal(parsed.toString());
   });
@@ -415,11 +903,12 @@ export function registerDesktopIpc(
         runId: z.string().uuid().optional(),
         conversationId: z.string().uuid().optional(),
         message: z.string().trim().min(1).max(50_000),
-        history: z.array(agentMessageSchema).max(50).optional(),
+        history: z.array(agentMessageSchema).max(100).optional(),
+        contextTokens: z.array(z.string().uuid()).max(3).optional(),
       })
       .strict()
       .parse(input);
-    return dependencies.agent.send(request);
+    return dependencies.agent.send(request.contextTokens?.length ? { ...request, contextOwnerId: _event.sender.id } : request);
   });
   handle(DESKTOP_CHANNELS.agentMorningBrief, (_event, input) => {
     const request = z
@@ -610,6 +1099,64 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.petRename, (_event, input) =>
     dependencies.pet.rename(z.string().trim().min(1).max(80).parse(input)),
   );
+  handle(DESKTOP_CHANNELS.petCustomize, (_event, input) => {
+    const request = z
+      .object({
+        palette: z.enum(["lavender", "mint", "sunset", "midnight"]).optional(),
+        outfit: z.enum(["none", "scarf", "explorer", "starlight"]).optional(),
+        roomTheme: z
+          .enum(["cloud-room", "forest-nook", "night-library"])
+          .optional(),
+        atmosphere: z.enum(["daylight", "cozy", "moonlit"]).optional(),
+        decorations: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
+        decorationPositions: z
+          .record(
+            z.string().trim().min(1).max(80),
+            z
+              .object({
+                x: z.number().finite(),
+                y: z.number().finite(),
+                scale: z.number().finite().optional(),
+              })
+              .strict()
+              .or(z.null()),
+          )
+          .optional(),
+        personality: z.enum(["gentle", "energetic", "calm", "playful", "witty", "quiet"]).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.customize(request);
+  });
+  handle(DESKTOP_CHANNELS.petCompanionAdd, (_event, input) => {
+    const request = z
+      .object({
+        kind: z.enum(["paper-bird", "cloudlet", "moss-mouse", "moon-moth"]),
+        name: z.string().trim().min(1).max(40).optional(),
+        personality: z.enum(["gentle", "energetic", "calm", "playful", "witty", "quiet"]).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.addCompanion(request);
+  });
+  handle(DESKTOP_CHANNELS.petCompanionUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: z.string().trim().min(1).max(80),
+        patch: z
+          .object({
+            name: z.string().trim().min(1).max(40).optional(),
+            personality: z.enum(["gentle", "energetic", "calm", "playful", "witty", "quiet"]).optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.updateCompanion(request.id, request.patch);
+  });
+  handle(DESKTOP_CHANNELS.petCompanionDelete, (_event, input) =>
+    dependencies.pet.deleteCompanion(z.string().trim().min(1).max(80).parse(input)),
+  );
   handle(DESKTOP_CHANNELS.petInteract, (_event, input) =>
     dependencies.pet.interact(
       input === undefined
@@ -617,6 +1164,62 @@ export function registerDesktopIpc(
         : z.string().trim().min(1).max(80).parse(input),
     ),
   );
+  handle(DESKTOP_CHANNELS.petAdventureDaily, (_event, input) =>
+    dependencies.pet.dailyAdventure(
+      input === undefined
+        ? undefined
+        : z.string().regex(/^\d{4}-\d{2}-\d{2}$/).parse(input),
+    ),
+  );
+  handle(DESKTOP_CHANNELS.petAdventureComplete, (_event, input) => {
+    const request = z
+      .object({
+        adventureId: z.string().trim().min(1).max(120),
+        choiceId: z.string().trim().min(1).max(80),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.completeAdventure(
+      request.adventureId,
+      request.choiceId,
+    );
+  });
+  handle(DESKTOP_CHANNELS.petMiniGameRecord, (_event, input) => {
+    const request = z
+      .object({
+        game: z.enum([
+          "breathing",
+          "star-catch",
+          "jump-rope",
+          "stretch-mirror",
+        ]),
+        score: z.number().finite().min(0).max(99_999),
+        durationSeconds: z.number().finite().min(1).max(3_600),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.recordMiniGame(request);
+  });
+  handle(DESKTOP_CHANNELS.petProactiveRecord, (_event, input) => {
+    const request = z
+      .object({
+        kind: z.enum([
+          "companion",
+          "planning",
+          "deadline",
+          "wellbeing",
+          "weather",
+          "sync",
+          "morning",
+          "evening",
+        ]),
+        reason: z.string().trim().min(1).max(500),
+        dismissed: z.boolean().optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.recordProactiveMessage(request);
+  });
   const focusPresetSchema = z
     .object({
       focusMinutes: z.number().int().min(1).max(240),
@@ -670,6 +1273,28 @@ export function registerDesktopIpc(
         : z.string().trim().max(10_000).parse(input),
     ),
   );
+  handle(DESKTOP_CHANNELS.petDiaryFromTask, (_event, input) => {
+    const request = z
+      .object({
+        taskId: idSchema,
+        userNote: z.string().trim().max(2_000).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.createDiaryFromTask(request.taskId, request.userNote);
+  });
+  handle(DESKTOP_CHANNELS.petDiaryFromCapture, (_event, input) => {
+    const request = z
+      .object({
+        title: z.string().trim().min(1).max(200),
+        content: z.string().trim().min(1).max(50_000),
+        localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+        captureId: z.string().trim().min(1).max(200).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.createDiaryFromCapture(request);
+  });
   handle(DESKTOP_CHANNELS.petDiaryUpdate, (_event, input) => {
     const request = z
       .object({
@@ -716,6 +1341,102 @@ export function registerDesktopIpc(
   handle(DESKTOP_CHANNELS.petMemoryDelete, (_event, input) =>
     dependencies.pet.deleteMemory(idSchema.parse(input)),
   );
+  handle(DESKTOP_CHANNELS.petHabitAdd, (_event, input) => {
+    const request = z
+      .object({
+        label: z.string().trim().min(1).max(80),
+        hint: z.string().trim().max(240),
+        cadenceMinutes: z.number().finite().min(15).max(1_440),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.addHabit(request);
+  });
+  handle(DESKTOP_CHANNELS.petHabitUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            label: z.string().trim().min(1).max(80).optional(),
+            hint: z.string().trim().max(240).optional(),
+            cadenceMinutes: z.number().finite().min(15).max(1_440).optional(),
+            enabled: z.boolean().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.updateHabit(request.id, request.patch);
+  });
+  handle(DESKTOP_CHANNELS.petHabitComplete, (_event, input) =>
+    dependencies.pet.completeHabit(idSchema.parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.petHabitSnooze, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        minutes: z.number().finite().min(5).max(1_440).optional(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.snoozeHabit(request.id, request.minutes);
+  });
+  handle(DESKTOP_CHANNELS.petHabitDelete, (_event, input) =>
+    dependencies.pet.deleteHabit(idSchema.parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.petGoalAdd, (_event, input) => {
+    const request = z
+      .object({
+        title: z.string().trim().min(1).max(80),
+        metric: z.enum(["tasks-completed", "focus-minutes", "habit-checkins"]),
+        target: z.number().int().min(1).max(9_999),
+        periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+        periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.addGoal(request);
+  });
+  handle(DESKTOP_CHANNELS.petGoalUpdate, (_event, input) => {
+    const request = z
+      .object({
+        id: idSchema,
+        patch: z
+          .object({
+            title: z.string().trim().min(1).max(80).optional(),
+            metric: z.enum(["tasks-completed", "focus-minutes", "habit-checkins"]).optional(),
+            target: z.number().int().min(1).max(9_999).optional(),
+            periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+            periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+            enabled: z.boolean().optional(),
+          })
+          .strict(),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.updateGoal(request.id, request.patch);
+  });
+  handle(DESKTOP_CHANNELS.petGoalDelete, (_event, input) =>
+    dependencies.pet.deleteGoal(idSchema.parse(input)),
+  );
+  handle(DESKTOP_CHANNELS.petDataExport, () => dependencies.pet.exportData());
+  handle(DESKTOP_CHANNELS.petDataPreviewImport, () =>
+    dependencies.pet.previewDataImport(),
+  );
+  handle(DESKTOP_CHANNELS.petDataCommitImport, (_event, input) => {
+    const request = z
+      .object({
+        previewToken: idSchema,
+        strategy: z.enum(["skip", "overwrite"]),
+      })
+      .strict()
+      .parse(input);
+    return dependencies.pet.commitDataImport(request.previewToken, request.strategy);
+  });
+  handle(DESKTOP_CHANNELS.petDataCancelImport, (_event, input) =>
+    dependencies.pet.cancelDataImport(idSchema.parse(input)),
+  );
   handle(DESKTOP_CHANNELS.dataExport, (_event, input) => {
     const request = z
       .object({
@@ -727,6 +1448,8 @@ export function registerDesktopIpc(
             operations: z.boolean().optional(),
             settings: z.boolean().optional(),
             permissionAudit: z.boolean().optional(),
+            projects: z.boolean().optional(),
+            lists: z.boolean().optional(),
           })
           .strict()
           .optional(),
@@ -734,6 +1457,24 @@ export function registerDesktopIpc(
       .strict()
       .parse(input ?? {});
     return dependencies.data.exportToFile(request);
+  });
+  handle(DESKTOP_CHANNELS.dataMarkdownExport, (_event, input) => {
+    const request = z
+      .object({
+        redaction: z.enum(["none", "private", "strict"]).optional(),
+        include: z
+          .object({
+            tasks: z.boolean().optional(),
+            projects: z.boolean().optional(),
+            lists: z.boolean().optional(),
+            operations: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .parse(input ?? {});
+    return dependencies.data.exportMarkdownToFile(request);
   });
   handle(DESKTOP_CHANNELS.dataPreviewImport, () =>
     dependencies.data.previewImport(),

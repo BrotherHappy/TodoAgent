@@ -1,14 +1,18 @@
 import { BrowserWindow, screen, shell, type Rectangle } from "electron";
 import path from "node:path";
 import type { AppSettings } from "../src/shared/settings";
+import type { BuddyPreferences } from '../src/shared/desktopbuddy-contract';
+import { stepBuddyPhysics, stepBuddySpring, type BuddyPhysicsState } from './buddy-physics';
 
 export type WindowKind = "main" | "quick" | "floating";
+export type FloatingEdge = "left" | "right";
 
 interface WindowManagerOptions {
   preloadPath: string;
   rendererPath: string;
   devServerUrl?: string;
   settings: () => AppSettings;
+  buddy?: () => BuddyPreferences;
   onFloatingPosition: (
     displayId: string,
     position: { x: number; y: number },
@@ -16,17 +20,33 @@ interface WindowManagerOptions {
   onMainCloseRequested: () => boolean;
 }
 
-const SAFE_EXTERNAL_PROTOCOLS = new Set(["https:", "mailto:"]);
+// HTTP links are intentionally allowed alongside HTTPS because task context
+// and attachment references accept both schemes. The URL is still parsed and
+// restricted to these protocols before leaving the app; file/javascript/data
+// URLs never reach the system browser.
+const SAFE_EXTERNAL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+const e2eBackgroundWindows =
+  process.env.TODO_AGENT_E2E_BACKGROUND === "1";
 
-const floatingWindowSize = (
+export const floatingWindowSize = (
   expanded: boolean,
   scalePercent = 100,
+  petOnly = false,
 ): { width: number; height: number } => {
-  if (expanded) return { width: 480, height: 600 };
+  if (petOnly) {
+    const scale = Math.max(0.75, Math.min(1.25, scalePercent / 100));
+    return {
+      width: Math.max(112, Math.round(148 * scale)),
+      height: Math.max(112, Math.round(148 * scale)),
+    };
+  }
+  if (expanded) return { width: 480, height: 640 };
   const scale = Math.max(0.75, Math.min(1.25, scalePercent / 100));
   return {
-    width: Math.round(410 * scale),
-    height: Math.round(116 * scale),
+    width: Math.round(438 * scale),
+    // Keep enough vertical room for the independent task and focus speech
+    // bubbles at the smallest pet scale. Empty pixels remain transparent.
+    height: Math.max(184, Math.round(184 * scale)),
   };
 };
 
@@ -68,6 +88,42 @@ export function snapToWorkArea(
 }
 
 /**
+ * Place a compact pet partly outside the chosen horizontal work-area edge.
+ * Keeping a small visible strip makes the pet discoverable and clickable,
+ * while the native window itself remains the source of truth for hit-testing.
+ */
+export function dockFloatingToEdge(
+  bounds: Rectangle,
+  workArea: Rectangle,
+  edge: FloatingEdge,
+  peek = 28,
+): Rectangle {
+  const safePeek = Math.max(12, Math.min(bounds.width, Math.round(peek)));
+  const width = Math.min(bounds.width, workArea.width);
+  const height = Math.min(bounds.height, workArea.height);
+  const x = edge === "left"
+    ? workArea.x - width + safePeek
+    : workArea.x + workArea.width - safePeek;
+  return {
+    width,
+    height,
+    x,
+    y: Math.max(
+      workArea.y,
+      Math.min(bounds.y, workArea.y + workArea.height - height),
+    ),
+  };
+}
+
+export function floatingEdgeForBounds(
+  bounds: Rectangle,
+  workArea: Rectangle,
+): FloatingEdge {
+  const center = workArea.x + workArea.width / 2;
+  return bounds.x + bounds.width / 2 <= center ? "left" : "right";
+}
+
+/**
  * The floating surface is intentionally shown without taking keyboard focus.
  * On macOS, an inactive frameless window normally consumes the first pointer
  * press just to activate itself, which made Todo Pet's expand control feel
@@ -81,13 +137,40 @@ export function floatingWindowInteractionOptions(
   return platform === "darwin" ? { acceptFirstMouse: true } : {};
 }
 
+export function floatingMousePassthroughOptions(enabled: boolean): {
+  ignore: boolean;
+  forward: boolean;
+} {
+  return { ignore: enabled, forward: true };
+}
+
 export class WindowManager {
   readonly #options: WindowManagerOptions;
   #main?: BrowserWindow;
   #quick?: BrowserWindow;
   #floating?: BrowserWindow;
   #floatingExpanded = false;
+  #floatingPetOnly = false;
   #floatingPositionSaveTimer?: ReturnType<typeof setTimeout>;
+  #floatingPointerDrag?: {
+    screenX: number;
+    screenY: number;
+    bounds: Rectangle;
+    lastScreenX: number;
+    lastScreenY: number;
+    startedAt: number;
+    lastMovementAt: number;
+    hasMoved: boolean;
+    velocityX: number;
+    velocityY: number;
+  };
+  #floatingPointerDragTimer?: ReturnType<typeof setInterval>;
+  #floatingMotionTimer?: ReturnType<typeof setTimeout>;
+  #focusActive = false;
+  #floatingEdgeDocked = false;
+  #floatingEdgePeeked = false;
+  #floatingEdge?: FloatingEdge;
+  #floatingUndockedBounds?: Rectangle;
 
   constructor(options: WindowManagerOptions) {
     this.#options = options;
@@ -112,6 +195,7 @@ export class WindowManager {
       minWidth: 760,
       minHeight: 600,
       show: false,
+      opacity: e2eBackgroundWindows ? 0 : 1,
       title: "Todo Agent",
       backgroundColor: "#00000000",
       vibrancy: isMac ? "under-window" : undefined,
@@ -125,7 +209,10 @@ export class WindowManager {
     });
     this.#secureWebContents(this.#main);
     this.#load(this.#main, "main");
-    this.#main.once("ready-to-show", () => this.#main?.show());
+    this.#main.once("ready-to-show", () => {
+      if (e2eBackgroundWindows) this.#main?.showInactive();
+      else this.#main?.show();
+    });
     this.#main.on("close", (event) => {
       if (!this.#options.onMainCloseRequested()) {
         event.preventDefault();
@@ -150,8 +237,11 @@ export class WindowManager {
     const window = this.createMain();
     if (route) this.#sendWhenReady(window, "navigation:route", route);
     if (window.isMinimized()) window.restore();
-    window.show();
-    window.focus();
+    if (e2eBackgroundWindows) window.showInactive();
+    else {
+      window.show();
+      window.focus();
+    }
   }
 
   createQuick(): BrowserWindow {
@@ -162,6 +252,7 @@ export class WindowManager {
       minWidth: 360,
       minHeight: 220,
       show: false,
+      opacity: e2eBackgroundWindows ? 0 : 1,
       frame: false,
       transparent: true,
       resizable: true,
@@ -198,8 +289,11 @@ export class WindowManager {
         cursorDisplay.workArea.y + cursorDisplay.workArea.height * 0.18,
       ),
     });
-    window.show();
-    window.focus();
+    if (e2eBackgroundWindows) window.showInactive();
+    else {
+      window.show();
+      window.focus();
+    }
     this.#sendWhenReady(window, "quick-capture:focus");
   }
 
@@ -213,6 +307,7 @@ export class WindowManager {
     const size = floatingWindowSize(
       this.#floatingExpanded,
       settings.scalePercent,
+      this.#floatingPetOnly,
     );
     const display =
       (settings.lastDisplayId
@@ -234,20 +329,31 @@ export class WindowManager {
     this.#floating = new BrowserWindow({
       ...initial,
       show: false,
+      opacity: e2eBackgroundWindows ? 0 : 1,
       frame: false,
       transparent: true,
       backgroundColor: "#00000000",
       resizable: false,
       movable: !settings.locked,
-      focusable: this.#floatingExpanded,
+      focusable: this.#floatingExpanded && !settings.mousePassthrough,
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
       alwaysOnTop: true,
       hasShadow: false,
       ...floatingWindowInteractionOptions(),
-      webPreferences: this.#webPreferences(),
+      // Todo Pet is an always-on-top, non-focused surface. Chromium otherwise
+      // treats it as a background renderer and throttles requestAnimationFrame
+      // to a sparse cadence while you work in another app. That is exactly the
+      // environment where the atlas looked like a low-FPS flipbook. Keep the
+      // floating renderer on the display clock; main/quick windows retain the
+      // normal throttling policy.
+      webPreferences: {
+        ...this.#webPreferences(),
+        backgroundThrottling: false,
+      },
     });
+    this.#applyFloatingMousePassthrough(this.#floating, settings.mousePassthrough);
     this.#keepFloatingOnTop(this.#floating);
     this.#floating.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: !settings.hideInFullscreen,
@@ -265,7 +371,11 @@ export class WindowManager {
       if (this.#options.settings().floating.locked || !this.#floating) return;
       const bounds = this.#floating.getBounds();
       const displayForWindow = screen.getDisplayMatching(bounds);
-      const snapped = snapToWorkArea(bounds, displayForWindow.workArea);
+      // Buddy release owns spring docking. Snapping every native move would
+      // jump to the edge before the spring can interpolate its first frame.
+      const snapped = this.#options.buddy
+        ? clampWindowToWorkArea(bounds, displayForWindow.workArea)
+        : snapToWorkArea(bounds, displayForWindow.workArea);
       if (snapped.x !== bounds.x || snapped.y !== bounds.y)
         this.#floating.setBounds(snapped, false);
       // `will-move` fires only once at the start of a native drag. Debounce
@@ -275,10 +385,20 @@ export class WindowManager {
     });
     this.#floating.on("close", () => this.#flushFloatingPositionSave());
     this.#floating.on("closed", () => {
+      this.#cancelFloatingMotion();
       if (this.#floatingPositionSaveTimer) {
         clearTimeout(this.#floatingPositionSaveTimer);
         this.#floatingPositionSaveTimer = undefined;
       }
+      if (this.#floatingPointerDragTimer) {
+        clearInterval(this.#floatingPointerDragTimer);
+        this.#floatingPointerDragTimer = undefined;
+      }
+      this.#floatingPointerDrag = undefined;
+      this.#floatingEdgeDocked = false;
+      this.#floatingEdgePeeked = false;
+      this.#floatingEdge = undefined;
+      this.#floatingUndockedBounds = undefined;
       this.#floating = undefined;
     });
     if (settings.enabled)
@@ -291,11 +411,13 @@ export class WindowManager {
   syncFloatingSettings(): void {
     const settings = this.#options.settings().floating;
     if (!settings.enabled) {
+      this.#cancelFloatingMotion();
       this.#floating?.hide();
       return;
     }
     const window = this.createFloating();
     this.#keepFloatingOnTop(window);
+    this.#applyFloatingMousePassthrough(window, settings.mousePassthrough);
     window.setMovable(!settings.locked);
     window.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: !settings.hideInFullscreen,
@@ -306,16 +428,25 @@ export class WindowManager {
   }
 
   setFloatingExpanded(expanded: boolean): void {
+    this.#cancelFloatingMotion();
     this.#floatingExpanded = expanded;
+    if (expanded) this.#floatingPetOnly = false;
+    if (expanded && this.#floatingEdgeDocked) {
+      this.setFloatingEdgeDocked(false, { preserveEdge: this.#floatingEdgePeeked });
+    }
     const window = this.createFloating();
     const settings = this.#options.settings().floating;
     const current = window.getBounds();
     // A compact desktop pet must not keep keyboard focus away from the main
     // application. The expanded panel becomes focusable again for chat,
     // approvals and task input.
-    window.setFocusable(expanded);
+    window.setFocusable(expanded && !this.#floatingPetOnly && !settings.mousePassthrough);
     const display = screen.getDisplayMatching(current);
-    const size = floatingWindowSize(expanded, settings.scalePercent);
+    const size = floatingWindowSize(
+      expanded,
+      settings.scalePercent,
+      this.#floatingPetOnly,
+    );
     const anchoredRight =
       current.x + current.width >
       display.workArea.x + display.workArea.width / 2;
@@ -327,11 +458,283 @@ export class WindowManager {
       },
       display.workArea,
     );
-    window.setBounds(next, true);
+    // The renderer owns the bubble enter/exit transition. Animating the
+    // transparent native window as well moves the pet's screen coordinate
+    // during the same 200ms, which reads as a teleport and can expose two
+    // compositor snapshots on an always-on-top surface. Resize in one native
+    // commit; the pet remains anchored while the bubble animates in place.
+    window.setBounds(next, false);
     this.#keepFloatingOnTop(window);
   }
 
-  setFocusActive(_active: boolean): void {
+  setFloatingPetOnly(petOnly: boolean): void {
+    this.#cancelFloatingMotion();
+    if (!petOnly && this.#floatingEdgeDocked) {
+      this.setFloatingEdgeDocked(false, { preserveEdge: this.#floatingEdgePeeked });
+    }
+    this.#floatingPetOnly = petOnly;
+    if (petOnly) this.#floatingExpanded = false;
+    const window = this.createFloating();
+    const settings = this.#options.settings().floating;
+    const current = window.getBounds();
+    window.setFocusable(false);
+    const display = screen.getDisplayMatching(current);
+    const size = floatingWindowSize(
+      this.#floatingExpanded,
+      settings.scalePercent,
+      petOnly,
+    );
+    // The task rail grows to the pet's right, so preserve the pet's own
+    // screen position while the rail is hidden or restored. Clamp only when
+    // the restored rail would otherwise leave the active display.
+    const next = clampWindowToWorkArea(
+      { ...size, x: current.x, y: current.y },
+      display.workArea,
+    );
+    // Keep the native frame stationary while the renderer collapses the task
+    // rail. A second native resize animation makes the pet drift underneath
+    // its own speech bubble and is the main source of the perceived jump.
+    window.setBounds(next, false);
+    this.#keepFloatingOnTop(window);
+  }
+
+  /**
+   * Enter/leave the optional edge-peek mode inspired by clawd-on-desk's mini
+   * mode. Only the compact pet is docked; expanding the rail or beginning a
+   * drag automatically restores the pre-dock position.
+   */
+  setFloatingEdgeDocked(
+    docked: boolean,
+    options: { preserveEdge?: boolean } = {},
+  ): boolean {
+    this.#cancelFloatingMotion();
+    const window = this.createFloating();
+    if (!docked && !this.#floatingEdgeDocked) return true;
+    // Position locking protects the user's manual drag gesture.  It should
+    // not block an explicit system placement such as Edge Peek: otherwise a
+    // locked pet can get stuck in the middle of the screen when the user
+    // chooses the mini/edge mode from its own menu.
+    if (docked && (!this.#floatingPetOnly || this.#floatingExpanded)) {
+      this.setFloatingPetOnly(true);
+    }
+    const current = window.getBounds();
+    if (docked) {
+      if (!this.#floatingEdgeDocked) {
+        this.#floatingUndockedBounds = { ...current };
+        const display = screen.getDisplayMatching(current);
+        this.#floatingEdge = floatingEdgeForBounds(current, display.workArea);
+      }
+      const display = screen.getDisplayMatching(current);
+      const next = dockFloatingToEdge(
+        this.#floatingUndockedBounds ?? current,
+        display.workArea,
+        this.#floatingEdge ?? floatingEdgeForBounds(current, display.workArea),
+      );
+      this.#floatingEdgeDocked = true;
+      this.#floatingEdgePeeked = false;
+      window.setFocusable(false);
+      window.setBounds(next, true);
+      this.#keepFloatingOnTop(window);
+      return true;
+    }
+    const display = screen.getDisplayMatching(current);
+    const restored = options.preserveEdge && this.#floatingEdge
+      ? dockFloatingToEdge(
+          this.#floatingUndockedBounds ?? current,
+          display.workArea,
+          this.#floatingEdge,
+          (this.#floatingUndockedBounds ?? current).width,
+        )
+      : clampWindowToWorkArea(
+          this.#floatingUndockedBounds ?? current,
+          display.workArea,
+        );
+    this.#floatingEdgeDocked = false;
+    this.#floatingEdgePeeked = false;
+    this.#floatingEdge = undefined;
+    this.#floatingUndockedBounds = undefined;
+    const settings = this.#options.settings().floating;
+    window.setBounds(restored, true);
+    window.setFocusable(this.#floatingExpanded && !this.#floatingPetOnly && !settings.mousePassthrough);
+    this.#keepFloatingOnTop(window);
+    return true;
+  }
+
+  /** Reveal a docked pet into the same edge without abandoning mini mode. */
+  peekFloatingEdge(): boolean {
+    if (!this.#floatingEdgeDocked) return true;
+    const window = this.createFloating();
+    const current = window.getBounds();
+    const display = screen.getDisplayMatching(current);
+    const edge = this.#floatingEdge ?? floatingEdgeForBounds(current, display.workArea);
+    const baseline = this.#floatingUndockedBounds ?? current;
+    const next = dockFloatingToEdge(baseline, display.workArea, edge, baseline.width);
+    this.#floatingEdgePeeked = true;
+    window.setBounds(next, true);
+    this.#keepFloatingOnTop(window);
+    return true;
+  }
+
+  get floatingEdgeDocked(): boolean {
+    return this.#floatingEdgeDocked;
+  }
+
+  #applyFloatingMousePassthrough(window: BrowserWindow, enabled: boolean): void {
+    // `forward` keeps hover telemetry flowing to the renderer while clicks
+    // pass to the window underneath. The mode is opt-in and can be disabled
+    // from Settings or the system tray, so the pet never becomes unrecoverable.
+    const options = floatingMousePassthroughOptions(enabled);
+    window.setIgnoreMouseEvents(options.ignore, { forward: options.forward });
+  }
+
+  /**
+   * Renderer-driven dragging powers the visible six-dot handle. Native
+   * `app-region: drag` cannot reliably be interactive at the same time, so a
+   * handle that listened for pointer feedback could appear draggable without
+   * moving the BrowserWindow on macOS.
+   */
+  beginFloatingDrag(screenX: number, screenY: number): boolean {
+    if (this.#options.settings().floating.locked) return false;
+    if (this.#floatingEdgeDocked) {
+      this.setFloatingEdgeDocked(false, { preserveEdge: this.#floatingEdgePeeked });
+    }
+    const window = this.createFloating();
+    this.#cancelFloatingMotion();
+    this.endFloatingDrag(false);
+    const pointer =
+      process.env.TODO_AGENT_E2E === "1"
+        ? { x: screenX, y: screenY }
+        : screen.getCursorScreenPoint();
+    const now = Date.now();
+    this.#floatingPointerDrag = {
+      screenX: pointer.x,
+      screenY: pointer.y,
+      bounds: window.getBounds(),
+      lastScreenX: pointer.x,
+      lastScreenY: pointer.y,
+      startedAt: now,
+      lastMovementAt: now,
+      hasMoved: false,
+      velocityX: 0,
+      velocityY: 0,
+    };
+    // Real transparent macOS windows can lose renderer pointer capture as
+    // soon as the BrowserWindow begins moving. Poll the OS cursor in
+    // production so dragging keeps working even after that handoff. E2E uses
+    // explicit renderer coordinates to remain deterministic.
+    if (process.env.TODO_AGENT_E2E !== "1") {
+      this.#floatingPointerDragTimer = setInterval(() => {
+        const drag = this.#floatingPointerDrag;
+        if (!drag) return;
+        const cursor = screen.getCursorScreenPoint();
+        if (
+          cursor.x !== drag.lastScreenX ||
+          cursor.y !== drag.lastScreenY
+        ) {
+          this.updateFloatingDrag(cursor.x, cursor.y);
+          return;
+        }
+        const idleFor = Date.now() - drag.lastMovementAt;
+        const totalFor = Date.now() - drag.startedAt;
+        if ((drag.hasMoved && idleFor > 1_200) || totalFor > 8_000) {
+          this.endFloatingDrag();
+        }
+      }, 16);
+    }
+    return true;
+  }
+
+  updateFloatingDrag(screenX: number, screenY: number): boolean {
+    const drag = this.#floatingPointerDrag;
+    const window = this.#floating;
+    if (
+      !drag ||
+      !window ||
+      window.isDestroyed() ||
+      this.#options.settings().floating.locked
+    ) {
+      this.#floatingPointerDrag = undefined;
+      return false;
+    }
+    const candidate = {
+      ...drag.bounds,
+      x: Math.round(drag.bounds.x + screenX - drag.screenX),
+      y: Math.round(drag.bounds.y + screenY - drag.screenY),
+    };
+    const display = screen.getDisplayNearestPoint({
+      x: Math.round(screenX),
+      y: Math.round(screenY),
+    });
+    const next = clampWindowToWorkArea(candidate, display.workArea);
+    if (screenX !== drag.lastScreenX || screenY !== drag.lastScreenY) {
+      const delta = Math.max(8, Date.now() - drag.lastMovementAt) / 1000;
+      drag.velocityX = .45 * drag.velocityX + .55 * Math.max(-1800, Math.min(1800, (screenX - drag.lastScreenX) / delta));
+      drag.velocityY = .45 * drag.velocityY + .55 * Math.max(-1800, Math.min(1800, (screenY - drag.lastScreenY) / delta));
+      drag.lastScreenX = screenX;
+      drag.lastScreenY = screenY;
+      drag.lastMovementAt = Date.now();
+      drag.hasMoved = true;
+    }
+    window.setPosition(next.x, next.y, false);
+    return true;
+  }
+
+  endFloatingDrag(allowMotion = true): void {
+    if (this.#floatingPointerDragTimer) {
+      clearInterval(this.#floatingPointerDragTimer);
+      this.#floatingPointerDragTimer = undefined;
+    }
+    if (!this.#floatingPointerDrag) return;
+    const drag = this.#floatingPointerDrag;
+    this.#floatingPointerDrag = undefined;
+    const preferences = this.#options.buddy?.();
+    if (allowMotion && drag.hasMoved && preferences && this.#canAnimateFloating()) {
+      const fresh = Date.now() - drag.lastMovementAt < 130;
+      this.#animateFloatingRelease(preferences.inertia && fresh ? drag.velocityX : 0, preferences.inertia && fresh ? drag.velocityY : 0);
+    }
+    this.#scheduleFloatingPositionSave();
+  }
+
+  #cancelFloatingMotion(): void {
+    if (this.#floatingMotionTimer) clearTimeout(this.#floatingMotionTimer);
+    this.#floatingMotionTimer = undefined;
+  }
+
+  #canAnimateFloating(): boolean {
+    const prefs = this.#options.buddy?.();
+    const settings = this.#options.settings();
+    const muted = settings.notifications.mutedUntil && Date.parse(settings.notifications.mutedUntil) > Date.now();
+    return !!prefs && !prefs.reducedMotion && !this.#floatingExpanded && !this.#floatingEdgeDocked && !this.#focusActive && !settings.floating.locked && !settings.pet.meetingMode && !muted;
+  }
+
+  #animateFloatingRelease(vx: number, vy: number): void {
+    this.#cancelFloatingMotion();
+    const window = this.#floating;
+    const prefs = this.#options.buddy?.();
+    if (!window || window.isDestroyed() || !prefs) return;
+    const bounds = window.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const snap = prefs.edgeSnap ? snapToWorkArea(bounds, area, 24) : bounds;
+    const spring = snap.x !== bounds.x || snap.y !== bounds.y;
+    if (!spring && !prefs.gravity && Math.abs(vx) + Math.abs(vy) < 2) return;
+    let state: BuddyPhysicsState = { x: bounds.x, y: bounds.y, vx, vy };
+    let previous = performance.now();
+    const began = previous;
+    const tick = () => {
+      if (window.isDestroyed() || !this.#canAnimateFloating() || this.#floatingPointerDrag || (!window.isVisible() && !e2eBackgroundWindows)) { this.#cancelFloatingMotion(); return; }
+      const now = performance.now(), dt = (now - previous) / 1000; previous = now;
+      state = spring ? stepBuddySpring(state, snap, dt) : stepBuddyPhysics(state, area, bounds, dt, prefs);
+      const next = clampWindowToWorkArea({ ...bounds, x: Math.round(state.x), y: Math.round(state.y) }, area);
+      window.setPosition(next.x, next.y, false);
+      if (state.settled || now - began > 8000) { this.#cancelFloatingMotion(); this.#scheduleFloatingPositionSave(); return; }
+      this.#floatingMotionTimer = setTimeout(tick, 16);
+    };
+    this.#floatingMotionTimer = setTimeout(tick, 16);
+  }
+
+  setFocusActive(active: boolean): void {
+    this.#focusActive = active;
+    if (active) this.#cancelFloatingMotion();
     if (this.#floating) this.#keepFloatingOnTop(this.#floating);
   }
 
@@ -340,6 +743,20 @@ export class WindowManager {
     this.#keepFloatingOnTop(this.#floating);
     const current = this.#floating.getBounds();
     const display = screen.getDisplayMatching(current);
+    if (this.#floatingEdgeDocked) {
+      const next = dockFloatingToEdge(
+        this.#floatingUndockedBounds ?? current,
+        display.workArea,
+        this.#floatingEdge ?? floatingEdgeForBounds(current, display.workArea),
+        this.#floatingEdgePeeked
+          ? (this.#floatingUndockedBounds ?? current).width
+          : undefined,
+      );
+      if (next.x !== current.x || next.y !== current.y || next.width !== current.width || next.height !== current.height) {
+        this.#floating.setBounds(next, false);
+      }
+      return;
+    }
     const next = clampWindowToWorkArea(current, display.workArea);
     if (
       next.x !== current.x ||
@@ -378,7 +795,7 @@ export class WindowManager {
       try {
         const parsed = new URL(url);
         if (SAFE_EXTERNAL_PROTOCOLS.has(parsed.protocol))
-          void shell.openExternal(parsed.toString());
+          void shell.openExternal(parsed.toString()).catch(() => undefined);
       } catch {
         // Invalid URLs are ignored.
       }
@@ -396,12 +813,14 @@ export class WindowManager {
     if (this.#options.devServerUrl) {
       const url = new URL(this.#options.devServerUrl);
       url.searchParams.set("window", kind);
-      void window.loadURL(url.toString());
+      void window.loadURL(url.toString()).catch(() => undefined);
       return;
     }
-    void window.loadFile(this.#options.rendererPath, {
-      query: { window: kind },
-    });
+    void window
+      .loadFile(this.#options.rendererPath, {
+        query: { window: kind },
+      })
+      .catch(() => undefined);
   }
 
   #sendWhenReady(
@@ -420,7 +839,10 @@ export class WindowManager {
 
   #saveFloatingPosition(): void {
     if (!this.#floating || this.#floating.isDestroyed()) return;
-    const bounds = this.#floating.getBounds();
+    // A peeked window intentionally sits partly outside the work area. Save
+    // the user's real position so leaving edge mode or restarting does not
+    // turn the hidden strip into the new permanent origin.
+    const bounds = this.#floatingUndockedBounds ?? this.#floating.getBounds();
     const display = screen.getDisplayMatching(bounds);
     this.#options.onFloatingPosition(String(display.id), {
       x: bounds.x,

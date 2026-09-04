@@ -9,6 +9,7 @@ import type {
 } from "../src/shared/desktop-api";
 import type { AgentRunEvent } from "../src/shared/agent-types";
 import type { Task } from "../src/shared/models";
+import { AGENT_CONVERSATIONS_STORAGE_KEY } from "../src/renderer/agent-conversation-store";
 import { useAgentChat } from "../src/renderer/use-agent-chat";
 
 interface AgentHarness {
@@ -92,9 +93,53 @@ function installAgentApi(
 
 afterEach(() => {
   delete window.desktopApi;
+  window.localStorage.clear();
 });
 
 describe("useAgentChat", () => {
+  it("refreshes the generated welcome when the task snapshot finishes loading", async () => {
+    const loadingWelcome = "我可以查询、创建和整理任务。正在读取当前视图的任务…";
+    const readyWelcome = "我可以查询、创建和整理任务。当前有 3 项任务在这个视图里。";
+    const { result, rerender } = renderHook(
+      ({ welcome }) => useAgentChat({ initialMessage: welcome }),
+      { initialProps: { welcome: loadingWelcome } },
+    );
+
+    expect(result.current.messages[0]?.text).toBe(loadingWelcome);
+    rerender({ welcome: readyWelcome });
+    await waitFor(() => expect(result.current.messages[0]?.text).toBe(readyWelcome));
+  });
+
+  it("migrates a persisted task-count welcome to the current snapshot", () => {
+    const conversationId = "00000000-0000-4000-8000-000000000001";
+    window.localStorage.setItem(
+      AGENT_CONVERSATIONS_STORAGE_KEY,
+      JSON.stringify({
+        schemaVersion: 1,
+        activeConversationId: conversationId,
+        conversations: [
+          {
+            schemaVersion: 1,
+            conversationId,
+            updatedAt: new Date().toISOString(),
+            messages: [
+              {
+                role: "assistant",
+                text: "我可以查询、创建和整理任务。当前有 0 项任务在这个视图里。",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const readyWelcome = "我可以查询、创建和整理任务。当前有 3 项任务在这个视图里。";
+    const { result } = renderHook(() =>
+      useAgentChat({ initialMessage: readyWelcome, persistConversation: true }),
+    );
+
+    expect(result.current.messages[0]?.text).toBe(readyWelcome);
+  });
+
   it("streams only the correlated run and converges on the final reply", async () => {
     const completion = deferred<AgentSendResult>();
     const harness = installAgentApi(async () => completion.promise);
@@ -417,6 +462,116 @@ describe("useAgentChat", () => {
     });
   });
 
+  it("projects the correlated tool lifecycle for an explainable Agent run", async () => {
+    const completion = deferred<AgentSendResult>();
+    const harness = installAgentApi(async () => completion.promise);
+    const { result } = renderHook(() =>
+      useAgentChat({ initialMessage: "你好" }),
+    );
+    let sending!: Promise<boolean>;
+    act(() => {
+      sending = result.current.send("请查询并整理任务");
+    });
+    await waitFor(() => expect(harness.send).toHaveBeenCalledOnce());
+    const runId = harness.send.mock.calls[0][0].runId!;
+
+    act(() => {
+      harness.emitEvent({
+        version: 1,
+        runId: "another-run",
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        type: "tool-started",
+        payload: { invocationId: "stale", toolName: "task_list" },
+      });
+      harness.emitEvent({
+        version: 1,
+        runId,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        type: "tool-proposed",
+        payload: {
+          invocationId: "invocation-1",
+          providerCallId: "provider-1",
+          toolName: "task_list",
+          risk: "R0",
+          preview: { action: "list-tasks", scope: "today" },
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.toolActivity).toMatchObject([
+        {
+          invocationId: "invocation-1",
+          toolName: "task_list",
+          status: "proposed",
+          risk: "R0",
+        },
+      ]),
+    );
+
+    act(() => {
+      harness.emitEvent({
+        version: 1,
+        runId,
+        sequence: 2,
+        timestamp: new Date().toISOString(),
+        type: "approval-required",
+        payload: {
+          approvalId: "approval-1",
+          toolName: "task_list",
+          effects: { risk: "R0" },
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.toolActivity[0]?.status).toBe("awaiting-approval"),
+    );
+
+    act(() => {
+      harness.emitEvent({
+        version: 1,
+        runId,
+        sequence: 3,
+        timestamp: new Date().toISOString(),
+        type: "tool-started",
+        payload: {
+          invocationId: "invocation-1",
+          toolName: "task_list",
+        },
+      });
+      harness.emitEvent({
+        version: 1,
+        runId,
+        sequence: 4,
+        timestamp: new Date().toISOString(),
+        type: "tool-finished",
+        payload: {
+          invocationId: "invocation-1",
+          toolName: "task_list",
+          status: "ok",
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.toolActivity[0]).toMatchObject({
+        toolName: "task_list",
+        status: "succeeded",
+      }),
+    );
+    expect(result.current.toolActivity).toHaveLength(1);
+
+    completion.resolve({
+      runId,
+      state: "completed",
+      assistantText: "已完成查询",
+    });
+    await act(async () => {
+      await sending;
+    });
+    expect(result.current.toolActivity[0]?.status).toBe("succeeded");
+  });
+
   it("synchronously prevents duplicate sends", async () => {
     const completion = deferred<AgentSendResult>();
     const harness = installAgentApi(async () => completion.promise);
@@ -466,5 +621,109 @@ describe("useAgentChat", () => {
     expect(result.current.messages.at(-1)?.text).not.toContain(
       "Error invoking remote method",
     );
+  });
+
+  it("restores the short-term conversation locally without changing the sent history contract", async () => {
+    const harness = installAgentApi(async (request) => ({
+      runId: request.runId!,
+      state: "completed",
+      assistantText: "这是本机可恢复的回答",
+    }));
+    const first = renderHook(() =>
+      useAgentChat({ initialMessage: "你好", persistConversation: true }),
+    );
+    await act(async () => {
+      await first.result.current.send("记住这段会话");
+    });
+    await waitFor(() =>
+      expect(window.localStorage.getItem("todo-agent:agent-conversation:v1")).not.toBeNull(),
+    );
+    expect(harness.send.mock.calls[0][0].history).toEqual([
+      { role: "assistant", content: "你好" },
+    ]);
+    first.unmount();
+
+    const second = renderHook(() =>
+      useAgentChat({ initialMessage: "新的欢迎语", persistConversation: true }),
+    );
+    expect(second.result.current.messages.map((message) => message.text)).toEqual([
+      "你好",
+      "记住这段会话",
+      "这是本机可恢复的回答",
+    ]);
+  });
+
+  it("starts a new conversation and clears the local transcript on request", async () => {
+    installAgentApi(async (request) => ({
+      runId: request.runId!,
+      state: "completed",
+      assistantText: "完成",
+    }));
+    const { result } = renderHook(() =>
+      useAgentChat({ initialMessage: "你好", persistConversation: true }),
+    );
+    await act(async () => {
+      await result.current.send("旧会话");
+    });
+    const oldConversationId = result.current.conversationId;
+    act(() => result.current.newConversation());
+    expect(result.current.conversationId).not.toBe(oldConversationId);
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].text).toBe("你好");
+    act(() => result.current.clearConversation());
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].role).toBe("assistant");
+  });
+
+  it("archives, switches, and removes local conversations without sending them remotely", async () => {
+    const harness = installAgentApi(async (request) => ({
+      runId: request.runId!,
+      state: "completed",
+      assistantText: `回答：${request.message}`,
+    }));
+    const { result } = renderHook(() =>
+      useAgentChat({ initialMessage: "你好", persistConversation: true }),
+    );
+
+    await act(async () => {
+      await result.current.send("旧会话内容");
+    });
+    const oldConversationId = result.current.conversationId;
+    act(() => result.current.newConversation());
+    await act(async () => {
+      await result.current.send("新会话内容");
+    });
+    const newConversationId = result.current.conversationId;
+    expect(newConversationId).not.toBe(oldConversationId);
+    await waitFor(() => expect(result.current.conversationSessions).toHaveLength(2));
+
+    act(() => {
+      expect(result.current.renameConversation(oldConversationId, "项目发布计划")).toBe(true);
+      expect(result.current.toggleConversationPinned(oldConversationId)).toBe(true);
+    });
+    expect(result.current.conversationSessions[0]).toMatchObject({
+      conversationId: oldConversationId,
+      title: "项目发布计划",
+      pinnedAt: expect.any(String),
+    });
+
+    act(() => {
+      expect(result.current.switchConversation(oldConversationId)).toBe(true);
+    });
+    expect(result.current.conversationId).toBe(oldConversationId);
+    expect(result.current.messages.at(-1)?.text).toBe("回答：旧会话内容");
+    expect(harness.send).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      expect(result.current.removeConversation(oldConversationId)).toBe(true);
+    });
+    expect(result.current.conversationId).not.toBe(oldConversationId);
+    expect(result.current.messages).toHaveLength(1);
+    let switchedBack = false;
+    act(() => {
+      switchedBack = result.current.switchConversation(newConversationId);
+    });
+    expect(switchedBack).toBe(true);
+    expect(result.current.messages.at(-1)?.text).toBe("回答：新会话内容");
   });
 });

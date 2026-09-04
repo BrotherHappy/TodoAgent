@@ -2,10 +2,16 @@ import { contextBridge, ipcRenderer } from "electron";
 import { DESKTOP_CHANNELS, type DesktopApi } from "../src/shared/desktop-api";
 import type { AppSettings } from "../src/shared/settings";
 import type { AgentRunEvent } from "../src/shared/agent-types";
-import type { AgentApprovalView } from "../src/shared/desktop-api";
-import type { FeishuStatusView } from "../src/shared/desktop-api";
-import type { InAppNotificationView } from "../src/shared/desktop-api";
+import type { AgentActivitySnapshot } from "../src/shared/agent-activity";
+import type {
+  AgentApprovalView,
+  FeishuStatusView,
+  InAppNotificationView,
+  PetInputActivityEvent,
+} from "../src/shared/desktop-api";
 import type { PetEvent } from "../src/shared/pet-types";
+import { BUDDY_CHANNELS } from '../src/shared/desktopbuddy-contract';
+import { AGENT_CONTEXT_CHANNELS } from '../src/shared/agent-context';
 
 function subscribe<Payload>(
   channel: string,
@@ -50,6 +56,26 @@ function subscribeNavigation(listener: (route: string) => void): () => void {
 }
 
 const desktopApi: DesktopApi = {
+  agentContext: {
+    chooseFile: () => ipcRenderer.invoke(AGENT_CONTEXT_CHANNELS.chooseFile),
+    selectScreenRegion: () => ipcRenderer.invoke(AGENT_CONTEXT_CHANNELS.selectScreen),
+    finishScreenRegion: region => ipcRenderer.invoke(AGENT_CONTEXT_CHANNELS.finishScreen, region),
+    discard: token => ipcRenderer.invoke(AGENT_CONTEXT_CHANNELS.discard, token),
+  },
+  buddy: {
+    snapshot: () => ipcRenderer.invoke(BUDDY_CHANNELS.snapshot),
+    assets: (id) => ipcRenderer.invoke(BUDDY_CHANNELS.assets, id),
+    setPreferences: (patch) => ipcRenderer.invoke(BUDDY_CHANNELS.preferences, patch),
+    importTheme: () => ipcRenderer.invoke(BUDDY_CHANNELS.import),
+    chooseImage: () => ipcRenderer.invoke(BUDDY_CHANNELS.image),
+    generateTheme: (input) => ipcRenderer.invoke(BUDDY_CHANNELS.generate, input),
+    setEnabled: (themeId, enabled) => ipcRenderer.invoke(BUDDY_CHANNELS.enabled, { themeId, enabled }),
+    removeTheme: (id) => ipcRenderer.invoke(BUDDY_CHANNELS.remove, id),
+    interact: (id) => ipcRenderer.invoke(BUDDY_CHANNELS.interaction, id),
+    onChange: (listener) => subscribe(BUDDY_CHANNELS.changed, listener),
+    onInteraction: (listener) => subscribe(BUDDY_CHANNELS.performed, listener),
+    onCursor: (listener) => subscribe(BUDDY_CHANNELS.cursor, listener),
+  },
   tasks: {
     create: (input) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskCreate, input),
     get: (id, includeDeleted) =>
@@ -62,22 +88,73 @@ const desktopApi: DesktopApi = {
     complete: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskComplete, request),
     reopen: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskReopen, id),
+    skipRecurring: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskSkipRecurring, id),
     moveToToday: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskMoveToToday, request),
     startFocus: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskStartFocus, id),
     pauseFocus: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskPauseFocus, id),
     resetFocus: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskResetFocus, id),
+    recordWorkLog: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskRecordWorkLog, request),
     reorderToday: (taskIds) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskReorderToday, taskIds),
+    applyTodayPlan: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskApplyTodayPlan, request),
+    applyBulkTaskAction: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskApplyBulkAction, request),
+    applyTaskAutomation: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskApplyAutomation, request),
     moveToTrash: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskTrash, id),
     restore: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskRestore, id),
     purge: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskPurge, id),
+    history: (id, limit) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskHistory, { id, limit }),
+    getLatestUndoableOperation: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskLatestUndoableOperation),
+    getLatestRedoableOperation: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskLatestRedoableOperation),
     undo: (operationId) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskUndo, operationId),
+    redo: (operationId) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskRedo, operationId),
     saveDraft: (input) => ipcRenderer.invoke(DESKTOP_CHANNELS.draftSave, input),
     getDraft: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.draftGet, id),
     listDrafts: () => ipcRenderer.invoke(DESKTOP_CHANNELS.draftList),
     deleteDraft: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.draftDelete, id),
+    chooseAttachments: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskChooseAttachments),
+    openAttachment: (attachment) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskOpenAttachment, {
+        id: attachment.id,
+        localPath: attachment.localPath,
+      }),
+    previewAttachment: (attachment) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskPreviewAttachment, {
+        id: attachment.id,
+        localPath: attachment.localPath,
+      }),
+    deleteAttachment: (attachment) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskDeleteAttachment, {
+        id: attachment.id,
+        localPath: attachment.localPath,
+      }),
+    listProjects: (includeArchived) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.projectList, includeArchived),
+    createProject: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.projectCreate, input),
+    updateProject: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.projectUpdate, request),
+    deleteProject: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.projectDelete, id),
+    listLists: (includeArchived) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.listList, includeArchived),
+    createList: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.listCreate, input),
+    updateList: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.listUpdate, request),
+    deleteList: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.listDelete, id),
   },
   settings: {
     get: () => ipcRenderer.invoke(DESKTOP_CHANNELS.settingsGet),
@@ -91,6 +168,9 @@ const desktopApi: DesktopApi = {
   },
   shell: {
     getInfo: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellGetInfo),
+    readClipboard: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellReadClipboard),
+    readActiveWindow: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellReadActiveWindow),
+    readSelectedText: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellReadSelectedText),
     showMain: (route) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellShowMain, route),
     showQuickCapture: () => ipcRenderer.invoke(DESKTOP_CHANNELS.shellShowQuick),
@@ -100,6 +180,24 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingVisible, visible),
     setFloatingExpanded: (expanded) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingExpanded, expanded),
+    setFloatingPetOnly: (petOnly) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingPetOnly, petOnly),
+    setFloatingEdgeDocked: (docked) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetFloatingEdgeDocked, docked),
+    peekFloatingEdge: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellPeekFloatingEdge),
+    beginFloatingDrag: (screenX, screenY) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellBeginFloatingDrag, {
+        screenX,
+        screenY,
+      }),
+    updateFloatingDrag: (screenX, screenY) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellUpdateFloatingDrag, {
+        screenX,
+        screenY,
+      }),
+    endFloatingDrag: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.shellEndFloatingDrag),
     setLaunchAtLogin: (enabled) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.shellSetLaunchAtLogin, enabled),
     openExternal: (url) =>
@@ -124,6 +222,13 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.agentFullAccessCreate, request),
     revokeFullAccess: () =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.agentFullAccessRevoke),
+  },
+  agentActivity: {
+    status: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentActivityStatus),
+    setup: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentActivitySetup),
+    rotateToken: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.agentActivityRotateToken),
+    snapshot: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentActivitySnapshot),
   },
   feishu: {
     status: () => ipcRenderer.invoke(DESKTOP_CHANNELS.feishuStatus),
@@ -156,8 +261,27 @@ const desktopApi: DesktopApi = {
   pet: {
     snapshot: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petSnapshot),
     rename: (name) => ipcRenderer.invoke(DESKTOP_CHANNELS.petRename, name),
+    customize: (patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petCustomize, patch),
+    addCompanion: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petCompanionAdd, input),
+    updateCompanion: (id, patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petCompanionUpdate, { id, patch }),
+    deleteCompanion: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petCompanionDelete, id),
     interact: (kind) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petInteract, kind),
+    dailyAdventure: (localDate) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petAdventureDaily, localDate),
+    completeAdventure: (adventureId, choiceId) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petAdventureComplete, {
+        adventureId,
+        choiceId,
+      }),
+    recordMiniGame: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petMiniGameRecord, input),
+    recordProactiveMessage: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petProactiveRecord, input),
     startFocus: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petFocusStart, request),
     pauseFocus: (reason) =>
@@ -171,6 +295,10 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.petWeatherRefresh, force),
     generateDiary: (userNote) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryGenerate, userNote),
+    createDiaryFromTask: (taskId, userNote) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryFromTask, { taskId, userNote }),
+    createDiaryFromCapture: (input) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryFromCapture, input),
     updateDiary: (id, patch) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petDiaryUpdate, { id, patch }),
     deleteDiary: (id) =>
@@ -181,10 +309,34 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryUpdate, { id, patch }),
     deleteMemory: (id) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.petMemoryDelete, id),
+    addHabit: (input) => ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitAdd, input),
+    updateHabit: (id, patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitUpdate, { id, patch }),
+    completeHabit: (id) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitComplete, id),
+    snoozeHabit: (id, minutes) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitSnooze, { id, minutes }),
+    deleteHabit: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.petHabitDelete, id),
+    addGoal: (input) => ipcRenderer.invoke(DESKTOP_CHANNELS.petGoalAdd, input),
+    updateGoal: (id, patch) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petGoalUpdate, { id, patch }),
+    deleteGoal: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.petGoalDelete, id),
+    exportData: () => ipcRenderer.invoke(DESKTOP_CHANNELS.petDataExport),
+    previewDataImport: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDataPreviewImport),
+    commitDataImport: (previewToken, strategy) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDataCommitImport, {
+        previewToken,
+        strategy,
+      }),
+    cancelDataImport: (previewToken) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.petDataCancelImport, previewToken),
   },
   data: {
     exportToFile: (request) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.dataExport, request),
+    exportMarkdownToFile: (request) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.dataMarkdownExport, request),
     previewImport: () => ipcRenderer.invoke(DESKTOP_CHANNELS.dataPreviewImport),
     commitImport: (previewToken, strategy) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.dataCommitImport, {
@@ -213,6 +365,11 @@ const desktopApi: DesktopApi = {
         DESKTOP_CHANNELS.eventAgentApproval,
         listener,
       ),
+    onAgentActivity: (listener: (snapshot: AgentActivitySnapshot) => void) =>
+      subscribe<AgentActivitySnapshot>(
+        DESKTOP_CHANNELS.eventAgentActivity,
+        listener,
+      ),
     onFeishuStatus: (listener) =>
       subscribe<FeishuStatusView>(DESKTOP_CHANNELS.eventFeishuStatus, listener),
     onNotification: (listener) =>
@@ -222,6 +379,8 @@ const desktopApi: DesktopApi = {
       ),
     onPetEvent: (listener) =>
       subscribe<PetEvent>(DESKTOP_CHANNELS.eventPet, listener),
+    onPetInputActivity: (listener) =>
+      subscribe<PetInputActivityEvent>(DESKTOP_CHANNELS.eventPetInputActivity, listener),
   },
 };
 

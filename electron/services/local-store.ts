@@ -43,12 +43,21 @@ const parseState = (text: string): LocalAppState => {
     !Number.isInteger(value.revision) ||
     value.revision < 0 ||
     !isRecord(value.tasks) ||
+    (value.projects !== undefined && !isRecord(value.projects)) ||
+    (value.lists !== undefined && !isRecord(value.lists)) ||
     !isRecord(value.drafts) ||
     !Array.isArray(value.operations)
   ) {
     throw new TypeError('The local state file does not match schema version 1.');
   }
-  return value as unknown as LocalAppState;
+  // Project entities were added after the original state format. Keep the
+  // schema version stable and migrate an older file in memory; the next
+  // atomic save publishes the normalized collection.
+  return {
+    ...value,
+    projects: isRecord(value.projects) ? value.projects : {},
+    lists: isRecord(value.lists) ? value.lists : {},
+  } as unknown as LocalAppState;
 };
 
 const isMissingFileError = (error: unknown): boolean =>

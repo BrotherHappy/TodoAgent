@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SettingsService, type EncryptionAdapter } from '../electron/services/settings-service';
+import { createTaskAutomationRule } from '../src/shared/task-automations';
 
 const encryption: EncryptionAdapter = {
   isAvailable: () => true,
@@ -12,6 +13,59 @@ const encryption: EncryptionAdapter = {
 };
 
 describe('SettingsService', () => {
+  it('persists and sanitizes local task automation rules', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-automations-'));
+    const service = new SettingsService(root, encryption);
+    await service.load();
+    const saved = await service.update({
+      automations: [
+        createTaskAutomationRule({
+          id: 'rule-flag',
+          name: '完成后加重点',
+          trigger: 'task-completed',
+          action: { kind: 'set-flagged', value: true },
+        }),
+        createTaskAutomationRule({
+          id: 'rule-schedule',
+          name: '早上整理重点',
+          trigger: 'scheduled',
+          schedule: { frequency: 'daily', time: '09:00' },
+          action: { kind: 'set-flagged', value: true },
+        }),
+        createTaskAutomationRule({
+          id: 'rule-deadline',
+          name: '临近截止加重点',
+          trigger: 'deadline-approaching',
+          deadlineWindowMinutes: 120,
+          action: { kind: 'set-flagged', value: true },
+        }),
+        createTaskAutomationRule({
+          id: 'rule-any',
+          name: '两个项目都加重点',
+          trigger: 'manual',
+          condition: { anyOf: [{ projectId: 'project-a' }, { projectId: 'project-b' }] },
+          action: { kind: 'set-flagged', value: true },
+        }),
+        { id: 'malformed', enabled: true } as never,
+      ],
+    });
+    expect(saved.automations).toHaveLength(4);
+    expect(saved.automations[0]?.id).toBe('rule-flag');
+    expect(saved.automations[1]?.schedule).toEqual({
+      frequency: 'daily',
+      time: '09:00',
+    });
+    expect(saved.automations[2]?.deadlineWindowMinutes).toBe(120);
+    expect(saved.automations[3]?.condition.anyOf).toEqual([
+      { projectId: 'project-a' },
+      { projectId: 'project-b' },
+    ]);
+
+    const reloaded = new SettingsService(root, encryption);
+    await reloaded.load();
+    expect(reloaded.get().automations).toEqual(saved.automations);
+  });
+
   it('creates defaults and persists nested updates', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-settings-'));
     const service = new SettingsService(root, encryption);
@@ -50,6 +104,30 @@ describe('SettingsService', () => {
     expect(persisted.ai.authMode).toBe('bearer');
   });
 
+  it('migrates missing model price profiles without inventing a provider price', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-model-pricing-'));
+    const initial = new SettingsService(root, encryption);
+    await initial.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const legacy = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      ai: { pricing?: unknown; fallback?: { pricing?: unknown } };
+    };
+    delete legacy.ai.pricing;
+    delete legacy.ai.fallback?.pricing;
+    await writeFile(settingsPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().ai.pricing).toEqual({
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    });
+    expect(migrated.get().ai.fallback.pricing).toEqual({
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    });
+  });
+
   it('migrates a legacy orb or capsule into the unique Todo Pet configuration', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-floating-settings-'));
     const initial = new SettingsService(root, encryption);
@@ -57,10 +135,14 @@ describe('SettingsService', () => {
     const settingsPath = path.join(root, 'settings.v1.json');
     const legacy = JSON.parse(await readFile(settingsPath, 'utf8')) as {
       floating: Record<string, unknown>;
+      pet: Record<string, unknown>;
     };
     delete legacy.floating.hoverExpandDelayMs;
     delete legacy.floating.selectedTab;
     delete legacy.floating.scalePercent;
+    delete legacy.floating.mousePassthrough;
+    delete legacy.pet.inputReactionsEnabled;
+    delete legacy.pet.vacationMode;
     legacy.floating.shape = 'orb';
     legacy.floating.topMode = 'focus-only';
     await writeFile(settingsPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8');
@@ -71,12 +153,19 @@ describe('SettingsService', () => {
     expect(migrated.get().floating.topMode).toBe('always');
     expect(migrated.get().floating.selectedTab).toBe('all');
     expect(migrated.get().floating.scalePercent).toBe(100);
+    expect(migrated.get().floating.mousePassthrough).toBe(false);
+    expect(migrated.get().pet.inputReactionsEnabled).toBe(false);
+    expect(migrated.get().pet.vacationMode).toBe(false);
     const persistedMigration = JSON.parse(await readFile(settingsPath, 'utf8')) as {
       floating: Record<string, unknown>;
+      pet: Record<string, unknown>;
     };
     expect(persistedMigration.floating.topMode).toBe('always');
     expect(persistedMigration.floating.selectedTab).toBe('all');
     expect(persistedMigration.floating.scalePercent).toBe(100);
+    expect(persistedMigration.floating.mousePassthrough).toBe(false);
+    expect(persistedMigration.pet.inputReactionsEnabled).toBe(false);
+    expect(persistedMigration.pet.vacationMode).toBe(false);
     expect(persistedMigration.floating).not.toHaveProperty('shape');
     const replaced = await migrated.replace({
       ...migrated.get(),
@@ -84,6 +173,12 @@ describe('SettingsService', () => {
         ...migrated.get().floating,
         hoverExpandDelayMs: 1_700,
         topMode: 'never',
+        mousePassthrough: true,
+      },
+      pet: {
+        ...migrated.get().pet,
+        inputReactionsEnabled: true,
+        vacationMode: true,
       },
     });
     expect(replaced.floating.topMode).toBe('always');
@@ -92,6 +187,33 @@ describe('SettingsService', () => {
     await reloaded.load();
     expect(reloaded.get().floating.hoverExpandDelayMs).toBe(1_700);
     expect(reloaded.get().floating.topMode).toBe('always');
+    expect(reloaded.get().floating.mousePassthrough).toBe(true);
+    expect(reloaded.get().pet.inputReactionsEnabled).toBe(true);
+    expect(reloaded.get().pet.vacationMode).toBe(true);
+  });
+
+  it('defaults newly introduced Agent capability layers on older settings files', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-capability-migration-'));
+    const initial = new SettingsService(root, encryption);
+    await initial.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const legacy = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>;
+    delete legacy.agentCapabilities;
+    await writeFile(settingsPath, `${JSON.stringify(legacy, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().agentCapabilities).toEqual({
+      taskManagement: true,
+      feishuSync: true,
+      webResearch: true,
+      filesAndTerminal: true,
+      clipboardAndScreen: true,
+    });
+    const persisted = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      agentCapabilities?: unknown;
+    };
+    expect(persisted.agentCapabilities).toEqual(migrated.get().agentCapabilities);
   });
 
   it('clamps malformed on-disk hover delays to the supported range', async () => {
@@ -110,15 +232,88 @@ describe('SettingsService', () => {
     expect(reloaded.get().floating.hoverExpandDelayMs).toBe(5_000);
   });
 
-  it('migrates missing Todo Pet domains and normalizes malformed focus and weather values', async () => {
+  it('migrates and clamps the notification fatigue controls', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-notification-budget-'));
+    const service = new SettingsService(root, encryption);
+    await service.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const raw = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      notifications: Record<string, unknown>;
+    };
+    delete raw.notifications.dailyTaskReminderLimit;
+    delete raw.notifications.taskIgnoreBackoffEnabled;
+    delete raw.notifications.taskReminderMinIntervalMinutes;
+    delete raw.notifications.taskReminderSourceMode;
+    delete raw.notifications.taskReminderProjectMode;
+    await writeFile(settingsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().notifications.dailyTaskReminderLimit).toBe(8);
+    expect(migrated.get().notifications.taskIgnoreBackoffEnabled).toBe(true);
+    expect(migrated.get().notifications.taskReminderMinIntervalMinutes).toBe(120);
+    expect(migrated.get().notifications.taskReminderSourceMode).toEqual({ local: 'normal', feishu: 'normal' });
+    expect(migrated.get().notifications.taskReminderProjectMode).toEqual({});
+
+    await migrated.update({
+      notifications: {
+        ...migrated.get().notifications,
+        dailyTaskReminderLimit: 999,
+        taskReminderMinIntervalMinutes: 99_999,
+        taskReminderProjectMode: { planning: 'off', malformed: 'not-valid' as never },
+      },
+    });
+    expect(migrated.get().notifications.dailyTaskReminderLimit).toBe(50);
+    expect(migrated.get().notifications.taskReminderMinIntervalMinutes).toBe(1_440);
+    expect(migrated.get().notifications.taskReminderProjectMode).toEqual({ planning: 'off' });
+
+    await migrated.update({
+      pet: { ...migrated.get().pet, proactiveDailyLimit: 99 },
+    });
+    expect(migrated.get().pet.proactiveDailyLimit).toBe(20);
+  });
+
+  it('migrates and normalizes the local-only focus shield settings', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-focus-shield-'));
+    const service = new SettingsService(root, encryption);
+    await service.load();
+    const settingsPath = path.join(root, 'settings.v1.json');
+    const raw = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+      focus: Record<string, unknown>;
+    };
+    delete raw.focus.shieldMode;
+    delete raw.focus.shieldApplications;
+    await writeFile(settingsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+
+    const migrated = new SettingsService(root, encryption);
+    await migrated.load();
+    expect(migrated.get().focus.shieldMode).toBe('off');
+    expect(migrated.get().focus.shieldApplications).toEqual([]);
+
+    await migrated.replace({
+      ...migrated.get(),
+      focus: {
+        ...migrated.get().focus,
+        shieldMode: 'pause',
+        shieldApplications: [' Chrome ', 'chrome', '', 'YouTube', 3 as never],
+      },
+    });
+    expect(migrated.get().focus.shieldMode).toBe('pause');
+    expect(migrated.get().focus.shieldApplications).toEqual(['Chrome', 'YouTube']);
+  });
+
+  it('migrates missing Todo Pet domains and normalizes malformed focus, planning and weather values', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'todo-agent-pet-settings-'));
     const service = new SettingsService(root, encryption);
     await service.load();
     const settingsPath = path.join(root, 'settings.v1.json');
     const raw = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>;
     delete raw.focus;
+    delete raw.planning;
     delete raw.weather;
     delete raw.pet;
+    const rawPersona = raw.persona as Record<string, unknown>;
+    delete rawPersona.syncWithPet;
     await writeFile(settingsPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
 
     const migrated = new SettingsService(root, encryption);
@@ -128,6 +323,13 @@ describe('SettingsService', () => {
     expect(migrated.get().pet).toMatchObject({
       interactionsEnabled: true,
       proactiveMessages: true,
+    });
+    expect(migrated.get().persona.syncWithPet).toBe(true);
+    expect(migrated.get().planning.urgencyWeights).toEqual({
+      deadline: 70,
+      plannedToday: 90,
+      priority: 40,
+      quickWin: 10,
     });
 
     const current = migrated.get();
@@ -145,12 +347,26 @@ describe('SettingsService', () => {
         cacheMinutes: Number.NaN,
         latitude: Number.POSITIVE_INFINITY,
       },
+      planning: {
+        urgencyWeights: {
+          deadline: 999,
+          plannedToday: -10,
+          priority: Number.NaN,
+          quickWin: 42.7,
+        },
+      },
     });
     expect(migrated.get().focus).toMatchObject({
       focusMinutes: 25,
       shortBreakMinutes: 60,
       cycles: 1,
       environmentSound: 'off',
+    });
+    expect(migrated.get().planning.urgencyWeights).toEqual({
+      deadline: 100,
+      plannedToday: 0,
+      priority: 40,
+      quickWin: 43,
     });
     expect(migrated.get().weather.cacheMinutes).toBe(45);
     expect(migrated.get().weather.latitude).toBeUndefined();

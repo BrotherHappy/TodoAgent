@@ -77,12 +77,26 @@ try {
     path: path.join(output, "todo-pet-home.png"),
     animations: "disabled",
   });
+  await main.getByRole("button", { name: "小房间" }).click();
+  await main.locator(".pet-room-stage").waitFor();
+  await main.screenshot({
+    path: path.join(output, "todo-pet-room.png"),
+    animations: "disabled",
+  });
+  await main.getByRole("button", { name: "今日冒险" }).click();
+  await main.locator(".pet-adventure-card").waitFor();
+  await main.screenshot({
+    path: path.join(output, "todo-pet-adventure.png"),
+    animations: "disabled",
+  });
 
   const floating = await windowFor("floating");
   await floating.waitForLoadState("domcontentloaded");
   await floating.getByRole("button", { name: "展开 小序" }).click();
   await floating.getByRole("button", { name: "专注", exact: true }).click();
   await floating.locator(".pet-focus-view").waitFor();
+  await floating.getByRole("button", { name: /25.*轻专注/u }).click();
+  await floating.locator(".pet-focus-bubble").waitFor();
   await floating.screenshot({
     path: path.join(output, "todo-pet-focus.png"),
     animations: "disabled",

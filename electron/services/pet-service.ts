@@ -10,14 +10,32 @@ import {
   type FocusSession,
   type FocusSessionView,
   type PetDiaryEntry,
+  type PetAdventure,
+  type PetCustomizationPatch,
+  type PetCompanion,
+  type PetCompanionKind,
+  type PetDecorationPlacement,
   type PetEvent,
   type PetMemoryEntry,
+  type PetHabit,
+  type PetGoal,
+  type PetGoalMetric,
+  type PetMiniGameRecord,
   type PetProfile,
+  type PetPortableState,
+  type PetPersonality,
+  type ProactiveMessageRecord,
   type PetReward,
+  type PetRoomAtmosphere,
   type PetSnapshot,
   type PetState,
   type StartFocusRequest,
 } from "../../src/shared/pet-types";
+import {
+  PET_ROOM_DECORATION_DEFAULTS,
+  clampPetDecorationPlacement,
+  isPetRoomDecorationId,
+} from "../../src/shared/pet-room-layout";
 
 const clone = <T>(value: T): T => structuredClone(value);
 const isoNow = (now = Date.now()): string => new Date(now).toISOString();
@@ -28,6 +46,7 @@ function createProfile(name: string, now = Date.now()): PetProfile {
     id: randomUUID(),
     name: name.trim() || "小序",
     species: "task-sprite",
+    personality: "gentle",
     stage: "seed",
     level: 1,
     experience: 0,
@@ -44,18 +63,116 @@ function createProfile(name: string, now = Date.now()): PetProfile {
   };
 }
 
+function normalizePersonality(value: unknown): PetPersonality {
+  if (value === "gentle" || value === "energetic" || value === "calm" || value === "playful" || value === "witty" || value === "quiet") {
+    return value;
+  }
+  // Accept the names used briefly by the pre-release renderer so an
+  // interrupted upgrade cannot discard a user's chosen style.
+  if (value === "warm") return "gentle";
+  if (value === "lively") return "energetic";
+  if (value === "focused") return "calm";
+  return "gentle";
+}
+
+const COMPANION_DEFAULTS: Record<PetCompanionKind, { name: string; personality: PetPersonality }> = {
+  "paper-bird": { name: "纸飞机", personality: "energetic" },
+  cloudlet: { name: "云团", personality: "calm" },
+  "moss-mouse": { name: "苔苔", personality: "gentle" },
+  "moon-moth": { name: "月蛾", personality: "quiet" },
+};
+
+const COMPANION_KINDS = new Set<PetCompanionKind>(Object.keys(COMPANION_DEFAULTS) as PetCompanionKind[]);
+
+function normalizeDecorationPositions(value: unknown): Record<string, PetDecorationPlacement> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const normalized: Record<string, PetDecorationPlacement> = {};
+  for (const [id, placement] of Object.entries(value)) {
+    if (!isPetRoomDecorationId(id)) continue;
+    normalized[id] = clampPetDecorationPlacement(
+      placement,
+      PET_ROOM_DECORATION_DEFAULTS[id],
+    );
+  }
+  return normalized;
+}
+
+function normalizeRoomAtmosphere(value: unknown): PetRoomAtmosphere | undefined {
+  return value === "daylight" || value === "cozy" || value === "moonlit"
+    ? value
+    : undefined;
+}
+
+function normalizeCompanions(value: unknown, now: number): PetCompanion[] {
+  if (!Array.isArray(value)) return [];
+  const seenIds = new Set<string>();
+  const seenKinds = new Set<PetCompanionKind>();
+  return value
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    .map((entry) => {
+      const kind = COMPANION_KINDS.has(entry.kind as PetCompanionKind)
+        ? (entry.kind as PetCompanionKind)
+        : undefined;
+      if (!kind) return undefined;
+      const defaults = COMPANION_DEFAULTS[kind];
+      const id = typeof entry.id === "string" ? entry.id.trim().slice(0, 80) : "";
+      const name = typeof entry.name === "string" ? entry.name.trim().slice(0, 40) : "";
+      const unlockedAt = typeof entry.unlockedAt === "string" && !Number.isNaN(Date.parse(entry.unlockedAt))
+        ? entry.unlockedAt
+        : isoNow(now);
+      return {
+        id: id || randomUUID(),
+        kind,
+        name: name || defaults.name,
+        personality: normalizePersonality(entry.personality),
+        unlockedAt,
+      } satisfies PetCompanion;
+    })
+    .filter((entry): entry is PetCompanion => {
+      if (!entry || seenIds.has(entry.id) || seenKinds.has(entry.kind)) return false;
+      seenIds.add(entry.id);
+      seenKinds.add(entry.kind);
+      return true;
+    })
+    .slice(0, 3);
+}
+
 export function createDefaultPetState(name = "小序", now = Date.now()): PetState {
+  const timestamp = isoNow(now);
   return {
     schemaVersion: 1,
     revision: 0,
     profile: createProfile(name, now),
     focusHistory: [],
     rewards: [],
-    inventory: [],
+    inventory: [
+      { id: "outfit-scarf", quantity: 1, unlockedAt: timestamp },
+      { id: "toy-ball", quantity: 1, unlockedAt: timestamp },
+      { id: "decoration-cloud-lamp", quantity: 1, unlockedAt: timestamp },
+    ],
+    appearance: {
+      palette: "lavender",
+      outfit: "none",
+      roomTheme: "cloud-room",
+      decorations: ["cloud-lamp"],
+    },
+    adventures: [],
+    miniGames: [],
     diary: [],
     memories: [],
+    habits: defaultPetHabits(),
+    goals: [],
+    companions: [],
     proactiveMessages: [],
   };
+}
+
+function defaultPetHabits(): PetHabit[] {
+  return [
+    { id: "water", label: "喝口水", hint: "让身体跟上你的节奏", cadenceMinutes: 90, enabled: true },
+    { id: "stretch", label: "起身伸展", hint: "肩颈和眼睛一起松一松", cadenceMinutes: 120, enabled: true },
+    { id: "close-loop", label: "收尾一分钟", hint: "把刚才的上下文留给未来的你", cadenceMinutes: 180, enabled: true },
+  ].map((habit) => ({ ...habit, lastCompletedAt: undefined, snoozedUntil: undefined }));
 }
 
 function normalizePreset(input?: FocusPreset): FocusPreset {
@@ -106,11 +223,31 @@ function viewFocus(session: FocusSession, now = Date.now()): FocusSessionView {
   };
 }
 
-function normalizeState(value: unknown, name: string): PetState {
+function normalizeState(value: unknown, name: string, now = Date.now()): PetState {
   if (!value || typeof value !== "object") return createDefaultPetState(name);
   const raw = value as Partial<PetState>;
   if (raw.schemaVersion !== 1 || !raw.profile) return createDefaultPetState(name);
   const defaults = createDefaultPetState(name);
+  const rawAppearance = raw.appearance && typeof raw.appearance === "object"
+    ? raw.appearance
+    : undefined;
+  const appearance = {
+    ...defaults.appearance,
+    ...clone(rawAppearance ?? {}),
+    decorations: Array.isArray(rawAppearance?.decorations)
+      ? clone(rawAppearance.decorations)
+      : defaults.appearance.decorations,
+  };
+  const decorationPositions = normalizeDecorationPositions(
+    (rawAppearance as { decorationPositions?: unknown } | undefined)?.decorationPositions,
+  );
+  if (decorationPositions !== undefined) {
+    appearance.decorationPositions = decorationPositions;
+  }
+  const atmosphere = normalizeRoomAtmosphere(
+    (rawAppearance as { atmosphere?: unknown } | undefined)?.atmosphere,
+  );
+  if (atmosphere) appearance.atmosphere = atmosphere;
   return {
     ...defaults,
     ...clone(raw),
@@ -122,6 +259,7 @@ function normalizeState(value: unknown, name: string): PetState {
     profile: {
       ...defaults.profile,
       ...clone(raw.profile),
+      personality: normalizePersonality(raw.profile.personality),
       attributes: {
         ...defaults.profile.attributes,
         ...clone(raw.profile.attributes ?? {}),
@@ -130,12 +268,108 @@ function normalizeState(value: unknown, name: string): PetState {
     focusHistory: Array.isArray(raw.focusHistory) ? clone(raw.focusHistory) : [],
     rewards: Array.isArray(raw.rewards) ? clone(raw.rewards) : [],
     inventory: Array.isArray(raw.inventory) ? clone(raw.inventory) : [],
-    diary: Array.isArray(raw.diary) ? clone(raw.diary) : [],
+    appearance,
+    adventures: Array.isArray(raw.adventures) ? clone(raw.adventures) : [],
+    miniGames: Array.isArray(raw.miniGames) ? clone(raw.miniGames) : [],
+    diary: Array.isArray(raw.diary)
+      ? raw.diary.map((entry) => ({
+          ...clone(entry),
+          taskIds: Array.isArray(entry.taskIds)
+            ? [...new Set(entry.taskIds.filter((id) => typeof id === "string" && id.trim()))]
+            : undefined,
+        }))
+      : [],
     memories: Array.isArray(raw.memories) ? clone(raw.memories) : [],
+    habits: Array.isArray(raw.habits)
+      ? raw.habits
+          .filter((habit): habit is PetHabit => {
+            if (!habit || typeof habit !== "object") return false;
+            const candidate = habit as unknown as Record<string, unknown>;
+            return (
+              typeof candidate.id === "string" &&
+              typeof candidate.label === "string" &&
+              typeof candidate.hint === "string" &&
+              typeof candidate.cadenceMinutes === "number" &&
+              Number.isFinite(candidate.cadenceMinutes) &&
+              candidate.cadenceMinutes > 0
+            );
+          })
+          .map((habit) => ({
+            id: habit.id.trim().slice(0, 80),
+            label: habit.label.trim().slice(0, 80),
+            hint: habit.hint.trim().slice(0, 240),
+            cadenceMinutes: Math.min(1_440, Math.max(15, Math.round(habit.cadenceMinutes))),
+            enabled: habit.enabled !== false,
+            lastCompletedAt: typeof habit.lastCompletedAt === "string" ? habit.lastCompletedAt : undefined,
+            snoozedUntil: typeof habit.snoozedUntil === "string" ? habit.snoozedUntil : undefined,
+          }))
+          .filter((habit, index, list) => habit.id.length > 0 && list.findIndex((candidate) => candidate.id === habit.id) === index)
+          .slice(0, 12)
+      : defaults.habits,
+    goals: Array.isArray(raw.goals)
+      ? raw.goals
+          .filter((goal): goal is PetGoal => {
+            if (!goal || typeof goal !== "object") return false;
+            const candidate = goal as unknown as Record<string, unknown>;
+            return (
+              typeof candidate.id === "string" &&
+              typeof candidate.title === "string" &&
+              (candidate.metric === "tasks-completed" ||
+                candidate.metric === "focus-minutes" ||
+                candidate.metric === "habit-checkins") &&
+              typeof candidate.target === "number" &&
+              Number.isFinite(candidate.target) &&
+              candidate.target > 0 &&
+              typeof candidate.periodStart === "string" &&
+              typeof candidate.periodEnd === "string" &&
+              isValidGoalDate(candidate.periodStart) &&
+              isValidGoalDate(candidate.periodEnd) &&
+              (candidate.enabled === undefined || typeof candidate.enabled === "boolean")
+            );
+          })
+          .map((goal) => ({
+            id: goal.id.trim().slice(0, 80),
+            title: goal.title.trim().slice(0, 80),
+            metric: goal.metric,
+            target: normalizeGoalTarget(goal.target),
+            periodStart: normalizeGoalDate(goal.periodStart),
+            periodEnd: normalizeGoalDate(goal.periodEnd),
+            enabled: goal.enabled !== false,
+            createdAt: typeof goal.createdAt === "string" ? goal.createdAt : isoNow(),
+            updatedAt: typeof goal.updatedAt === "string" ? goal.updatedAt : isoNow(),
+          }))
+          .filter(
+            (goal, index, list) =>
+              goal.id.length > 0 &&
+              goal.title.length > 0 &&
+              goal.periodStart <= goal.periodEnd &&
+              list.findIndex((candidate) => candidate.id === goal.id) === index,
+          )
+          .slice(0, 3)
+      : [],
+    companions: normalizeCompanions(raw.companions, now),
     proactiveMessages: Array.isArray(raw.proactiveMessages)
       ? clone(raw.proactiveMessages)
       : [],
   };
+}
+
+/**
+ * Normalize a backup payload without ever accepting an active focus session.
+ * The same normalizer is used at startup and during imports so an imported
+ * profile cannot bypass the service's default/shape guards.
+ */
+export function normalizePortablePetState(
+  value: unknown,
+  name = "小序",
+): PetPortableState {
+  const raw = value && typeof value === "object"
+    ? { ...(value as Record<string, unknown>) }
+    : value;
+  if (raw && typeof raw === "object") delete (raw as Record<string, unknown>).focus;
+  const normalized = normalizeState(raw, name);
+  const { focus: _focus, ...portable } = normalized;
+  return portable;
 }
 
 async function atomicWrite(filePath: string, value: PetState): Promise<void> {
@@ -165,6 +399,19 @@ export interface DiaryFacts {
   userNote?: string;
 }
 
+export interface DiaryTaskFacts {
+  localDate: string;
+  task: Pick<Task, "id" | "title" | "status">;
+  userNote?: string;
+}
+
+export interface DiaryCaptureFacts {
+  localDate?: string;
+  title: string;
+  content: string;
+  captureId?: string;
+}
+
 export class PetService {
   readonly #filePath: string;
   readonly #now: () => number;
@@ -184,7 +431,7 @@ export class PetService {
   async initialize(): Promise<PetSnapshot> {
     try {
       const raw = JSON.parse(await readFile(this.#filePath, "utf8")) as unknown;
-      this.#state = normalizeState(raw, this.#initialName);
+      this.#state = normalizeState(raw, this.#initialName, this.#now());
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       await atomicWrite(this.#filePath, this.#state);
@@ -200,12 +447,333 @@ export class PetService {
     };
   }
 
+  /** Return the durable pet profile, excluding the currently running focus. */
+  portableSnapshot(): PetPortableState {
+    const { focus: _focus, ...state } = clone(this.#state);
+    return state;
+  }
+
+  /**
+   * Replace only the durable pet profile from a validated backup.  The active
+   * focus session is preserved (or remains absent), and the local revision is
+   * advanced by the normal mutation path rather than trusting an imported
+   * revision number.
+   */
+  async replacePortableSnapshot(input: PetPortableState): Promise<PetSnapshot> {
+    const imported = normalizePortablePetState(input, this.#state.profile.name);
+    return this.#mutate((draft, now) => {
+      const activeFocus = draft.focus;
+      Object.assign(draft, clone(imported));
+      if (activeFocus) draft.focus = activeFocus;
+      else delete draft.focus;
+      draft.profile.updatedAt = isoNow(now);
+    });
+  }
+
   async rename(name: string): Promise<PetSnapshot> {
     const next = name.trim().slice(0, 80);
     if (!next) throw new Error("EMPTY_PET_NAME");
     return this.#mutate((draft, now) => {
       draft.profile.name = next;
       draft.profile.updatedAt = isoNow(now);
+    });
+  }
+
+  async customize(patch: PetCustomizationPatch): Promise<PetSnapshot> {
+    const palettes = new Set(["lavender", "mint", "sunset", "midnight"]);
+    const outfits = new Set(["none", "scarf", "explorer", "starlight"]);
+    const rooms = new Set(["cloud-room", "forest-nook", "night-library"]);
+    const atmospheres = new Set<PetRoomAtmosphere>(["daylight", "cozy", "moonlit"]);
+    const personalities = new Set<PetPersonality>([
+      "gentle",
+      "energetic",
+      "calm",
+      "playful",
+      "witty",
+      "quiet",
+    ]);
+    return this.#mutate((draft, now, events) => {
+      if (patch.palette !== undefined) {
+        if (!palettes.has(patch.palette)) throw new Error("INVALID_PET_PALETTE");
+        draft.appearance.palette = patch.palette;
+      }
+      if (patch.outfit !== undefined) {
+        if (!outfits.has(patch.outfit)) throw new Error("INVALID_PET_OUTFIT");
+        draft.appearance.outfit = patch.outfit;
+        draft.profile.equippedOutfit =
+          patch.outfit === "none" ? undefined : patch.outfit;
+      }
+      if (patch.roomTheme !== undefined) {
+        if (!rooms.has(patch.roomTheme)) throw new Error("INVALID_PET_ROOM");
+        draft.appearance.roomTheme = patch.roomTheme;
+      }
+      if (patch.atmosphere !== undefined) {
+        if (!atmospheres.has(patch.atmosphere)) throw new Error("INVALID_PET_ROOM_ATMOSPHERE");
+        draft.appearance.atmosphere = patch.atmosphere;
+      }
+      if (patch.personality !== undefined) {
+        if (!personalities.has(patch.personality)) throw new Error("INVALID_PET_PERSONALITY");
+        draft.profile.personality = patch.personality;
+      }
+      if (patch.decorations !== undefined) {
+        draft.appearance.decorations = Array.from(
+          new Set(
+            patch.decorations
+              .map((item) => item.trim().slice(0, 80))
+              .filter(Boolean),
+          ),
+        ).slice(0, 12);
+      }
+      if (patch.decorationPositions !== undefined) {
+        const positions = { ...(draft.appearance.decorationPositions ?? {}) };
+        for (const [id, placement] of Object.entries(patch.decorationPositions)) {
+          if (!isPetRoomDecorationId(id)) continue;
+          if (placement === null) {
+            delete positions[id];
+            continue;
+          }
+          positions[id] = clampPetDecorationPlacement(
+            placement,
+            PET_ROOM_DECORATION_DEFAULTS[id],
+          );
+        }
+        if (Object.keys(positions).length) {
+          draft.appearance.decorationPositions = positions;
+        } else {
+          delete draft.appearance.decorationPositions;
+        }
+      }
+      draft.profile.updatedAt = isoNow(now);
+      events.push({ type: "customization-changed", at: isoNow(now) });
+    });
+  }
+
+  /**
+   * Add one of the small room-only companions. Companions never receive a
+   * copied task list and are intentionally capped so the room stays calm.
+   */
+  async addCompanion(input: {
+    kind: PetCompanionKind;
+    name?: string;
+    personality?: PetPersonality;
+  }): Promise<PetSnapshot> {
+    return this.#mutate((draft, now, events) => {
+      if (!COMPANION_KINDS.has(input.kind)) throw new Error("INVALID_PET_COMPANION_KIND");
+      if (draft.companions.length >= 3) throw new Error("PET_COMPANION_LIMIT");
+      if (draft.companions.some((companion) => companion.kind === input.kind)) {
+        throw new Error("PET_COMPANION_EXISTS");
+      }
+      const defaults = COMPANION_DEFAULTS[input.kind];
+      const name = input.name?.trim().slice(0, 40) || defaults.name;
+      if (!name) throw new Error("EMPTY_PET_COMPANION_NAME");
+      const personality = input.personality ?? defaults.personality;
+      if (!COMPANION_KINDS.has(input.kind) || ![
+        "gentle",
+        "energetic",
+        "calm",
+        "playful",
+        "witty",
+        "quiet",
+      ].includes(personality)) {
+        throw new Error("INVALID_PET_PERSONALITY");
+      }
+      draft.companions.push({
+        id: randomUUID(),
+        kind: input.kind,
+        name,
+        personality,
+        unlockedAt: isoNow(now),
+      });
+      events.push({ type: "customization-changed", at: isoNow(now) });
+    });
+  }
+
+  async updateCompanion(
+    id: string,
+    patch: Partial<Pick<PetCompanion, "name" | "personality">>,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft, now, events) => {
+      const companion = draft.companions.find((entry) => entry.id === id);
+      if (!companion) throw new Error("PET_COMPANION_NOT_FOUND");
+      if (patch.name !== undefined) {
+        const name = patch.name.trim().slice(0, 40);
+        if (!name) throw new Error("EMPTY_PET_COMPANION_NAME");
+        companion.name = name;
+      }
+      if (patch.personality !== undefined) {
+        if (!["gentle", "energetic", "calm", "playful", "witty", "quiet"].includes(patch.personality)) {
+          throw new Error("INVALID_PET_PERSONALITY");
+        }
+        companion.personality = patch.personality;
+      }
+      draft.profile.updatedAt = isoNow(now);
+      events.push({ type: "customization-changed", at: isoNow(now) });
+    });
+  }
+
+  async deleteCompanion(id: string): Promise<boolean> {
+    let deleted = false;
+    await this.#mutate((draft, now, events) => {
+      const next = draft.companions.filter((entry) => entry.id !== id);
+      deleted = next.length !== draft.companions.length;
+      if (!deleted) return;
+      draft.companions = next;
+      draft.profile.updatedAt = isoNow(now);
+      events.push({ type: "customization-changed", at: isoNow(now) });
+    });
+    return deleted;
+  }
+
+  async dailyAdventure(localDate = isoNow(this.#now()).slice(0, 10)): Promise<PetAdventure> {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(localDate)
+      ? localDate
+      : isoNow(this.#now()).slice(0, 10);
+    const existing = this.#state.adventures.find(
+      (adventure) => adventure.localDate === date,
+    );
+    if (existing) return clone(existing);
+    let result!: PetAdventure;
+    await this.#mutate((draft, now) => {
+      const current = draft.adventures.find(
+        (adventure) => adventure.localDate === date,
+      );
+      if (current) {
+        result = clone(current);
+        return;
+      }
+      result = createDailyAdventure(date, now, draft.profile.name);
+      draft.adventures.unshift(result);
+      draft.adventures = draft.adventures.slice(0, 180);
+    });
+    return clone(result);
+  }
+
+  async completeAdventure(
+    adventureId: string,
+    choiceId: string,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft, now, events) => {
+      const adventure = draft.adventures.find(
+        (entry) => entry.id === adventureId,
+      );
+      if (!adventure) throw new Error("PET_ADVENTURE_NOT_FOUND");
+      const choice = adventure.choices.find((entry) => entry.id === choiceId);
+      if (!choice) throw new Error("PET_ADVENTURE_CHOICE_NOT_FOUND");
+      if (adventure.completedAt) return;
+      adventure.selectedChoiceId = choice.id;
+      adventure.outcome = adventureOutcome(choice.id, draft.profile.name);
+      adventure.completedAt = isoNow(now);
+      const reward = this.#grantReward(
+        draft,
+        {
+          idempotencyKey: `adventure:${adventure.localDate}`,
+          source: "adventure",
+          sourceId: adventure.id,
+          experience: 6,
+          intimacy: 2,
+          attribute:
+            choice.id === "explore"
+              ? "courage"
+              : choice.id === "organize"
+                ? "organization"
+                : "creativity",
+          attributePoints: 1,
+          itemId: "adventure-star",
+        },
+        now,
+      );
+      adventure.rewardId = reward.id;
+      addInventoryItem(draft, "adventure-star", now, 1);
+      addInventoryItem(draft, "outfit-explorer", now);
+      addInventoryItem(draft, "decoration-books", now);
+      addInventoryItem(draft, "action-inspect", now);
+      events.push({ type: "reward-granted", at: isoNow(now), reward });
+      events.push({ type: "adventure-completed", at: isoNow(now) });
+    });
+  }
+
+  async recordMiniGame(input: {
+    game: PetMiniGameRecord["game"];
+    score: number;
+    durationSeconds: number;
+  }): Promise<PetSnapshot> {
+    return this.#mutate((draft, now, events) => {
+      const completedAt = isoNow(now);
+      const record: PetMiniGameRecord = {
+        id: randomUUID(),
+        game: input.game,
+        score: Math.min(99_999, Math.max(0, Math.round(input.score))),
+        durationSeconds: Math.min(
+          3_600,
+          Math.max(1, Math.round(input.durationSeconds)),
+        ),
+        completedAt,
+      };
+      draft.miniGames.unshift(record);
+      draft.miniGames = draft.miniGames.slice(0, 500);
+      if (record.game === "breathing" || record.game === "stretch-mirror") {
+        addInventoryItem(draft, "decoration-plant", now);
+        addInventoryItem(draft, "prop-teacup", now);
+      } else if (record.score >= 1) {
+        addInventoryItem(draft, "outfit-starlight", now);
+        addInventoryItem(draft, "action-dance", now);
+      }
+      const day = completedAt.slice(0, 10);
+      const key = `game:${day}:${record.game}`;
+      if (!draft.rewards.some((reward) => reward.idempotencyKey === key)) {
+        const reward = this.#grantReward(
+          draft,
+          {
+            idempotencyKey: key,
+            source: "game",
+            sourceId: record.id,
+            experience: 3,
+            intimacy: 1,
+            attribute:
+              record.game === "breathing" || record.game === "stretch-mirror"
+                ? "energy"
+                : record.game === "jump-rope"
+                  ? "courage"
+                  : "creativity",
+            attributePoints: 1,
+          },
+          now,
+        );
+        events.push({ type: "reward-granted", at: completedAt, reward });
+      }
+      events.push({ type: "mini-game-completed", at: completedAt });
+    });
+  }
+
+  async recordProactiveMessage(
+    input: Pick<ProactiveMessageRecord, "kind" | "reason" | "dismissed">,
+    options?: {
+      /** Maximum records for the local day; 0 or omitted means unlimited. */
+      dailyLimit?: number;
+      /** Main-process local date, supplied by the settings/runtime owner. */
+      localDate?: string;
+    },
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      const dailyLimit = typeof options?.dailyLimit === "number" &&
+        Number.isFinite(options.dailyLimit) && options.dailyLimit > 0
+        ? Math.floor(options.dailyLimit)
+        : 0;
+      if (dailyLimit > 0) {
+        const date = options?.localDate ?? isoNow(now).slice(0, 10);
+        const shownToday = draft.proactiveMessages.filter((message) =>
+          message.shownAt.slice(0, 10) === date,
+        ).length;
+        if (shownToday >= dailyLimit) return;
+      }
+      draft.proactiveMessages.unshift({
+        id: randomUUID(),
+        kind: input.kind,
+        reason: input.reason.trim().slice(0, 500),
+        dismissed: input.dismissed,
+        shownAt: isoNow(now),
+      });
+      draft.proactiveMessages = draft.proactiveMessages.slice(0, 500);
     });
   }
 
@@ -414,6 +982,7 @@ export class PetService {
         localDate: facts.localDate,
         title: `${facts.localDate} · 和${draft.profile.name}的一天`,
         content,
+        taskIds: [...new Set(facts.completedTasks.map((task) => task.id))],
         generation: "local-template",
         completedTaskCount: facts.completedTasks.length,
         focusRounds: focusRounds.length,
@@ -431,6 +1000,104 @@ export class PetService {
         ...draft.diary.filter((entry) => entry.id !== result.id),
         result,
       ].sort((a, b) => b.localDate.localeCompare(a.localDate));
+    });
+    return clone(result);
+  }
+
+  async createDiaryFromTask(facts: DiaryTaskFacts): Promise<PetDiaryEntry> {
+    let result!: PetDiaryEntry;
+    await this.#mutate((draft, now) => {
+      const localDate = /^\d{4}-\d{2}-\d{2}$/u.test(facts.localDate)
+        ? facts.localDate
+        : isoNow(now).slice(0, 10);
+      const taskId = facts.task.id;
+      const existing = draft.diary.find(
+        (entry) =>
+          entry.generation === "user" &&
+          !entry.userEdited &&
+          entry.taskIds?.length === 1 &&
+          entry.taskIds[0] === taskId,
+      );
+      const focusRounds = draft.focusHistory.filter(
+        (record) =>
+          record.taskId === taskId &&
+          record.phase === "focus" &&
+          record.outcome === "completed",
+      );
+      const statusLine =
+        facts.task.status === "completed"
+          ? `今天我们一起完成了“${facts.task.title}”。`
+          : `我们把“${facts.task.title}”记进了共同日记，下一步可以从这里继续。`;
+      const content = [
+        statusLine,
+        focusRounds.length
+          ? `这项任务一起专注了 ${focusRounds.length} 轮，共 ${Math.round(focusRounds.reduce((sum, record) => sum + record.actualSeconds, 0) / 60)} 分钟。`
+          : "这次没有完整的专注轮次，也没关系。",
+        facts.userNote?.trim() ? `你的备注：${facts.userNote.trim().slice(0, 2_000)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      result = {
+        id: existing?.id ?? randomUUID(),
+        localDate,
+        title: `${localDate} · ${facts.task.title}`.slice(0, 200),
+        content,
+        taskIds: [taskId],
+        generation: "user",
+        completedTaskCount: facts.task.status === "completed" ? 1 : 0,
+        focusRounds: focusRounds.length,
+        focusSeconds: focusRounds.reduce((sum, record) => sum + record.actualSeconds, 0),
+        rewardIds: [],
+        userEdited: existing?.userEdited ?? false,
+        createdAt: existing?.createdAt ?? isoNow(now),
+        updatedAt: isoNow(now),
+      };
+      draft.diary = [
+        ...draft.diary.filter((entry) => entry.id !== result.id),
+        result,
+      ].sort((left, right) => right.localDate.localeCompare(left.localDate));
+    });
+    return clone(result);
+  }
+
+  /**
+   * Persist a user-authored capture as a diary entry. This intentionally has
+   * no taskIds and never touches the task store or a remote provider. A
+   * caller-supplied captureId makes retries idempotent without exposing any
+   * diary snapshot or provider metadata to the renderer.
+   */
+  async createDiaryFromCapture(facts: DiaryCaptureFacts): Promise<PetDiaryEntry> {
+    let result!: PetDiaryEntry;
+    await this.#mutate((draft, now) => {
+      const title = facts.title.trim().slice(0, 200);
+      const content = facts.content.trim().slice(0, 50_000);
+      if (!title || !content) throw new Error("DIARY_CAPTURE_EMPTY");
+      const localDate = facts.localDate && /^\d{4}-\d{2}-\d{2}$/u.test(facts.localDate)
+        ? facts.localDate
+        : isoNow(now).slice(0, 10);
+      const captureId = facts.captureId?.trim().slice(0, 200) || undefined;
+      const existing = captureId
+        ? draft.diary.find((entry) => entry.captureId === captureId)
+        : undefined;
+      result = {
+        id: existing?.id ?? randomUUID(),
+        localDate,
+        title,
+        content,
+        ...(captureId ? { captureId } : {}),
+        generation: "user",
+        completedTaskCount: 0,
+        focusRounds: 0,
+        focusSeconds: 0,
+        rewardIds: [],
+        userEdited: false,
+        createdAt: existing?.createdAt ?? isoNow(now),
+        updatedAt: isoNow(now),
+      };
+      draft.diary = [
+        ...draft.diary.filter((entry) => entry.id !== result.id),
+        result,
+      ].sort((left, right) => right.localDate.localeCompare(left.localDate));
     });
     return clone(result);
   }
@@ -509,6 +1176,131 @@ export class PetService {
       const next = draft.memories.filter((entry) => entry.id !== id);
       deleted = next.length !== draft.memories.length;
       draft.memories = next;
+    });
+    return deleted;
+  }
+
+  async addHabit(input: Pick<PetHabit, "label" | "hint" | "cadenceMinutes">): Promise<PetSnapshot> {
+    return this.#mutate((draft) => {
+      if (draft.habits.length >= 12) throw new Error("PET_HABIT_LIMIT");
+      const label = input.label.trim().slice(0, 80);
+      const hint = input.hint.trim().slice(0, 240);
+      if (!label) throw new Error("EMPTY_PET_HABIT");
+      const cadenceMinutes = normalizeHabitCadence(input.cadenceMinutes);
+      draft.habits.push({
+        id: randomUUID(),
+        label,
+        hint,
+        cadenceMinutes,
+        enabled: true,
+      });
+    });
+  }
+
+  async updateHabit(
+    id: string,
+    patch: Partial<Pick<PetHabit, "label" | "hint" | "cadenceMinutes" | "enabled">>,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft) => {
+      const habit = draft.habits.find((candidate) => candidate.id === id);
+      if (!habit) throw new Error("PET_HABIT_NOT_FOUND");
+      if (patch.label !== undefined) {
+        const label = patch.label.trim().slice(0, 80);
+        if (!label) throw new Error("EMPTY_PET_HABIT");
+        habit.label = label;
+      }
+      if (patch.hint !== undefined) habit.hint = patch.hint.trim().slice(0, 240);
+      if (patch.cadenceMinutes !== undefined) habit.cadenceMinutes = normalizeHabitCadence(patch.cadenceMinutes);
+      if (patch.enabled !== undefined) habit.enabled = patch.enabled;
+    });
+  }
+
+  async completeHabit(id: string): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      const habit = draft.habits.find((candidate) => candidate.id === id);
+      if (!habit) throw new Error("PET_HABIT_NOT_FOUND");
+      habit.lastCompletedAt = isoNow(now);
+      delete habit.snoozedUntil;
+    });
+  }
+
+  async snoozeHabit(id: string, minutes = 30): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      const habit = draft.habits.find((candidate) => candidate.id === id);
+      if (!habit) throw new Error("PET_HABIT_NOT_FOUND");
+      const delay = Number.isFinite(minutes) ? Math.min(24 * 60, Math.max(5, Math.round(minutes))) : 30;
+      habit.snoozedUntil = isoNow(now + delay * 60_000);
+    });
+  }
+
+  async deleteHabit(id: string): Promise<boolean> {
+    let deleted = false;
+    await this.#mutate((draft) => {
+      const next = draft.habits.filter((habit) => habit.id !== id);
+      deleted = next.length !== draft.habits.length;
+      draft.habits = next;
+    });
+    return deleted;
+  }
+
+  async addGoal(input: {
+    title: string;
+    metric: PetGoalMetric;
+    target: number;
+    periodStart: string;
+    periodEnd: string;
+  }): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      if (draft.goals.length >= 3) throw new Error("PET_GOAL_LIMIT");
+      const title = input.title.trim().slice(0, 80);
+      if (!title) throw new Error("EMPTY_PET_GOAL");
+      const metric = normalizeGoalMetric(input.metric);
+      const target = normalizeGoalTarget(input.target);
+      const periodStart = normalizeGoalDate(input.periodStart);
+      const periodEnd = normalizeGoalDate(input.periodEnd);
+      if (periodStart > periodEnd) throw new Error("INVALID_PET_GOAL_PERIOD");
+      draft.goals.push({
+        id: randomUUID(),
+        title,
+        metric,
+        target,
+        periodStart,
+        periodEnd,
+        enabled: true,
+        createdAt: isoNow(now),
+        updatedAt: isoNow(now),
+      });
+    });
+  }
+
+  async updateGoal(
+    id: string,
+    patch: Partial<Pick<PetGoal, "title" | "metric" | "target" | "periodStart" | "periodEnd" | "enabled">>,
+  ): Promise<PetSnapshot> {
+    return this.#mutate((draft, now) => {
+      const goal = draft.goals.find((candidate) => candidate.id === id);
+      if (!goal) throw new Error("PET_GOAL_NOT_FOUND");
+      if (patch.title !== undefined) {
+        const title = patch.title.trim().slice(0, 80);
+        if (!title) throw new Error("EMPTY_PET_GOAL");
+        goal.title = title;
+      }
+      if (patch.metric !== undefined) goal.metric = normalizeGoalMetric(patch.metric);
+      if (patch.target !== undefined) goal.target = normalizeGoalTarget(patch.target);
+      if (patch.periodStart !== undefined) goal.periodStart = normalizeGoalDate(patch.periodStart);
+      if (patch.periodEnd !== undefined) goal.periodEnd = normalizeGoalDate(patch.periodEnd);
+      if (goal.periodStart > goal.periodEnd) throw new Error("INVALID_PET_GOAL_PERIOD");
+      if (patch.enabled !== undefined) goal.enabled = patch.enabled;
+      goal.updatedAt = isoNow(now);
+    });
+  }
+
+  async deleteGoal(id: string): Promise<boolean> {
+    let deleted = false;
+    await this.#mutate((draft) => {
+      const next = draft.goals.filter((goal) => goal.id !== id);
+      deleted = next.length !== draft.goals.length;
+      draft.goals = next;
     });
     return deleted;
   }
@@ -683,4 +1475,104 @@ function taskExperience(priority: TaskPriority): number {
   if (priority === "medium") return 10;
   if (priority === "low") return 8;
   return 6;
+}
+
+function addInventoryItem(
+  draft: PetState,
+  id: string,
+  now: number,
+  quantity = 0,
+): void {
+  const existing = draft.inventory.find((item) => item.id === id);
+  if (existing) {
+    if (quantity > 0) existing.quantity += quantity;
+    return;
+  }
+  draft.inventory.push({
+    id,
+    quantity: Math.max(1, quantity),
+    unlockedAt: isoNow(now),
+  });
+}
+
+function normalizeHabitCadence(value: number): number {
+  if (!Number.isFinite(value)) throw new Error("INVALID_PET_HABIT_CADENCE");
+  return Math.min(1_440, Math.max(15, Math.round(value)));
+}
+
+function normalizeGoalMetric(value: PetGoalMetric): PetGoalMetric {
+  if (value !== "tasks-completed" && value !== "focus-minutes" && value !== "habit-checkins") {
+    throw new Error("INVALID_PET_GOAL_METRIC");
+  }
+  return value;
+}
+
+function isValidGoalDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function normalizeGoalDate(value: string): string {
+  if (!isValidGoalDate(value)) throw new Error("INVALID_PET_GOAL_DATE");
+  return value;
+}
+
+function normalizeGoalTarget(value: number): number {
+  if (!Number.isFinite(value)) throw new Error("INVALID_PET_GOAL_TARGET");
+  return Math.min(9_999, Math.max(1, Math.round(value)));
+}
+
+const DAILY_ADVENTURES = [
+  {
+    title: "云朵邮局的慢递",
+    prompt: "一封没有收件人的信落在窗边。我们怎么替它找到方向？",
+  },
+  {
+    title: "被风吹乱的任务星图",
+    prompt: "今天的任务像星星一样散开了。要和我一起把它们排成星座吗？",
+  },
+  {
+    title: "森林书架的秘密夹层",
+    prompt: "小窝的书架响了一声，夹层里藏着一张空白地图。先从哪里开始？",
+  },
+] as const;
+
+function createDailyAdventure(
+  localDate: string,
+  now: number,
+  petName: string,
+): PetAdventure {
+  const seed = Array.from(localDate).reduce(
+    (sum, character) => sum + character.charCodeAt(0),
+    0,
+  );
+  const template = DAILY_ADVENTURES[seed % DAILY_ADVENTURES.length]!;
+  return {
+    id: `adventure:${localDate}`,
+    localDate,
+    title: template.title,
+    prompt: `${template.prompt}\n${petName}会陪你一起，不需要连续签到。`,
+    choices: [
+      { id: "explore", label: "大胆探索" },
+      { id: "organize", label: "先整理线索" },
+      { id: "imagine", label: "画出新路线" },
+    ],
+    createdAt: isoNow(now),
+  };
+}
+
+function adventureOutcome(choiceId: string, petName: string): string {
+  if (choiceId === "explore") {
+    return `你和${petName}顺着风跑出去，找到了那封信真正想抵达的地方。勇气不是不犹豫，而是一起迈出一步。`;
+  }
+  if (choiceId === "organize") {
+    return `你和${petName}把线索铺成一排，原本混乱的小事渐渐有了方向。今天的秩序来自温柔的整理。`;
+  }
+  return `你和${petName}画了一条地图上没有的路，意外发现了一片会发光的云。好奇心也值得被记进日记。`;
 }

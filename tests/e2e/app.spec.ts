@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -22,32 +22,22 @@ async function launch(profilePath: string): Promise<ElectronApplication> {
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: "false",
       TODO_AGENT_E2E: "1",
+      TODO_AGENT_E2E_BACKGROUND: "1",
     },
   });
 }
 
+import { waitForElectronWindow } from '../helpers/electron-window';
 async function windowFor(
   app: ElectronApplication,
   kind: "main" | "quick" | "floating",
 ): Promise<Page> {
-  const existing = app
-    .windows()
-    .find((page) => new URL(page.url()).searchParams.get("window") === kind);
-  if (existing) return existing;
-  return app.waitForEvent("window", {
-    predicate: (page) => {
-      try {
-        return new URL(page.url()).searchParams.get("window") === kind;
-      } catch {
-        return false;
-      }
-    },
-  });
+  return waitForElectronWindow(app, kind);
 }
 
 async function finishOnboarding(page: Page): Promise<void> {
   const skip = page.getByRole("button", { name: "跳过并使用本地任务" });
-  if (await skip.isVisible().catch(() => false)) await skip.click();
+  if (await skip.isVisible().catch(() => false)) await skip.click({ force: true });
 }
 
 async function expectSingleMainShell(page: Page): Promise<void> {
@@ -418,6 +408,7 @@ test.describe("Todo Agent desktop shell", () => {
       { label: "同步问题", heading: "飞书连接与同步" },
       { label: "Agent", heading: "任务助理" },
       { label: "动态", heading: "动态与审计" },
+      { label: "文档中心", heading: "Todo Agent 项目文档" },
       { label: "设置", heading: "通用" },
     ];
 
@@ -448,6 +439,953 @@ test.describe("Todo Agent desktop shell", () => {
       await expect(button).toHaveClass(/active/u);
       await expectSingleMainShell(main);
     }
+  });
+
+  test("keeps audit detail keyboard-scoped and restores its trigger", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("button", { name: "动态", exact: true })
+      .click();
+    const trigger = main.getByRole("button", { name: "详情", exact: true }).first();
+    await trigger.click();
+
+    const dialog = main.getByRole("dialog", { name: /审计记录 #/u });
+    const done = dialog.getByRole("button", { name: "完成", exact: true });
+    await expect(done).toBeFocused();
+    await done.press("Tab");
+    await expect(done).toBeFocused();
+    await done.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+
+  test("keeps the calendar action-item preview keyboard-scoped and restores its trigger", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const { today, tomorrow } = await main.evaluate(() => {
+      const format = (date: Date) =>
+        `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+      const date = new Date();
+      const next = new Date(date);
+      next.setDate(next.getDate() + 1);
+      return { today: format(date), tomorrow: format(next) };
+    });
+    const calendarPath = path.join(profilePath, "desktop-action-items.ics");
+    await writeFile(
+      calendarPath,
+      [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "BEGIN:VEVENT",
+        "UID:desktop-action-items",
+        `DTSTART;VALUE=DATE:${today}`,
+        `DTEND;VALUE=DATE:${tomorrow}`,
+        "SUMMARY:桌面行动项验收",
+        "DESCRIPTION:行动项：联系客户\\n行动项：更新方案",
+        "END:VEVENT",
+        "END:VCALENDAR",
+      ].join("\r\n"),
+      "utf8",
+    );
+
+    const navigation = main.getByRole("navigation", { name: "主导航" });
+    await navigation.getByRole("button", { name: "时间线", exact: true }).click();
+    await main.getByLabel("选择日历文件").setInputFiles(calendarPath);
+    const trigger = main.getByRole("button", {
+      name: "从“桌面行动项验收”提取行动项",
+      exact: true,
+    });
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+
+    const sheet = main.getByRole("dialog", { name: "会议行动项预览" });
+    await expect(sheet).toBeVisible();
+    const firstInput = sheet.getByRole("textbox", { name: "行动项 1" });
+    await expect(firstInput).toBeFocused();
+    await firstInput.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+    await expect(main.getByRole("dialog", { name: "快速命令" })).toHaveCount(0);
+    await firstInput.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+
+  test("supports desktop inline capture without opening the full editor", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const composer = main.getByRole("form", { name: "快速添加到今天" });
+    const input = composer.getByRole("textbox", { name: "快速添加任务" });
+    await expect(composer).toBeVisible();
+    await expect(main.getByRole("form", { name: "新建任务" })).toHaveCount(0);
+
+    await input.fill("桌面快速捕获验收");
+    await input.press("Enter");
+    await expect(input).toHaveValue("");
+    await expect(main.getByText("桌面快速捕获验收", { exact: true })).toBeVisible();
+
+    const created = await main.evaluate(async () => {
+      const tasks = await window.desktopApi!.tasks.list({ includeDeleted: false });
+      return tasks.find((task) => task.title === "桌面快速捕获验收");
+    });
+    expect(created).toMatchObject({
+      source: { type: "local" },
+      plannedDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/u),
+    });
+
+    await main.getByRole("button", { name: "批量选择", exact: true }).click();
+    await expect(composer).toHaveCount(0);
+    await main.getByRole("button", { name: "退出选择", exact: true }).click();
+    await expect(composer).toBeVisible();
+  });
+
+  test("keeps the desktop new-task editor keyboard-scoped and restores its trigger", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const trigger = main.getByRole("button", { name: "新建", exact: true });
+    await trigger.click();
+    const form = main.getByRole("form", { name: "新建任务" });
+    const title = form.locator("#new-title");
+    await expect(title).toBeFocused();
+    await title.fill("键盘闭环验收");
+
+    const save = form.getByRole("button", { name: "保存到本地", exact: true });
+    await save.focus();
+    await save.press("Tab");
+    await expect(title).toBeFocused();
+
+    await title.press("Escape");
+    await expect(form).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  });
+
+  test("can collapse the wide desktop task inspector without losing context", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.getByRole("button", { name: /全部任务/u }).first().click();
+    const firstTitle = "验收-宽屏详情-一";
+    const secondTitle = "验收-宽屏详情-二";
+    for (const title of [firstTitle, secondTitle]) {
+      await main.getByRole("button", { name: "新建", exact: true }).click();
+      await main.locator("#new-title").fill(title);
+      await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+      await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+    }
+
+    const inspector = main.getByRole("complementary", { name: "任务详情" });
+    await expect(inspector).toBeVisible();
+    const before = await main.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>(".shell-grid");
+      const content = document.querySelector<HTMLElement>(".content-column");
+      if (!shell || !content) throw new Error("Task shell is missing");
+      return {
+        columns: getComputedStyle(shell).gridTemplateColumns,
+        contentWidth: content.getBoundingClientRect().width,
+      };
+    });
+
+    await main.getByLabel("收起任务详情").click();
+    await expect(inspector).toHaveCount(0);
+    await expect(main.locator(".shell-grid")).toHaveAttribute(
+      "data-inspector-collapsed",
+      "true",
+    );
+    await expect(main.getByLabel("展开任务详情")).toBeVisible();
+    await expect(main.getByLabel("展开任务详情")).toBeFocused();
+    const after = await main.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>(".shell-grid");
+      const content = document.querySelector<HTMLElement>(".content-column");
+      if (!shell || !content) throw new Error("Collapsed task shell is missing");
+      return {
+        columns: getComputedStyle(shell).gridTemplateColumns,
+        contentWidth: content.getBoundingClientRect().width,
+      };
+    });
+    expect(after.columns).not.toBe(before.columns);
+    expect(after.contentWidth).toBeGreaterThan(before.contentWidth + 200);
+
+    await main.getByLabel("展开任务详情").click();
+    await expect(inspector).toBeVisible();
+    await main
+      .locator(".task-row", { hasText: firstTitle })
+      .locator(".task-body")
+      .click();
+    await main.getByLabel("收起任务详情").click();
+    await main
+      .locator(".task-row", { hasText: secondTitle })
+      .locator(".task-body")
+      .click();
+    await expect(inspector).toBeVisible();
+    await expect(inspector.getByLabel("任务标题", { exact: true })).toHaveValue(
+      secondTitle,
+    );
+  });
+
+  test("supports keyboard navigation through the desktop task list", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.getByRole("button", { name: "全部任务", exact: true }).click();
+    const firstCreatedTitle = "验收-键盘列表-一";
+    const secondCreatedTitle = "验收-键盘列表-二";
+    for (const title of [firstCreatedTitle, secondCreatedTitle]) {
+      await main.getByRole("button", { name: "新建", exact: true }).click();
+      await main.locator("#new-title").fill(title);
+      await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+      await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+    }
+
+    const taskBodies = main.locator(".task-list .task-body");
+    const orderedTitles = await taskBodies.evaluateAll((elements) =>
+      elements.map((element) => element.querySelector(".task-title")?.textContent ?? ""),
+    );
+    expect(orderedTitles.length).toBeGreaterThan(1);
+    await taskBodies.first().click();
+    await taskBodies.first().press("ArrowDown");
+    await expect(main.locator(".task-row.selected .task-title")).toHaveText(
+      orderedTitles[1],
+    );
+
+    await main.locator(".task-row.selected .task-body").press("k");
+    await expect(main.locator(".task-row.selected .task-title")).toHaveText(
+      orderedTitles[0],
+    );
+    await main.locator(".task-row.selected .task-body").press("j");
+    await expect(main.locator(".task-row.selected .task-title")).toHaveText(
+      orderedTitles[1],
+    );
+    await expect(main.getByText("点击任务后，使用 ↑ ↓ 或 J K 浏览", { exact: true })).toBeVisible();
+    await expect(main.locator(".task-keyboard-hint kbd").first()).toHaveText("E");
+    await expect(main.locator(".task-keyboard-hint kbd").nth(1)).toHaveText("X");
+
+    const composer = main.getByRole("form", { name: "快速添加到本地任务" });
+    const input = composer.getByRole("textbox", { name: "快速添加任务" });
+    await input.focus();
+    await input.press("ArrowDown");
+    await expect(main.locator(".task-row.selected .task-title")).toHaveText(
+      orderedTitles[1],
+    );
+    await input.press("e");
+    await expect(input).toHaveValue("e");
+    await input.fill("");
+
+    await main
+      .locator(".task-row", { hasText: firstCreatedTitle })
+      .locator(".task-body")
+      .click();
+    await expect(main.locator(".task-row.selected .task-title")).toHaveText(
+      firstCreatedTitle,
+    );
+    await main.locator(".task-row.selected .task-body").press("e");
+    await expect(main.locator(".task-row.selected .task-title")).toHaveText(
+      secondCreatedTitle,
+    );
+    await expect.poll(async () =>
+      main.evaluate(
+        () => document.activeElement?.closest(".task-row")?.querySelector(".task-title")?.textContent ?? "",
+      ),
+    ).toBe(secondCreatedTitle);
+    await expect.poll(async () => {
+      const tasks = await main.evaluate(async () => window.desktopApi!.tasks.list({ includeDeleted: false }));
+      return tasks.find((task) => task.title === firstCreatedTitle)?.status;
+    }).toBe("completed");
+    await expect(main.getByText("任务已完成", { exact: true })).toBeVisible();
+  });
+
+  test("supports desktop contextual capture below a Today task with reversible ordering", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const today = await main.evaluate(() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    });
+    const firstTitle = "验收-当前任务后-一";
+    const secondTitle = "验收-当前任务后-二";
+    await main.evaluate(
+      async ({ today: plannedDate, firstTitle: first, secondTitle: second }) => {
+        const api = window.desktopApi!.tasks;
+        await api.create({
+          title: first,
+          plannedDate,
+          privateOrder: 0,
+          source: { type: "local" },
+        });
+        await api.create({
+          title: second,
+          plannedDate,
+          privateOrder: 1,
+          source: { type: "local" },
+        });
+      },
+      { today, firstTitle, secondTitle },
+    );
+
+    const firstRow = main.locator(".task-row", { hasText: firstTitle });
+    await expect(firstRow).toBeVisible();
+    await expect(main.locator(".task-row", { hasText: secondTitle })).toBeVisible();
+    await firstRow.locator(".task-body").click();
+    await firstRow.locator(".task-body").press("Space");
+
+    const contextual = main.locator("form.inline-task-composer-after");
+    await expect(contextual).toHaveAttribute(
+      "aria-label",
+      `在“${firstTitle}”后快速添加到今天`,
+    );
+    const contextualInput = contextual.getByRole("textbox", {
+      name: "快速添加任务",
+    });
+    await expect(contextualInput).toBeFocused();
+    await contextualInput.press("Escape");
+    await expect(contextual).toHaveCount(0);
+    await expect(firstRow.locator(".task-body")).toBeFocused();
+
+    await firstRow.locator(".task-body").press("Space");
+    await contextualInput.fill("验收-当前任务后-插入");
+    await contextualInput.press("Enter");
+    await expect(main.locator(".task-row", { hasText: "验收-当前任务后-插入" })).toBeVisible();
+    await expect.poll(async () =>
+      main.locator(".task-list .task-title").evaluateAll((elements) =>
+        elements
+          .map((element) => element.textContent ?? "")
+          .filter((title) => title.startsWith("验收-当前任务后-")),
+      ),
+    ).toEqual([firstTitle, "验收-当前任务后-插入", secondTitle]);
+    await expect(main.getByText("已添加到当前任务后", { exact: true })).toBeVisible();
+
+    await main.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(main.locator(".task-row", { hasText: "验收-当前任务后-插入" })).toHaveCount(0);
+    await expect.poll(async () =>
+      main.evaluate(async ({ first, second }) => {
+        const sections = await window.desktopApi!.tasks.sections({ view: "today" });
+        return sections
+          .flatMap((section) => section.tasks.map((task) => task.title))
+          .filter((title) => title === first || title === second);
+      }, { first: firstTitle, second: secondTitle }),
+    ).toEqual([firstTitle, secondTitle]);
+  });
+
+  test("supports keyboard multi-select in list and table views", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.getByRole("button", { name: "全部任务", exact: true }).click();
+    const titles = ["验收-键盘多选-一", "验收-键盘多选-二", "验收-键盘多选-三"];
+    for (const title of titles) {
+      await main.getByRole("button", { name: "新建", exact: true }).click();
+      await main.locator("#new-title").fill(title);
+      await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+      await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+    }
+
+    const firstRow = main.locator(".task-row", { hasText: titles[0] });
+    await firstRow.locator(".task-body").click();
+    await firstRow.locator(".task-body").press("x");
+    await expect(main.getByRole("region", { name: "批量操作" })).toBeVisible();
+    await expect(main.getByText("已选择 1 项", { exact: true })).toBeVisible();
+    await expect(firstRow.locator(".bulk-select-checkbox")).toBeChecked();
+
+    await main.locator(".task-row.selected .task-body").press("ArrowDown");
+    await expect(main.locator(".task-row.selected .task-title")).toHaveText(titles[1]);
+    await main.locator(".task-row.selected .task-body").press("x");
+    await expect(main.getByText("已选择 2 项", { exact: true })).toBeVisible();
+    await expect(main.locator(".task-row.bulk-selected")).toHaveCount(2);
+    await main.locator(".task-row.selected .task-body").press(",");
+    await expect(
+      main.getByRole("button", { name: "全选当前列表", exact: true }),
+    ).toBeFocused();
+
+    await main.getByRole("button", { name: "表格", exact: true }).click();
+    const tableSecond = main.locator(".task-table-row", { hasText: titles[1] });
+    await tableSecond.locator(".task-table-title").focus();
+    await tableSecond.locator(".task-table-title").press("x");
+    await expect(main.getByText("已选择 1 项", { exact: true })).toBeVisible();
+    await expect(tableSecond.locator(".bulk-select-checkbox")).not.toBeChecked();
+    await expect(main.locator(".task-table-row.bulk-selected")).toHaveCount(1);
+
+    await main.getByRole("button", { name: "退出选择", exact: true }).click();
+    await expect(main.getByRole("region", { name: "批量操作" })).toBeHidden();
+  });
+
+  test("opens searchable desktop shortcut help and protects text input", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.keyboard.press("?");
+    const sheet = main.getByRole("dialog", { name: "键盘快捷键" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText("选择连续范围", { exact: true })).toBeVisible();
+    await expect(sheet.getByText("18 个快捷键", { exact: true })).toBeVisible();
+
+    const helpSearch = sheet.getByLabel("搜索快捷键");
+    await helpSearch.fill("连续范围");
+    await expect(sheet.getByText("选择连续范围", { exact: true })).toBeVisible();
+    await expect(sheet.getByText("1 个快捷键", { exact: true })).toBeVisible();
+    await expect(sheet.getByText("完成 / 重新打开任务", { exact: true })).toHaveCount(0);
+
+    await helpSearch.fill("不存在的快捷键");
+    await expect(sheet.getByText("没有匹配的快捷键", { exact: true })).toBeVisible();
+    await helpSearch.press("Escape");
+    await expect(sheet).toBeHidden();
+    const helpButton = main.getByRole("button", { name: "打开快捷键说明", exact: true });
+    await expect(helpButton).toBeFocused();
+
+    const commandButton = main.getByRole("button", { name: "打开快速命令", exact: true });
+    await commandButton.click();
+    const palette = main.getByRole("dialog", { name: "快速命令" });
+    await palette.getByRole("button", { name: "关闭快速命令" }).click();
+    await expect(palette).toBeHidden();
+    await expect(commandButton).toBeFocused();
+
+    await commandButton.click();
+    const actionPalette = main.getByRole("dialog", { name: "快速命令" });
+    await actionPalette.getByRole("combobox", { name: "搜索快速命令" }).fill("快捷键");
+    const shortcutCommands = actionPalette.getByRole("option");
+    const shortcutCommand = shortcutCommands.last();
+    await shortcutCommand.focus();
+    await shortcutCommand.press("Tab");
+    await expect(actionPalette.getByRole("button", { name: "关闭快速命令" })).toBeFocused();
+    await actionPalette.getByRole("button", { name: "关闭快速命令" }).press("Shift+Tab");
+    await expect(shortcutCommand).toBeFocused();
+    await actionPalette.getByRole("option", { name: /查看快捷键/u }).click();
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole("button", { name: "关闭快捷键说明", exact: true }).click();
+    await expect(sheet).toBeHidden();
+    await expect(helpButton).toBeFocused();
+
+    await helpButton.click();
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole("button", { name: "关闭快捷键说明", exact: true }).click();
+    await expect(sheet).toBeHidden();
+    await expect(helpButton).toBeFocused();
+
+    const taskSearch = main.getByLabel("搜索任务");
+    await taskSearch.focus();
+    await main.keyboard.press("?");
+    await expect(sheet).toBeHidden();
+    await expect(taskSearch).toHaveValue("?");
+  });
+
+  test("lands on the searched task and restores keyboard focus in a long list", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const targetTitle = "验收-全局查找-直接定位";
+    await main.evaluate(async ({ target }) => {
+      const api = window.desktopApi!.tasks;
+      await api.create({
+        title: target,
+        source: { type: "local" },
+      });
+      for (let index = 1; index <= 28; index += 1) {
+        await api.create({
+          title: `验收-全局查找-列表填充-${index}`,
+          source: { type: "local" },
+        });
+      }
+    }, { target: targetTitle });
+
+    await main.getByRole("button", { name: /全部任务/u }).first().click();
+    const targetRow = main.locator(".task-row", { hasText: targetTitle });
+    await expect(targetRow).toBeVisible();
+    const scrolledAway = await main.evaluate(({ target }) => {
+      const content = document.querySelector<HTMLElement>(".content-column");
+      const row = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"))
+        .find((element) => element.querySelector(".task-title")?.textContent === target);
+      if (!content || !row) throw new Error("The target task is missing from All tasks");
+      const contentRect = content.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const maxScroll = Math.max(0, content.scrollHeight - content.clientHeight);
+      content.scrollTop = rowRect.top < contentRect.top + contentRect.height / 2 ? maxScroll : 0;
+      const movedRect = row.getBoundingClientRect();
+      return {
+        hasScrollRange: maxScroll > 0,
+        visible: movedRect.top >= contentRect.top && movedRect.bottom <= contentRect.bottom,
+      };
+    }, { target: targetTitle });
+    expect(scrolledAway.hasScrollRange).toBe(true);
+    expect(scrolledAway.visible).toBe(false);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const searchOpener = main.getByRole("button", { name: "打开快速命令", exact: true });
+    await searchOpener.focus();
+    await main.keyboard.press(`${modifier}+Shift+F`);
+    const sheet = main.getByRole("dialog", { name: "全局查找" });
+    const search = sheet.getByRole("combobox", { name: "全局搜索" });
+    await expect(search).toBeFocused();
+    await search.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(searchOpener).toBeFocused();
+    await main.keyboard.press(`${modifier}+Shift+F`);
+    await expect(search).toBeFocused();
+    await search.fill(targetTitle);
+    const result = sheet.getByRole("option", { name: new RegExp(targetTitle, "u") });
+    await expect(result).toBeVisible();
+    await result.focus();
+    await result.press("Tab");
+    await expect(sheet.getByRole("button", { name: "关闭全局查找" })).toBeFocused();
+    await sheet.getByRole("button", { name: "关闭全局查找" }).press("Shift+Tab");
+    await expect(result).toBeFocused();
+    await search.press("Enter");
+
+    await expect(sheet).toBeHidden();
+    await expect.poll(async () =>
+      main.evaluate(() =>
+        document.activeElement?.closest<HTMLElement>("[data-task-id]")
+          ?.querySelector<HTMLElement>(".task-title, .task-table-title")
+          ?.textContent ?? "",
+      ),
+    ).toBe(targetTitle);
+    await expect(main.locator(".task-row.selected .task-title")).toHaveText(targetTitle);
+
+    const focusPosition = await main.evaluate(() => {
+      const content = document.querySelector<HTMLElement>(".content-column");
+      const row = document.activeElement?.closest<HTMLElement>("[data-task-id]");
+      if (!content || !row) throw new Error("The searched task did not receive focus");
+      const contentRect = content.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      return {
+        visible: rowRect.top >= contentRect.top && rowRect.bottom <= contentRect.bottom,
+      };
+    });
+    expect(focusPosition.visible).toBe(true);
+  });
+
+  test("keeps desktop Inbox triage focused from open through close", async ({}, testInfo) => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const titles = ["验收-暂存整理-一", "验收-暂存整理-二"];
+    await main.evaluate(async ({ titles: taskTitles }) => {
+      const api = window.desktopApi!.tasks;
+      for (const title of taskTitles) {
+        await api.create({ title, source: { type: "local" } });
+      }
+    }, { titles });
+
+    await main.getByRole("button", { name: "暂存", exact: true }).click();
+    const trigger = main.getByRole("button", { name: "整理暂存", exact: true });
+    await expect(trigger).toBeVisible();
+    await trigger.focus();
+    await trigger.press("Enter");
+
+    const sheet = main.getByRole("dialog", { name: "把想法放到合适的位置" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole("button", { name: /今天/u })).toBeFocused();
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await main.keyboard.press(`${modifier}+K`);
+    await expect(main.getByRole("dialog", { name: "快速命令" })).toBeHidden();
+    await expect(sheet.getByRole("button", { name: /今天/u })).toBeFocused();
+    await sheet.screenshot({ path: testInfo.outputPath("inbox-triage-focused.png") });
+    await expect(sheet.getByRole("progressbar", { name: "暂存整理进度" })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+
+    await main.keyboard.press("s");
+    await expect(sheet.getByRole("heading", { name: titles[1] })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: /今天/u })).toBeFocused();
+    await expect(sheet.getByRole("progressbar", { name: "暂存整理进度" })).toHaveAttribute(
+      "aria-valuenow",
+      "1",
+    );
+
+    await main.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    await main.getByRole("button", { name: "打开快速命令", exact: true }).click();
+    const palette = main.getByRole("dialog", { name: "快速命令" });
+    await palette.getByRole("combobox", { name: "搜索快速命令" }).fill("整理暂存");
+    await palette.getByRole("option", { name: /^整理暂存/u }).click();
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole("button", { name: /今天/u })).toBeFocused();
+    await main.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    await main.getByRole("button", { name: "打开快速命令", exact: true }).click();
+    const repeatedPalette = main.getByRole("dialog", { name: "快速命令" });
+    await repeatedPalette
+      .getByRole("combobox", { name: "搜索快速命令" })
+      .fill("整理暂存");
+    await repeatedPalette
+      .getByRole("option", { name: /^整理暂存/u })
+      .click();
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole("button", { name: /今天/u })).toBeFocused();
+    await main.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+
+  test("supports a reversible desktop focus layout for the sidebar", async () => {
+    app = await launch(profilePath);
+    let main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    await resizeMainWindow(app, 1180, 760);
+
+    const sidebarToggle = main.getByRole("button", { name: "隐藏侧栏", exact: true });
+    await expect(sidebarToggle).toBeVisible();
+    const getLayout = () =>
+      main.evaluate(() => {
+        const shell = document.querySelector<HTMLElement>(".shell-grid");
+        const sidebar = document.querySelector<HTMLElement>(".sidebar");
+        if (!shell || !sidebar) throw new Error("Desktop shell is missing");
+        const columns = getComputedStyle(shell).gridTemplateColumns.split(" ");
+        return {
+          firstColumn: columns[0],
+          sidebarVisibility: getComputedStyle(sidebar).visibility,
+          sidebarPointerEvents: getComputedStyle(sidebar).pointerEvents,
+        };
+      });
+
+    await sidebarToggle.click();
+    await expect(main.getByRole("button", { name: "显示侧栏", exact: true })).toBeVisible();
+    await expect.poll(getLayout).toEqual({
+      firstColumn: "0px",
+      sidebarVisibility: "hidden",
+      sidebarPointerEvents: "none",
+    });
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await main.keyboard.press(`${modifier}+/`);
+    await expect(main.getByRole("button", { name: "隐藏侧栏", exact: true })).toBeVisible();
+    await expect.poll(getLayout).toMatchObject({ firstColumn: /^(?!0px)/u });
+
+    await main.getByRole("button", { name: "打开快速命令", exact: true }).click();
+    const palette = main.getByRole("dialog", { name: "快速命令" });
+    await palette.getByRole("combobox", { name: "搜索快速命令" }).fill("隐藏侧栏");
+    await palette.getByRole("option", { name: /隐藏侧栏/u }).click();
+    await expect(main.getByRole("button", { name: "显示侧栏", exact: true })).toBeVisible();
+
+    await resizeMainWindow(app, 760, 600);
+    await expect(main.getByRole("button", { name: "显示侧栏", exact: true })).toBeHidden();
+    await expect.poll(() =>
+      main.evaluate(() => {
+        const sidebar = document.querySelector<HTMLElement>(".sidebar");
+        if (!sidebar) throw new Error("Sidebar is missing");
+        return {
+          display: getComputedStyle(sidebar).display,
+          visibility: getComputedStyle(sidebar).visibility,
+        };
+      }),
+    ).toEqual({ display: "flex", visibility: "visible" });
+    await main.getByRole("button", { name: "打开快速命令", exact: true }).click();
+    const narrowPalette = main.getByRole("dialog", { name: "快速命令" });
+    await narrowPalette.getByRole("combobox", { name: "搜索快速命令" }).fill("侧栏");
+    await expect(narrowPalette.getByRole("option")).toHaveCount(0);
+    await narrowPalette.getByRole("combobox", { name: "搜索快速命令" }).press("Escape");
+    await expect(narrowPalette).toBeHidden();
+    await resizeMainWindow(app, 1180, 760);
+
+    await app.close();
+    app = await launch(profilePath);
+    main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    await resizeMainWindow(app, 1180, 760);
+    await expect(main.getByRole("button", { name: "显示侧栏", exact: true })).toBeVisible();
+    await expect.poll(getLayout).toMatchObject({ firstColumn: "0px" });
+  });
+
+  test("undoes the latest desktop task change from the shortcut and command palette", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const undoModifier = process.platform === "darwin" ? "Meta" : "Control";
+    const firstTitle = "验收-全局撤销-快捷键";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(firstTitle);
+    await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+    await expect(main.locator(".task-row", { hasText: firstTitle })).toBeVisible();
+
+    await main.locator(".content-column").focus();
+    await main.keyboard.press(`${undoModifier}+z`);
+    await expect(main.locator(".task-row", { hasText: firstTitle })).toHaveCount(0);
+    await expect(main.getByText("已撤销最近一次任务变更", { exact: true })).toBeVisible();
+
+    await main.locator(".content-column").focus();
+    await main.keyboard.press(`${undoModifier}+Shift+z`);
+    await expect(main.locator(".task-row", { hasText: firstTitle })).toBeVisible();
+    await expect(main.getByText("已重做最近一次任务变更", { exact: true })).toBeVisible();
+
+    const secondTitle = "验收-全局撤销-命令";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(secondTitle);
+    await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+    await expect(main.locator(".task-row", { hasText: secondTitle })).toBeVisible();
+
+    const taskSearch = main.getByLabel("搜索任务");
+    await taskSearch.fill("保留输入撤销");
+    await main.keyboard.press(`${undoModifier}+z`);
+    await expect.poll(async () => {
+      const tasks = await main.evaluate(async () => window.desktopApi!.tasks.list({ includeDeleted: false }));
+      return tasks.some((task) => task.title === secondTitle);
+    }).toBe(true);
+    await taskSearch.fill("");
+
+    await main.getByRole("button", { name: "打开快速命令", exact: true }).click();
+    const palette = main.getByRole("dialog", { name: "快速命令" });
+    await palette.getByRole("combobox", { name: "搜索快速命令" }).fill("撤销最近任务变更");
+    await expect(palette.getByRole("option", { name: /撤销最近任务变更/u })).toBeVisible();
+    await palette.getByRole("option", { name: /撤销最近任务变更/u }).click();
+    await expect(main.locator(".task-row", { hasText: secondTitle })).toHaveCount(0);
+    await expect(main.getByText("已撤销最近一次任务变更", { exact: true })).toBeVisible();
+
+    await main.getByRole("button", { name: "打开快速命令", exact: true }).click();
+    const redoPalette = main.getByRole("dialog", { name: "快速命令" });
+    await redoPalette.getByRole("combobox", { name: "搜索快速命令" }).fill("重做最近任务变更");
+    await expect(redoPalette.getByRole("option", { name: /重做最近任务变更/u })).toBeVisible();
+    await redoPalette.getByRole("option", { name: /重做最近任务变更/u }).click();
+    await expect(main.locator(".task-row", { hasText: secondTitle })).toBeVisible();
+    await expect(main.getByText("已重做最近一次任务变更", { exact: true })).toBeVisible();
+  });
+
+  test("supports modifier-click selection for non-contiguous desktop tasks", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.getByRole("button", { name: "全部任务", exact: true }).click();
+    const titles = ["验收-不连续选择-一", "验收-不连续选择-二", "验收-不连续选择-三"];
+    for (const title of titles) {
+      await main.getByRole("button", { name: "新建", exact: true }).click();
+      await main.locator("#new-title").fill(title);
+      await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+      await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+    }
+
+    const firstRow = main.locator(".task-row", { hasText: titles[0] });
+    const secondRow = main.locator(".task-row", { hasText: titles[1] });
+    const thirdRow = main.locator(".task-row", { hasText: titles[2] });
+    const modifier: "Meta" | "Control" = process.platform === "darwin" ? "Meta" : "Control";
+    await firstRow.locator(".task-body").click();
+    await thirdRow.locator(".task-body").click({ modifiers: [modifier] });
+    await expect(main.getByText("已选择 2 项", { exact: true })).toBeVisible();
+    await expect(firstRow).toHaveClass(/bulk-selected/u);
+    await expect(thirdRow).toHaveClass(/bulk-selected/u);
+    await expect(secondRow).not.toHaveClass(/bulk-selected/u);
+
+    await thirdRow.locator(".task-body").click({ modifiers: [modifier] });
+    await expect(main.getByText("已选择 1 项", { exact: true })).toBeVisible();
+    await expect(firstRow).toHaveClass(/bulk-selected/u);
+    await expect(thirdRow).not.toHaveClass(/bulk-selected/u);
+  });
+
+  test("supports shift-click ranges in list and table views", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.getByRole("button", { name: "全部任务", exact: true }).click();
+    const titles = ["验收-Shift范围-一", "验收-Shift范围-二", "验收-Shift范围-三"];
+    for (const title of titles) {
+      await main.getByRole("button", { name: "新建", exact: true }).click();
+      await main.locator("#new-title").fill(title);
+      await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+      await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+    }
+
+    const firstRow = main.locator(".task-row", { hasText: titles[0] });
+    const lastRow = main.locator(".task-row", { hasText: titles[2] });
+    await firstRow.locator(".task-body").click();
+    await lastRow.locator(".task-body").click({ modifiers: ["Shift"] });
+    await expect(main.getByRole("region", { name: "批量操作" })).toBeVisible();
+    for (const title of titles) {
+      await expect(main.locator(".task-row", { hasText: title })).toHaveClass(/bulk-selected/u);
+    }
+
+    await main.getByRole("button", { name: "退出选择", exact: true }).click();
+    await main.getByRole("button", { name: "表格", exact: true }).click();
+    const firstTableRow = main.locator(".task-table-row", { hasText: titles[0] });
+    const lastTableRow = main.locator(".task-table-row", { hasText: titles[2] });
+    await firstTableRow.locator(".task-table-title").click();
+    await lastTableRow.locator(".task-table-title").click({ modifiers: ["Shift"] });
+    await expect(main.getByText("已选择 3 项", { exact: true })).toBeVisible();
+    for (const title of titles) {
+      await expect(main.locator(".task-table-row", { hasText: title })).toHaveClass(/bulk-selected/u);
+    }
+  });
+
+  test("dismisses desktop task layers with Escape and restores focus", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const title = "验收-Escape分层退出";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(title);
+    await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+    const row = main.locator(".task-row", { hasText: title });
+    await expect(row).toBeVisible();
+    await row.locator(".task-body").click();
+    await expect(main.getByRole("complementary", { name: "任务详情" })).toBeVisible();
+    await row.locator(".task-body").press("Escape");
+    await expect(main.locator(".inspector:not(.inspector-empty)")).toHaveCount(0);
+    await expect.poll(async () =>
+      main.evaluate(() => document.activeElement?.closest("[data-task-id]")?.querySelector(".task-title")?.textContent ?? ""),
+    ).toBe(title);
+
+    await main.getByRole("button", { name: "筛选", exact: true }).click();
+    const filter = main.getByRole("dialog", { name: "任务筛选" });
+    const filterQuery = filter.locator("#smart-view-query");
+    await expect(filterQuery).toBeFocused();
+    await filter.getByRole("button", { name: "完成", exact: true }).focus();
+    await filter.getByRole("button", { name: "完成", exact: true }).press("Tab");
+    await expect(filterQuery).toBeFocused();
+    await filterQuery.press("Escape");
+    await expect(filter).toBeHidden();
+    await expect.poll(async () =>
+      main.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? ""),
+    ).toBe("筛选");
+
+    await main.getByRole("button", { name: "批量选择", exact: true }).click();
+    await row.locator(".task-body").click();
+    await main.getByRole("button", { name: "完成", exact: true }).click();
+    const preview = main.getByRole("dialog", { name: "批量操作预览" });
+    await expect(preview).toBeVisible();
+    const previewCancel = preview.getByRole("button", { name: "取消", exact: true });
+    const previewConfirm = preview.getByRole("button", { name: "确认执行", exact: true });
+    await expect(previewCancel).toBeFocused();
+    await previewCancel.press("Tab");
+    await expect(previewConfirm).toBeFocused();
+    await previewConfirm.press("Escape");
+    await expect(preview).toBeHidden();
+    await expect(main.getByRole("region", { name: "批量操作" })).toBeVisible();
+    await main.keyboard.press("Escape");
+    await expect(main.getByRole("region", { name: "批量操作" })).toBeHidden();
+
+    await main.getByRole("button", { name: "批量选择", exact: true }).click();
+    await row.locator(".task-body").click();
+    await main.getByRole("button", { name: "编辑属性", exact: true }).click();
+    const editSheet = main.getByRole("dialog", { name: "批量编辑任务" });
+    await expect(editSheet).toBeVisible();
+    await editSheet.getByLabel("批量优先级").press("Escape");
+    await expect(editSheet).toBeHidden();
+    await expect(main.getByRole("region", { name: "批量操作" })).toBeVisible();
+
+    await main.getByRole("button", { name: "编辑属性", exact: true }).click();
+    const reopenedEditSheet = main.getByRole("dialog", { name: "批量编辑任务" });
+    await expect(reopenedEditSheet.getByLabel("批量优先级")).toBeFocused();
+    await reopenedEditSheet.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(reopenedEditSheet).toBeHidden();
+    await expect(main.getByRole("button", { name: "编辑属性", exact: true })).toBeFocused();
+  });
+
+  test("keeps the Agent welcome task count aligned with the loaded view", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const title = "验收-Agent实时任务数量";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(title);
+    await main.getByRole("button", { name: "保存到本地", exact: true }).click();
+    await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+
+    const taskCount = await main.evaluate(
+      async () => (await window.desktopApi!.tasks.list({ view: "today" })).length,
+    );
+    expect(taskCount).toBeGreaterThan(0);
+
+    await main
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("button", { name: "Agent", exact: true })
+      .click();
+    const welcome = main.locator(".agent-thread .message").first();
+    await expect(welcome).toContainText(
+      `当前有 ${taskCount} 项任务在这个视图里。`,
+    );
+    await expect(welcome).not.toContainText("正在读取当前视图的任务");
+  });
+
+  test("exposes a local task reminder budget and ignore backoff in Settings", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.getByRole("button", { name: "设置", exact: true }).click();
+    const settingsNavigation = main.getByRole("navigation", { name: "设置导航" });
+    await settingsNavigation.getByRole("button", { name: "提醒", exact: true }).click();
+    await expect(main.getByRole("heading", { name: "提醒", exact: true })).toBeVisible();
+
+    const budget = main.getByLabel("每日任务提醒预算");
+    await expect(budget).toHaveValue("8");
+    await budget.fill("5");
+    await budget.press("Enter");
+    await expect(budget).toHaveValue("5");
+    await expect(main.getByText("同一任务连续关闭两次提醒后不再重复打扰", { exact: false })).toBeVisible();
+    const interval = main.getByLabel("同类任务提醒间隔");
+    await expect(interval).toHaveValue("120");
+    await interval.fill("60");
+    await interval.press("Enter");
+    await expect(interval).toHaveValue("60");
+    await main.getByLabel("本地任务提醒策略").selectOption("important-only");
+    const persisted = await main.evaluate(async () => window.desktopApi!.settings.get());
+    expect(persisted.notifications.dailyTaskReminderLimit).toBe(5);
+    expect(persisted.notifications.taskIgnoreBackoffEnabled).toBe(true);
+    expect(persisted.notifications.taskReminderMinIntervalMinutes).toBe(60);
+    expect(persisted.notifications.taskReminderSourceMode.local).toBe("important-only");
+
+    await settingsNavigation.getByRole("button", { name: "Todo Pet", exact: true }).click();
+    const companionBudget = main.getByLabel("每日主动陪伴预算");
+    await expect(companionBudget).toHaveValue("2");
+    await companionBudget.fill("3");
+    await companionBudget.press("Enter");
+    await expect(companionBudget).toHaveValue("3");
+    const petPersisted = await main.evaluate(async () => window.desktopApi!.settings.get());
+    expect(petPersisted.pet.proactiveDailyLimit).toBe(3);
+
+    await settingsNavigation.getByRole("button", { name: "隐私与数据", exact: true }).click();
+    const clearTrigger = main.getByRole("button", { name: "选择清除范围", exact: true });
+    await clearTrigger.click();
+    const clearDialog = main.getByRole("dialog", { name: "选择要清除的本地数据" });
+    const clearCancel = clearDialog.getByRole("button", { name: "取消", exact: true });
+    const clearAction = clearDialog.getByRole("button", { name: "继续并系统确认", exact: true });
+    await expect(clearCancel).toBeFocused();
+    await clearCancel.press("Tab");
+    await expect(clearAction).toBeFocused();
+    await clearAction.press("Tab");
+    await expect(clearDialog.getByLabel("清除任务")).toBeFocused();
+    await clearDialog.getByLabel("清除任务").press("Escape");
+    await expect(clearDialog).toHaveCount(0);
+    await expect(clearTrigger).toBeFocused();
   });
 
   test("clears a stale task search when explicit navigation opens a task collection", async () => {
@@ -517,6 +1455,219 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.locator(".task-row", { hasText: openTitle })).toBeVisible();
   });
 
+  test("keeps task discussions local and supports add, edit, and remove", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const title = "验收-任务讨论-本地";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(title);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    const row = main.locator(".task-row", { hasText: title });
+    await expect(row).toBeVisible();
+    await row.locator(".task-body").click();
+
+    const inspector = main.getByRole("complementary", { name: "任务详情" });
+    const composer = inspector.getByLabel("新增任务讨论");
+    await composer.fill("先确认接口契约，再开始实现。\n这是本机上下文。");
+    await inspector.getByRole("button", { name: "添加讨论" }).click();
+    await expect(inspector.getByText("先确认接口契约，再开始实现。", { exact: false })).toBeVisible();
+    await expect(inspector.getByText("仅保存在本机；不会写回飞书", { exact: false })).toBeVisible();
+
+    const comment = inspector.locator(".task-comment").first();
+    await comment.getByRole("button", { name: "编辑" }).click();
+    const edit = comment.getByLabel("编辑讨论");
+    await edit.fill("已确认接口契约，继续实现。");
+    await comment.getByRole("button", { name: "保存" }).click();
+    await expect(comment.getByText("已确认接口契约，继续实现。", { exact: true })).toBeVisible();
+
+    await comment.getByRole("button", { name: "删除" }).click();
+    await expect(comment).toHaveCount(0);
+    await expect(inspector.getByText("给未来的自己留一句上下文", { exact: false })).toBeVisible();
+  });
+
+  test("captures a collapsible private research card with source and action items", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const title = "验收-研究卡-本机上下文";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(title);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    const row = main.locator(".task-row", { hasText: title });
+    await expect(row).toBeVisible();
+    await row.locator(".task-body").click();
+    const inspector = main.getByRole("complementary", { name: "任务详情" });
+    const researchTitle = inspector.getByLabel("研究卡标题");
+    await researchTitle.scrollIntoViewIfNeeded();
+    await researchTitle.fill("竞品定价摘要");
+    const researchUrl = inspector.getByLabel("研究卡来源链接");
+    await researchUrl.scrollIntoViewIfNeeded();
+    await researchUrl.fill("https://example.com/pricing");
+    const researchSummary = inspector.getByLabel("研究卡摘要");
+    await researchSummary.scrollIntoViewIfNeeded();
+    await researchSummary.fill("按团队规模分层收费，个人版强调快速上手。");
+    const researchActions = inspector.getByLabel("研究卡行动项");
+    await researchActions.scrollIntoViewIfNeeded();
+    await researchActions.fill("验证个人版限制\n整理对比表");
+    const addResearch = inspector.getByRole("button", { name: "添加研究卡", exact: true });
+    await addResearch.scrollIntoViewIfNeeded();
+    await addResearch.click();
+
+    const card = inspector.locator(".research-card", { hasText: "竞品定价摘要" });
+    await expect(card).toBeVisible();
+    await expect(inspector).toContainText("不会写回飞书");
+    await card.locator("summary").click();
+    await expect(card).toHaveAttribute("open", "");
+    await expect(card).toContainText("个人版限制");
+    await card.locator("summary").click();
+    await expect(card).not.toHaveAttribute("open", "");
+    await card.locator("summary").click();
+    await card.getByRole("button", { name: "移除研究卡竞品定价摘要" }).click();
+    await expect(card).toHaveCount(0);
+  });
+
+  test("previews an atomic batch action and undoes it from the task list", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const titles = ["验收-批量操作-一", "验收-批量操作-二"];
+    for (const title of titles) {
+      await main.getByRole("button", { name: "新建", exact: true }).click();
+      await main.locator("#new-title").fill(title);
+      await main.getByRole("button", { name: "保存到本地" }).click();
+      await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+    }
+
+    await main.getByRole("button", { name: "批量选择", exact: true }).click();
+    for (const title of titles) {
+      await main
+        .locator(".task-row", { hasText: title })
+        .locator(".bulk-select-checkbox")
+        .check();
+    }
+    await expect(main.getByText("已选择 2 项", { exact: true })).toBeVisible();
+    await main.getByRole("button", { name: "完成", exact: true }).click();
+    await expect(main.getByRole("dialog", { name: "批量操作预览" })).toContainText(
+      "将对 2 项任务执行“完成任务”",
+    );
+    await main.getByRole("button", { name: "确认执行", exact: true }).click();
+    await expect(
+      main.locator(".task-row.completed", { hasText: titles[0] }),
+    ).toBeVisible();
+    await expect(
+      main.locator(".task-row.completed", { hasText: titles[1] }),
+    ).toBeVisible();
+    await expect(
+      main.getByRole("button", { name: "批量选择", exact: true }),
+    ).toBeFocused();
+
+    await main.getByRole("button", { name: "撤销", exact: true }).last().click();
+    await expect(
+      main.getByRole("button", { name: "撤销", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      main.locator(".task-row", { hasText: titles[0] }).locator(
+        `.task-checkbox[aria-label="完成${titles[0]}"]`,
+      ),
+    ).toBeVisible();
+    await expect(
+      main.locator(".task-row", { hasText: titles[1] }).locator(
+        `.task-checkbox[aria-label="完成${titles[1]}"]`,
+      ),
+    ).toBeVisible();
+  });
+
+  test("saves and reapplies tag and date-range task filters", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const yesterday = await main.evaluate(() => {
+      const date = new Date();
+      date.setDate(date.getDate() - 1);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    });
+    const highTitle = "验收-保存视图-高优先级";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(highTitle);
+    await main.locator("#new-tags").fill("研究");
+    await main.locator("#new-priority").selectOption("high");
+    await main.locator("#new-due").fill(`${yesterday}T08:00`);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    const title = "验收-保存视图-标签日期";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(title);
+    await main.locator("#new-tags").fill("研究, 发布");
+    await main.locator("#new-priority").selectOption("low");
+    await main.locator("#new-due").fill(`${yesterday}T09:00`);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    await main.getByRole("button", { name: /全部任务/u }).click();
+    const highRow = main.locator(".task-row", { hasText: highTitle });
+    await expect(highRow).toBeVisible();
+    await highRow
+      .getByRole("button", { name: `添加重点标记${highTitle}` })
+      .click();
+    await expect(
+      highRow.getByRole("button", { name: `取消重点标记${highTitle}` }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await main.getByRole("button", { name: "筛选", exact: true }).click();
+    const filter = main.getByRole("dialog", { name: "任务筛选" });
+    await expect(filter.getByLabel("标签")).toHaveValue("all");
+    await filter.getByLabel("标签").selectOption("研究");
+    await filter.getByLabel("日期").selectOption("overdue");
+    await expect(filter.getByLabel("排序")).toHaveValue("manual");
+    await filter.getByLabel("排序").selectOption("priority");
+    await filter.getByLabel("只看重点标记").check();
+    await expect(main.locator(".task-list .task-row").first()).toContainText(highTitle);
+    await expect(main.locator(".task-row", { hasText: title })).toHaveCount(0);
+    await filter.locator("#smart-view-name").fill("逾期研究优先级");
+    await filter.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(main.locator(".saved-view-strip").getByRole("button", { name: "逾期研究优先级", exact: true })).toBeVisible();
+    await filter.getByRole("button", { name: "完成", exact: true }).click();
+    await main.locator(".saved-view-strip").getByRole("button", { name: "逾期研究优先级", exact: true }).click();
+    await expect(main.locator(".task-list .task-row").first()).toContainText(highTitle);
+    await main.getByRole("button", { name: "筛选", exact: true }).click();
+    const reopenedFilter = main.getByRole("dialog", { name: "任务筛选" });
+    await reopenedFilter.getByRole("button", { name: "清除", exact: true }).click();
+    await expect(reopenedFilter.getByLabel("排序")).toHaveValue("manual");
+    await expect(reopenedFilter.getByLabel("只看重点标记")).not.toBeChecked();
+    await expect(main.locator(".task-row", { hasText: title })).toBeVisible();
+  });
+
+  test("shows subtask progress without auto-completing the parent", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const parentTitle = "验收-子任务进度-父任务";
+    const childTitle = "验收-子任务进度-子任务";
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill(parentTitle);
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    const row = main.locator(".task-row", { hasText: parentTitle });
+    await expect(row).toBeVisible();
+    await row.locator(".task-body").click();
+    const inspector = main.getByRole("complementary", { name: "任务详情" });
+    await expect(inspector.getByRole("textbox", { name: "任务标题", exact: true })).toHaveValue(parentTitle);
+    await inspector.getByLabel("新子任务标题").fill(childTitle);
+    await inspector.getByRole("button", { name: "添加子任务", exact: true }).click();
+    const childCheckbox = inspector.getByLabel(`完成${childTitle}`);
+    await expect(childCheckbox).toBeVisible();
+    await expect(inspector.getByRole("progressbar", { name: "子任务完成进度" })).toHaveAttribute("aria-valuenow", "0");
+    await childCheckbox.click();
+    await expect(inspector.getByRole("progressbar", { name: "子任务完成进度" })).toHaveAttribute("aria-valuenow", "1");
+    await expect(row).toContainText("子任务 1/1");
+    await expect(row.locator('.task-checkbox[aria-label="完成验收-子任务进度-父任务"]')).toBeVisible();
+  });
+
   test("keeps search, task details, and direct navigation usable at every supported desktop size", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
@@ -566,6 +1717,7 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(closeDetails).toBeVisible();
     await closeDetails.click();
     await expect(main.locator(".inspector:not(.inspector-empty)")).toHaveCount(0);
+    await expect(row.locator(".task-body")).toBeFocused();
     await main.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
     await expect(main.getByLabel("搜索任务")).toBeFocused();
 
@@ -641,7 +1793,7 @@ test.describe("Todo Agent desktop shell", () => {
       return { background: style.backgroundColor, backdrop: style.backdropFilter };
     });
     const capsuleVisual = await floating
-      .locator(".pet-compact")
+      .locator(".pet-task-bubble")
       .evaluate((element) => {
         const style = getComputedStyle(element);
         return { background: style.backgroundColor, backdrop: style.backdropFilter };
@@ -676,23 +1828,73 @@ test.describe("Todo Agent desktop shell", () => {
         height: bounds.height,
       };
     });
-    expect(cssAlpha(petVisual.background)).toBeGreaterThanOrEqual(0.98);
-    expect(petVisual.borderWidth).toBe("1px");
-    expect(petVisual.boxShadow).not.toBe("none");
+    expect(cssAlpha(petVisual.background)).toBe(0);
+    expect(petVisual.borderWidth).toBe("0px");
+    expect(petVisual.boxShadow).toBe("none");
     expect(petVisual.height).toBeGreaterThanOrEqual(100);
     await expect(floating.locator(".pet-character")).toBeVisible();
     await expect(floating.locator(".floating-drag-handle")).toBeVisible();
+    await expect(floating.locator(".pet-task-bubble")).toBeVisible();
+    await floating
+      .getByRole("button", { name: "折叠任务气泡" })
+      .click();
+    await expect(floating.locator(".pet-task-bubble")).toHaveClass(
+      /is-collapsed/u,
+    );
+    await expect(floating.locator(".floating-carousel")).toBeHidden();
+    await floating
+      .getByRole("button", { name: "展开任务气泡" })
+      .click();
+    await expect(floating.locator(".floating-carousel")).toBeVisible();
     expect(
       await pet.evaluate((element) =>
         getComputedStyle(element).getPropertyValue("-webkit-app-region"),
       ),
-    ).toBe("drag");
+    ).toBe("no-drag");
     expect(
       await floating.locator(".floating-drag-handle").evaluate((element) =>
         getComputedStyle(element).getPropertyValue("-webkit-app-region"),
       ),
-    ).toBe("drag");
+    ).toBe("no-drag");
     expect((await floatingWindowState(app)).movable).toBe(true);
+
+    const beforeDrag = (await floatingWindowState(app)).position;
+    const dragHandle = floating.locator(".floating-drag-handle");
+    const dragBounds = await dragHandle.boundingBox();
+    if (!dragBounds) throw new Error("Floating drag handle has no bounds");
+    await floating.mouse.move(
+      dragBounds.x + dragBounds.width / 2,
+      dragBounds.y + dragBounds.height / 2,
+    );
+    await floating.mouse.down();
+    await floating.mouse.move(
+      dragBounds.x + dragBounds.width / 2 - 64,
+      dragBounds.y + dragBounds.height / 2 + 42,
+      { steps: 6 },
+    );
+    await floating.mouse.up();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).position)
+      .not.toEqual(beforeDrag);
+
+    const beforeBodyDrag = (await floatingWindowState(app)).position;
+    const petButton = floating.locator(".pet-avatar-button");
+    const petBounds = await petButton.boundingBox();
+    if (!petBounds) throw new Error("Pet body has no drag bounds");
+    await floating.mouse.move(
+      petBounds.x + petBounds.width / 2,
+      petBounds.y + petBounds.height / 2,
+    );
+    await floating.mouse.down();
+    await floating.mouse.move(
+      petBounds.x + petBounds.width / 2 + 52,
+      petBounds.y + petBounds.height / 2 - 34,
+      { steps: 6 },
+    );
+    await floating.mouse.up();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).position)
+      .not.toEqual(beforeBodyDrag);
 
     await floating
       .getByRole("button", { name: "展开 小序" })
@@ -724,7 +1926,7 @@ test.describe("Todo Agent desktop shell", () => {
     await expect.poll(async () => (await floatingWindowState(app!)).alwaysOnTop).toBe(true);
     await expect
       .poll(async () => (await floatingWindowState(app!)).bounds)
-      .toEqual({ width: 308, height: 87 });
+      .toEqual({ width: 329, height: 184 });
 
     const scaledVisual = await pet.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -737,11 +1939,291 @@ test.describe("Todo Agent desktop shell", () => {
         height: bounds.height,
       };
     });
-    expect(cssAlpha(scaledVisual.background)).toBeGreaterThanOrEqual(0.98);
-    expect(scaledVisual.borderWidth).toBe("1px");
-    expect(scaledVisual.boxShadow).not.toBe("none");
-    expect(scaledVisual.width).toBeGreaterThanOrEqual(290);
-    expect(scaledVisual.height).toBeGreaterThanOrEqual(70);
+    expect(cssAlpha(scaledVisual.background)).toBe(0);
+    expect(scaledVisual.borderWidth).toBe("0px");
+    expect(scaledVisual.boxShadow).toBe("none");
+    expect(scaledVisual.width).toBeGreaterThanOrEqual(315);
+    expect(scaledVisual.height).toBeGreaterThanOrEqual(170);
+  });
+
+  test("collapses the complete task rail into a persistent pet-only surface", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+
+    const before = await floatingWindowState(app);
+    expect(before.bounds).toEqual({ width: 438, height: 184 });
+    await floating.getByRole("button", { name: "收起宠物任务栏" }).click();
+
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-pet-only/u);
+    await expect(floating.locator(".pet-character")).toBeVisible();
+    await expect(floating.locator(".pet-bubble-stack")).toBeHidden();
+    await expect(floating.locator(".mini-panel")).toBeHidden();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).bounds)
+      .toEqual({ width: 148, height: 148 });
+    expect((await floatingWindowState(app)).position).toEqual(before.position);
+
+    // A normal pet interaction must not reopen the task rail. The message is
+    // retained by the behavior state but its bubble stays hidden in pet-only mode.
+    await floating.locator(".pet-avatar-button").click({ position: { x: 47, y: 18 } });
+    await floating.waitForTimeout(320);
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-pet-only/u);
+    await expect(floating.locator(".pet-reaction-bubble")).toBeHidden();
+
+    await floating.getByRole("button", { name: "展开宠物任务栏" }).click();
+    await expect(floating.locator(".floating-shell")).not.toHaveClass(/is-pet-only/u);
+    await expect(floating.locator(".pet-task-bubble")).toBeVisible();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).bounds)
+      .toEqual({ width: 438, height: 184 });
+
+    await floating.getByRole("button", { name: "收起宠物任务栏" }).click();
+    await floating.reload();
+    await floating.waitForLoadState("domcontentloaded");
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-pet-only/u);
+    await expect(floating.getByRole("button", { name: "展开宠物任务栏" })).toBeVisible();
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).bounds)
+      .toEqual({ width: 148, height: 148 });
+
+    // Pet-only mode still offers the radial interactions, then returns to the
+    // exact pet-only footprint after that temporary surface closes.
+    await floating.locator(".pet-compact").hover();
+    await floating.getByRole("button", { name: "和小序互动" }).click();
+    await expect(floating.getByRole("menu", { name: "宠物互动轮盘" })).toBeVisible();
+    await floating.keyboard.press("Escape");
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-pet-only/u);
+    await expect
+      .poll(async () => (await floatingWindowState(app!)).bounds)
+      .toEqual({ width: 148, height: 148 });
+  });
+
+  test("opens a radial interaction wheel and runs cooperative pet games", async ({}, testInfo) => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+
+    await floating.locator(".pet-compact").hover();
+    await floating.getByRole("button", { name: "和小序互动" }).click();
+    const wheel = floating.getByRole("menu", { name: "宠物互动轮盘" });
+    await expect(wheel).toBeVisible();
+    await expect(wheel.getByRole("menuitem")).toHaveCount(9);
+    await expect(floating.locator(".floating-shell")).toHaveClass(/has-interaction-wheel/u);
+    await expect(floating.locator(".pet-season-mark")).toHaveCount(0);
+    await floating.screenshot({ path: testInfo.outputPath("pet-interaction-wheel.png") });
+
+    await wheel.getByRole("menuitem", { name: "摸摸头" }).click();
+    const pattedPet = floating.locator('.pet-character[data-pet-action="pet"]');
+    await expect(pattedPet).toBeVisible();
+    const usesDesktopBuddy = (await pattedPet.getAttribute("data-pet-visual-style")) === "desktopbuddy";
+    if (usesDesktopBuddy) {
+      const buddySurface = pattedPet.locator('[data-buddy-theme] canvas[data-buddy-renderer="live2d"]').first();
+      await expect(buddySurface).toHaveAttribute("data-buddy-status", "ready", { timeout: 20_000 });
+      const frame = Number(await buddySurface.getAttribute("data-buddy-frame"));
+      await expect.poll(async () => Number(await buddySurface.getAttribute("data-buddy-frame"))).toBeGreaterThan(frame + 10);
+      await expect(pattedPet.locator(".buddy-touch-spark")).toBeVisible();
+    } else {
+      await expect(pattedPet).toHaveAttribute("data-pet-atlas-animation", "head-pat");
+      await expect(pattedPet).toHaveAttribute("data-pet-atlas-ready", "true");
+      await expect(pattedPet.locator(".pet-atlas-buffer-stack"))
+        .toHaveAttribute("data-render-path", "single-canvas");
+      await expect(pattedPet.locator(".pet-atlas-buffer-stack > canvas")).toHaveCount(1);
+      expect(
+        await pattedPet.locator(".pet-atlas-buffer-stack .pet-atlas-motion").first().evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { animationName: style.animationName, transform: style.transform };
+        }),
+      ).toEqual({ animationName: "none", transform: "none" });
+      const patStep = Number(await pattedPet.getAttribute("data-pet-atlas-step"));
+      await expect
+        .poll(async () => Number(await pattedPet.getAttribute("data-pet-atlas-step")))
+        .not.toBe(patStep);
+      const patStepSamples = await floating.evaluate(async () => {
+        const root = document.querySelector<HTMLElement>('.pet-character[data-pet-action="pet"]');
+        if (!root) return [];
+        const samples: number[] = [];
+        const started = performance.now();
+        await new Promise<void>((resolve) => {
+          const sample = (now: number): void => {
+            samples.push(Number(root.getAttribute("data-pet-atlas-step") ?? -1));
+            if (now - started >= 240) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        });
+        return samples;
+      });
+      const patStepDeltas = patStepSamples
+        .slice(1)
+        .map((step, index) => Math.abs(step - (patStepSamples[index] ?? step)));
+      // The atlas playhead is time-accurate: a 60Hz display consumes roughly
+      // eight to ten calibrated 2ms dense cells per refresh (120Hz consumes
+      // roughly four to five). A single compositor commit is bounded to twelve
+      // dense cells, far below the 64-cell authored-pose interval, so it cannot
+      // leap over a meaningful pose boundary.
+      expect(Math.max(...patStepDeltas, 0)).toBeLessThanOrEqual(12);
+      const patCanvasHealth = await floating.evaluate(async () => {
+        const root = document.querySelector<HTMLElement>('.pet-character[data-pet-action="pet"]');
+        const stack = root?.querySelector<HTMLElement>(".pet-atlas-buffer-stack");
+        if (!stack) return { blankFrames: 1, samples: 0 };
+        const samples: number[] = [];
+        const started = performance.now();
+        await new Promise<void>((resolve) => {
+          const sample = (now: number): void => {
+            const canvas = stack.querySelector<HTMLCanvasElement>(".pet-atlas-canvas");
+            const context = canvas?.getContext("2d");
+            if (canvas && context && canvas.width > 0 && canvas.height > 0) {
+              const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+              let alphaPixels = 0;
+              for (let index = 3; index < pixels.length; index += 4) {
+                if ((pixels[index] ?? 0) > 8) alphaPixels += 1;
+              }
+              samples.push(alphaPixels);
+            } else {
+              samples.push(0);
+            }
+            if (now - started >= 240) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        });
+        return {
+          blankFrames: samples.filter((count) => count === 0).length,
+          samples: samples.length,
+        };
+      });
+      expect(patCanvasHealth.samples).toBeGreaterThan(4);
+      expect(patCanvasHealth.blankFrames).toBe(0);
+      expect(
+        await pattedPet.locator(".pet-pat-hand").evaluate((element) =>
+          getComputedStyle(element).animationName,
+        ),
+      ).toBe("pet-hand-pat");
+    }
+    await floating.waitForTimeout(260);
+    await floating.screenshot({ path: testInfo.outputPath("pet-head-pat-motion.png") });
+
+    const interactionChecks = [
+      { menu: "挠痒痒", action: "tickle", effect: ".pet-tickle-feather", animation: "pet-feather-tickle" },
+      { menu: "击掌", action: "high-five", effect: ".pet-high-five-hand", animation: "pet-user-high-five" },
+      { menu: "玩毛线球", action: "play", effect: ".pet-prop-ball", animation: "pet-ball-play" },
+      { menu: "喂零食", action: "snack", effect: ".pet-prop-snack", animation: "pet-snack-bite" },
+      { menu: "轻戳肚子", action: "poke", effect: ".pet-poke-finger", animation: "pet-finger-poke" },
+      { menu: "一起休息", action: "drink", effect: ".pet-prop-cup", animation: "pet-sip" },
+    ] as const;
+    for (const check of interactionChecks) {
+      await floating.locator(".pet-compact").hover();
+      await floating.getByRole("button", { name: "和小序互动" }).click();
+      await floating.getByRole("menuitem", { name: check.menu }).click();
+      const activePet = floating.locator(`.pet-character[data-pet-action="${check.action}"]`);
+      await expect(activePet).toBeVisible();
+      if (usesDesktopBuddy) {
+        const buddySurface = activePet.locator('[data-buddy-theme] canvas[data-buddy-renderer="live2d"]').first();
+        await expect(buddySurface).toHaveAttribute("data-buddy-status", "ready", { timeout: 20_000 });
+        const frame = Number(await buddySurface.getAttribute("data-buddy-frame"));
+        await expect.poll(async () => Number(await buddySurface.getAttribute("data-buddy-frame"))).toBeGreaterThan(frame + 4);
+      } else {
+        expect(
+          await activePet.locator(check.effect).evaluate((element) =>
+            getComputedStyle(element).animationName,
+          ),
+        ).toBe(check.animation);
+      }
+      await floating.waitForTimeout(180);
+      await floating.screenshot({ path: testInfo.outputPath(`pet-${check.action}-motion.png`) });
+    }
+
+    await floating.locator(".pet-compact").hover();
+    await floating.getByRole("button", { name: "和小序互动" }).click();
+
+    await floating.getByRole("menuitem", { name: "开始镜像伸展" }).click();
+    const stretch = floating.getByRole("region", { name: "镜像伸展小游戏" });
+    await expect(stretch).toBeVisible();
+    const stretchPet = stretch.locator(".pet-game-character .pet-character");
+    await expect(stretchPet).toBeVisible();
+    // Stage actions should hand off on the same mounted pet. A remount resets
+    // the atlas timeline and replays the entrance animation, which reads as a
+    // visible jump even when the source frames themselves are smooth.
+    await stretchPet.evaluate((element) => {
+      element.setAttribute("data-todo-pet-stable-node", "true");
+    });
+    await floating.screenshot({ path: testInfo.outputPath("pet-stretch-mirror.png") });
+    await stretch.getByRole("button", { name: "我跟上了" }).click();
+    await expect
+      .poll(async () =>
+        stretch.evaluate(() => {
+          return document.querySelector(
+            '.pet-game-character .pet-character[data-todo-pet-stable-node="true"]',
+          ) !== null;
+        }),
+      )
+      .toBe(true);
+    await stretch.getByRole("button", { name: "我跟上了" }).click();
+    await stretch.getByRole("button", { name: "我跟上了" }).click();
+    await stretch.getByRole("button", { name: "一起完成" }).click();
+    await expect(stretch).toBeHidden();
+    await expect
+      .poll(async () =>
+        main.evaluate(async () =>
+          (await window.desktopApi!.pet.snapshot()).miniGames[0]?.game,
+        ),
+      )
+      .toBe("stretch-mirror");
+
+    await floating.locator(".pet-compact").hover();
+    await floating.getByRole("button", { name: "和小序互动" }).click();
+    await floating.getByRole("menuitem", { name: "开始协作跳绳" }).click();
+    const rope = floating.getByRole("region", { name: "协作跳绳小游戏" });
+    await expect(rope).toBeVisible();
+    const jumpButton = rope.getByRole("button", { name: "让宠物跳起来" });
+    await expect(jumpButton).toBeVisible();
+    const ropePet = rope.locator('.pet-character[data-pet-action="jump-rope-ready"]');
+    await expect(ropePet).toBeVisible();
+    await expect(ropePet.locator(usesDesktopBuddy ? ".buddy-rope-back" : ".pet-jump-rope-back")).toHaveCount(1);
+    await expect(ropePet.locator(usesDesktopBuddy ? ".buddy-rope-front" : ".pet-jump-rope-front")).toHaveCount(1);
+    await expect(jumpButton).toHaveClass(/is-ready/u);
+    await floating.screenshot({ path: testInfo.outputPath("pet-jump-rope-ready.png") });
+    const jumpingPet = rope.locator('.pet-character[data-pet-action="jump-rope"]');
+    // The game intentionally has a timing window. Retry only the test click
+    // until it lands in the visible cue so a slow CI paint cannot turn this
+    // visual regression check into a random miss.
+    for (let attempt = 0; attempt < 30 && (await jumpingPet.count()) === 0; attempt += 1) {
+      await jumpButton.click();
+      if ((await jumpingPet.count()) > 0) break;
+      await floating.waitForTimeout(80);
+    }
+    await expect(jumpingPet).toBeVisible();
+    if (usesDesktopBuddy) {
+      const buddySurface = jumpingPet.locator('[data-buddy-theme] canvas[data-buddy-renderer="live2d"]').first();
+      await expect(buddySurface).toHaveAttribute("data-buddy-status", "ready", { timeout: 20_000 });
+      const frame = Number(await buddySurface.getAttribute("data-buddy-frame"));
+      await expect.poll(async () => Number(await buddySurface.getAttribute("data-buddy-frame"))).toBeGreaterThan(frame + 4);
+    } else {
+      expect(
+        await jumpingPet.locator(".pet-rig").evaluate((element) =>
+          getComputedStyle(element).animationName,
+        ),
+      ).toBe("pet-rope-jump");
+    }
+    await floating.waitForTimeout(120);
+    await floating.screenshot({ path: testInfo.outputPath("pet-jump-rope-motion.png") });
+    await floating.waitForTimeout(350);
+    await floating.screenshot({ path: testInfo.outputPath("pet-jump-rope-overhead.png") });
+    await rope.getByRole("button", { name: "退出小游戏" }).click();
+    await expect(rope).toBeHidden();
   });
 
   test("runs the native Todo Pet focus loop and exposes the shared growth home", async () => {
@@ -754,6 +2236,19 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.getByRole("heading", { name: "小序的小窝" })).toBeVisible();
     await expect(main.getByRole("button", { name: "成长" })).toHaveClass(/active/u);
     await expect(main.getByText(/亲密度 0/u)).toBeVisible();
+    await expect(main.getByRole("region", { name: "弹性习惯" })).toBeVisible();
+    await expect(main.getByRole("region", { name: /今日进展|今晚回顾/u })).toBeVisible();
+    await main.getByRole("region", { name: "弹性习惯" }).getByRole("button", { name: "完成一次" }).first().click();
+    await expect(main.getByRole("region", { name: "弹性习惯" }).getByRole("button", { name: "已记下" }).first()).toBeVisible();
+    const weeklyCheckin = main.getByRole("region", { name: "每周 Check-in" });
+    await expect(weeklyCheckin).toBeVisible();
+    await weeklyCheckin.getByRole("button", { name: "集中火力" }).click();
+    await weeklyCheckin.getByLabel("想留一句话吗（可选）").fill("这周先守住一个重要节奏");
+    await weeklyCheckin.getByRole("button", { name: "记下本周节奏" }).click();
+    await expect(weeklyCheckin).toContainText("本周已记下");
+    await expect(weeklyCheckin).toContainText("这周先守住一个重要节奏");
+    await expect(main.getByRole("region", { name: "宠物回顾" })).toBeVisible();
+    await expect(main.getByRole("region", { name: "宠物回顾" })).toContainText("暂时没有逾期");
 
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
@@ -764,13 +2259,109 @@ test.describe("Todo Agent desktop shell", () => {
       .getByRole("button", { name: /25.*轻专注/u })
       .click();
     await expect(floating.getByText(/专注 · 第 1\/4 轮/u)).toBeVisible();
-    await expect(floating.getByRole("button", { name: "暂停" })).toBeVisible();
-    await floating.getByRole("button", { name: "暂停" }).click();
-    await expect(floating.getByRole("button", { name: "继续" })).toBeVisible();
-    await floating.getByRole("button", { name: "继续" }).click();
-    await expect(floating.getByRole("button", { name: "暂停" })).toBeVisible();
-    await floating.getByRole("button", { name: "结束" }).click();
+    const compactFocusBubble = floating.locator(".pet-focus-bubble");
+    await expect(compactFocusBubble).toBeVisible();
+    await expect(
+      compactFocusBubble.getByRole("button", { name: "暂停专注计时" }),
+    ).toBeVisible();
+    await compactFocusBubble
+      .getByRole("button", { name: "折叠专注气泡" })
+      .click();
+    await expect(compactFocusBubble).toHaveClass(/is-collapsed/u);
+    await compactFocusBubble
+      .getByRole("button", { name: "展开专注气泡" })
+      .click();
+    await expect(
+      floating.getByRole("button", { name: "暂停", exact: true }),
+    ).toBeVisible();
+    await floating
+      .getByRole("button", { name: "暂停", exact: true })
+      .click();
+    await expect(
+      floating.getByRole("button", { name: "继续", exact: true }),
+    ).toBeVisible();
+    await floating
+      .getByRole("button", { name: "继续", exact: true })
+      .click();
+    await expect(
+      floating.getByRole("button", { name: "暂停", exact: true }),
+    ).toBeVisible();
+    await floating
+      .getByRole("button", { name: "结束", exact: true })
+      .click();
     await expect(floating.locator(".pet-focus-timer")).toHaveText("25:00");
+  });
+
+  test("makes the pet itself react and keeps room, adventure, and play features operable", async ({}, testInfo) => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const floating = await windowFor(app, "floating");
+    await floating.waitForLoadState("domcontentloaded");
+
+    const avatar = floating.locator(".pet-avatar-button");
+    await avatar.click({ position: { x: 47, y: 18 } });
+    await expect(floating.locator(".floating-shell")).toHaveAttribute(
+      "data-pet-action",
+      "pet",
+    );
+    await expect(floating.getByText("嗯，再摸一下也可以。", { exact: true })).toBeVisible();
+    await expect(floating.locator(".pet-quick-replies")).toBeVisible();
+    await expect(floating.locator(".floating-shell")).toHaveClass(/is-expanded/u);
+    await expect(floating.locator(".floating-shell")).toHaveClass(/has-pet-reaction/u);
+    const reactionLayout = await floating.evaluate(() => {
+      const reaction = document.querySelector<HTMLElement>(".pet-reaction-bubble");
+      const taskBubble = document.querySelector<HTMLElement>(".pet-task-bubble");
+      if (!reaction || !taskBubble) throw new Error("Pet bubbles are missing");
+      const reactionRect = reaction.getBoundingClientRect();
+      const taskRect = taskBubble.getBoundingClientRect();
+      return {
+        viewportHeight: window.innerHeight,
+        reactionTop: reactionRect.top,
+        reactionBottom: reactionRect.bottom,
+        taskTop: taskRect.top,
+      };
+    });
+    expect(reactionLayout.reactionTop).toBeGreaterThanOrEqual(0);
+    expect(reactionLayout.reactionBottom).toBeLessThanOrEqual(reactionLayout.taskTop - 4);
+    expect(reactionLayout.reactionBottom).toBeLessThanOrEqual(reactionLayout.viewportHeight);
+    await floating.getByRole("button", { name: "折叠宠物消息气泡" }).click();
+    await expect(floating.locator(".pet-reaction-bubble")).toHaveClass(/is-collapsed/u);
+    await expect(floating.locator(".pet-reaction-bubble-body")).toBeHidden();
+    await expect(floating.locator(".floating-shell")).toHaveClass(/pet-reaction-collapsed/u);
+    await floating.getByRole("button", { name: "展开宠物消息气泡" }).click();
+    await expect(floating.getByText("嗯，再摸一下也可以。", { exact: true })).toBeVisible();
+    await avatar.evaluate((element) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData("text/plain", "https://example.com/research");
+      element.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer }));
+      element.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer }));
+      element.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
+    });
+    await expect(floating.getByRole("region", { name: "宠物收到的拖入内容" })).toBeVisible();
+    await floating.getByRole("button", { name: "带入聊聊" }).click();
+    await expect(floating.getByRole("button", { name: "聊聊", exact: true })).toHaveClass(/active/u);
+    await floating.screenshot({
+      path: testInfo.outputPath("pet-expanded-reaction-safe-area.png"),
+    });
+
+    const navigation = main.getByRole("navigation", { name: "主导航" });
+    await navigation.getByRole("button", { name: "小窝", exact: true }).click();
+    await main.getByRole("button", { name: "小房间" }).click();
+    await expect(main.locator(".pet-room-stage")).toBeVisible();
+    await main.getByLabel("身体配色").selectOption("mint");
+    await expect(main.locator(".pet-room-stage .pet-palette-mint")).toBeVisible();
+
+    await main.getByRole("button", { name: "今日冒险" }).click();
+    await expect(main.locator(".pet-adventure-card")).toBeVisible();
+    await main.getByRole("button", { name: "先整理线索" }).click();
+    await expect(main.getByText(/你和小序把线索铺成一排/u)).toBeVisible();
+
+    await main.getByRole("button", { name: "一起玩" }).click();
+    await main.getByRole("button", { name: "开始接星星" }).click();
+    await main.getByRole("button", { name: "接住星星" }).click();
+    await expect(main.getByText(/20s · 1 颗/u)).toBeVisible();
   });
 
   test("keeps Todo Pet available after the main window closes and reopens the remembered task page", async () => {
@@ -1021,6 +2612,9 @@ test.describe("Todo Agent desktop shell", () => {
         .getByRole("button", { name: "展开 小序" })
         .click({ button: "right" });
       await expect(menu).toBeVisible();
+      await expect(
+        menu.getByRole("menuitem", { name: /打开 Today/u }),
+      ).toBeFocused();
     };
 
     // Todo Pet supports a concise, safe right-click menu. It is
@@ -1053,6 +2647,9 @@ test.describe("Todo Agent desktop shell", () => {
     await floating.keyboard.press("Escape");
     await expect(menu).toBeHidden();
     await expect(floating.locator(".mini-panel")).toBeHidden();
+    await expect(
+      floating.getByRole("button", { name: "展开 小序" }),
+    ).toBeFocused();
 
     await openPetMenu();
     await menu.getByRole("menuitem", { name: /在此处对话/u }).click();
@@ -1064,6 +2661,36 @@ test.describe("Todo Agent desktop shell", () => {
     await floating
       .getByRole("button", { name: "收起 小序" })
       .click();
+
+    // Lightweight pet interactions stay on the desktop surface, expose a
+    // distinct body action, and use the existing idempotent relationship
+    // reward path instead of opening a distracting game window.
+    const intimacyBefore = await main.evaluate(async () =>
+      (await window.desktopApi!.pet.snapshot()).profile.intimacy
+    );
+    await openPetMenu();
+    await menu.getByRole("menuitem", { name: /摸摸小序/u }).click();
+    await expect(menu).toBeHidden();
+    await expect(floating.locator(".floating-shell")).toHaveAttribute(
+      "data-pet-action",
+      "pet",
+    );
+    await expect(floating.getByRole("status").filter({ hasText: "再摸一下也可以" })).toBeVisible();
+    await expect
+      .poll(() =>
+        main.evaluate(async () =>
+          (await window.desktopApi!.pet.snapshot()).profile.intimacy
+        ),
+      )
+      .toBe(intimacyBefore + 1);
+
+    await openPetMenu();
+    await menu.getByRole("menuitem", { name: /玩一会儿/u }).click();
+    await expect(floating.locator(".floating-shell")).toHaveAttribute(
+      "data-pet-action",
+      "play",
+    );
+    await expect(floating.getByText("接住毛线球！")).toBeVisible();
 
     // Preference toggles are local display choices and immediately persist
     // through the existing settings API; no task content is inspected.
@@ -1305,6 +2932,9 @@ test.describe("Todo Agent desktop shell", () => {
     expect(security.processType).toBe("undefined");
     expect(security.exposedNamespaces).toEqual([
       "agent",
+      "agentActivity",
+      "agentContext",
+      "buddy",
       "capture",
       "data",
       "events",
@@ -1351,6 +2981,113 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.getByRole("form", { name: "新建任务" })).toBeVisible();
   });
 
+  test("manages a local project entity without duplicating task data", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const navigation = main.getByRole("navigation", { name: "主导航" });
+    await navigation.getByRole("button", { name: "项目", exact: true }).click();
+    await expect(main.getByRole("main", { name: "项目总览" })).toBeVisible();
+
+    await main.getByLabel("新项目名称").fill("研究空间");
+    await main.getByRole("button", { name: "新建项目", exact: true }).click();
+    const card = main.locator(".project-card", { hasText: "研究空间" });
+    await expect(card).toBeVisible();
+
+    await card.getByRole("button", { name: "重命名研究空间" }).click();
+    await main.getByLabel("重命名项目").fill("研究空间 2");
+    await main.getByRole("button", { name: "保存项目名称" }).click();
+    await expect(card).toContainText("研究空间 2");
+
+    await card.getByRole("button", { name: "归档研究空间 2" }).click();
+    await expect(card).toContainText("已归档");
+    await card.getByRole("button", { name: "恢复研究空间 2" }).click();
+    await expect(card).not.toContainText("已归档");
+
+    await card.getByRole("button", { name: "删除研究空间 2" }).click();
+    await card.getByRole("button", { name: "确认删除研究空间 2" }).click();
+    await expect(card).toHaveCount(0);
+  });
+
+  test("manages a local list entity and associates a task", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const navigation = main.getByRole("navigation", { name: "主导航" });
+    await navigation.getByRole("button", { name: "清单", exact: true }).click();
+    await expect(main.getByRole("main", { name: "清单管理" })).toBeVisible();
+
+    await main.getByLabel("新清单名称").fill("周末安排");
+    await main.getByRole("button", { name: "新建清单", exact: true }).click();
+    const card = main.locator(".project-card", { hasText: "周末安排" });
+    await expect(card).toBeVisible();
+
+    await main.getByRole("button", { name: "新建", exact: true }).click();
+    await main.locator("#new-title").fill("清单关联任务");
+    await main.locator("#new-list").fill("周末安排");
+    await main.getByRole("button", { name: "保存到本地" }).click();
+    await expect(card).toContainText("清单关联任务");
+
+    await card.getByRole("button", { name: "重命名周末安排" }).click();
+    await main.getByLabel("重命名清单").fill("周末安排 2");
+    await main.getByRole("button", { name: "保存清单名称" }).click();
+    await expect(card).toContainText("周末安排 2");
+    await card.getByRole("button", { name: "删除周末安排 2" }).click();
+    await card.getByRole("button", { name: "确认删除周末安排 2" }).click();
+    await expect(card).toHaveCount(0);
+  });
+
+  test("previews a private local text attachment without opening a system window", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+    const userDataPath = await app.evaluate(({ app: electronApp }) => electronApp.getPath("userData"));
+    const attachmentId = "e2e-preview-text";
+    const attachmentPath = path.join(userDataPath, "attachments", `${attachmentId}-notes.md`);
+    await mkdir(path.dirname(attachmentPath), { recursive: true });
+    await writeFile(attachmentPath, "# 私人预览\n\n这段内容只在任务详情中显示。", "utf8");
+    const taskId = await main.evaluate(async ({ attachmentId: id, localPath }) => {
+      const api = window.desktopApi;
+      if (!api) throw new Error("Desktop API is unavailable");
+      const created = await api.tasks.create({ title: "附件预览验收", source: { type: "local" } });
+      await api.tasks.update({
+        id: created.task.id,
+        patch: {
+          attachments: [{ id, name: "notes.md", mimeType: "text/markdown", localPath }],
+        },
+      });
+      return created.task.id;
+    }, { attachmentId, localPath: attachmentPath });
+    const windowCountBeforePreview = app.windows().length;
+
+    await main.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: /全部任务/u }).click();
+    const row = main.locator(".task-row", { hasText: "附件预览验收" });
+    await expect(row).toBeVisible();
+    await main.getByLabel("搜索任务").fill("notes.md");
+    await expect(main.locator(".task-row", { hasText: "附件预览验收" })).toBeVisible();
+    await main.getByLabel("搜索任务").fill("");
+    await row.locator(".task-body").click();
+    await expect(main.getByLabel("预览附件notes.md")).toBeVisible();
+    await main.getByLabel("预览附件notes.md").click();
+    const preview = main.getByRole("dialog", { name: "notes.md" });
+    await expect(preview).toBeVisible();
+    await expect(preview.locator(".attachment-preview-text")).toContainText("私人预览");
+    const closePreview = preview.getByRole("button", { name: "关闭附件预览" });
+    await expect(closePreview).toBeFocused();
+    const finishPreview = preview.getByRole("button", { name: "完成", exact: true });
+    await finishPreview.focus();
+    await finishPreview.press("Tab");
+    await expect(closePreview).toBeFocused();
+    await closePreview.press("Escape");
+    await expect(preview).toBeHidden();
+    await expect(main.getByLabel("预览附件notes.md")).toBeFocused();
+    expect(app.windows().length).toBe(windowCountBeforePreview);
+    expect(taskId).toBeTruthy();
+  });
+
   test("completes the visible local task lifecycle without losing edits", async () => {
     app = await launch(profilePath);
     const main = await windowFor(app, "main");
@@ -1382,6 +3119,16 @@ test.describe("Todo Agent desktop shell", () => {
     await main.locator("#new-reminder").fill("2026-08-10T08:00");
     await main.getByRole("button", { name: "保存到本地" }).click();
 
+    const dependencyId = await main.evaluate(async () => {
+      const api = window.desktopApi;
+      if (!api) throw new Error("Desktop API is unavailable");
+      const result = await api.tasks.create({
+        title: "验收前置依赖",
+        source: { type: "local" },
+      });
+      return result.task.id;
+    });
+
     const row = main.locator(".task-row", { hasText: title });
     await expect(row).toBeVisible();
     await expect(
@@ -1398,10 +3145,65 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.locator("#local-reminder")).toHaveValue(
       "2026-08-10T08:00",
     );
+    await expect(
+      main.locator("#task-dependencies option", { hasText: "验收前置依赖" }),
+    ).toBeVisible();
+    await expect(main.getByText("创建任务", { exact: true })).toBeVisible();
+    await main.locator("#task-dependencies").selectOption(dependencyId);
+    await expect(main.locator("#task-dependencies")).toHaveValues([dependencyId]);
+    await expect(
+      main.getByText("还有 1 项前置任务未完成", { exact: true }),
+    ).toBeVisible();
+    await main.locator("#task-link-url").fill("file:///tmp/private.txt");
+    await main.getByRole("button", { name: "添加链接", exact: true }).click();
+    await expect(
+      main.getByText("链接只支持 http 或 https 地址", { exact: true }),
+    ).toBeVisible();
+    await main.locator("#task-link-url").fill("https://example.com/验收");
+    await main.locator("#task-link-label").fill("验收资料");
+    await main.getByRole("button", { name: "添加链接", exact: true }).click();
+    await expect(
+      main.locator(".task-link-open", { hasText: "验收资料" }),
+    ).toBeVisible();
+    await main.locator("#custom-field-key").fill("客户");
+    await main.locator("#custom-field-value").fill("Todo Agent");
+    await main.getByRole("button", { name: "添加字段", exact: true }).click();
+    await expect(
+      main.locator(".custom-field-row", { hasText: "客户" }),
+    ).toContainText("Todo Agent");
+    await main.getByRole("button", { name: "移除自定义字段客户", exact: true }).click();
+    await expect(main.locator(".custom-field-row", { hasText: "客户" })).toHaveCount(0);
+    await main.locator("#custom-field-key").fill("预计人数");
+    await main.locator("#custom-field-type").selectOption("number");
+    await main.locator("#custom-field-value").fill("3.5");
+    await main.getByRole("button", { name: "添加字段", exact: true }).click();
+    await expect(main.locator(".custom-field-row", { hasText: "预计人数" })).toContainText("3.5");
+    await main.getByRole("button", { name: "移除自定义字段预计人数", exact: true }).click();
+    await main.locator("#custom-field-key").fill("需要回访");
+    await main.locator("#custom-field-type").selectOption("checkbox");
+    await expect(main.locator("#custom-field-value")).toHaveRole("combobox");
+    await main.locator("#custom-field-value").selectOption("true");
+    await main.getByRole("button", { name: "添加字段", exact: true }).click();
+    await expect(main.locator(".custom-field-row", { hasText: "需要回访" })).toContainText("已勾选");
+    await main.getByRole("button", { name: "移除自定义字段需要回访", exact: true }).click();
+    await main.locator("#task-attachment-url").fill("file:///tmp/private.pdf");
+    await main.getByRole("button", { name: "添加附件", exact: true }).click();
+    await expect(
+      main.getByText("附件只支持 http 或 https 地址", { exact: true }),
+    ).toBeVisible();
+    await main.locator("#task-attachment-name").fill("验收文档");
+    await main.locator("#task-attachment-url").fill("https://example.com/验收.pdf");
+    await main.getByRole("button", { name: "添加附件", exact: true }).click();
+    await expect(
+      main.locator(".task-attachment-open", { hasText: "验收文档" }),
+    ).toBeVisible();
+    await main.getByRole("button", { name: "移除附件验收文档", exact: true }).click();
+    await expect(main.locator(".task-attachment-row", { hasText: "验收文档" })).toHaveCount(0);
 
     await main.getByLabel("任务标题", { exact: true }).fill(editedTitle);
     await main.getByLabel("任务标题", { exact: true }).press("Tab");
     await expect(main.locator(".task-row", { hasText: editedTitle })).toBeVisible();
+    await expect(main.getByText("标题", { exact: true })).toBeVisible();
     await main.getByLabel("任务备注", { exact: true }).fill("第二版备注");
     await main.getByLabel("任务备注", { exact: true }).press("Tab");
     await expect(main.getByLabel("任务备注", { exact: true })).toHaveValue("第二版备注");
@@ -1484,6 +3286,12 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(editedRow).toContainText(updatedDueLabel);
     await expect(editedRow).not.toContainText(previousDueLabel);
 
+    await navigation.getByRole("button", { name: "项目", exact: true }).click();
+    await expect(main.getByRole("heading", { name: "项目", exact: true })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "更新后的项目", exact: true })).toBeVisible();
+    await main.locator(".project-task-row", { hasText: editedTitle }).click();
+    await expect(main.getByLabel("任务标题", { exact: true })).toHaveValue(editedTitle);
+
     await main.getByLabel(`完成${editedTitle}`).click();
     await expect(
       navigation.getByRole("button", { name: /已完成.*1/u }),
@@ -1493,7 +3301,7 @@ test.describe("Todo Agent desktop shell", () => {
     await main.getByLabel(`恢复${editedTitle}`).click();
     await expect(main.getByText(editedTitle, { exact: true })).toHaveCount(0);
     await expect(
-      navigation.getByRole("button", { name: /全部任务.*1/u }),
+      navigation.getByRole("button", { name: /全部任务.*2/u }),
     ).toBeVisible();
 
     await navigation.getByRole("button", { name: /全部任务/u }).click();
@@ -1515,6 +3323,87 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(main.getByText(editedTitle, { exact: true })).toHaveCount(0);
     await navigation.getByRole("button", { name: /全部任务/u }).click();
     await expect(main.getByText(editedTitle, { exact: true }).first()).toBeVisible();
+  });
+
+  test("opens an out-of-view prerequisite directly from task details", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const taskIds = await main.evaluate(async () => {
+      const api = window.desktopApi;
+      if (!api) throw new Error("Desktop API is unavailable");
+      const today = new Date();
+      const plannedDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const prerequisite = await api.tasks.create({
+        title: "验收-详情外部前置",
+        source: { type: "local" },
+      });
+      const current = await api.tasks.create({
+        title: "验收-详情当前任务",
+        source: { type: "local" },
+        plannedDate,
+        dependencyIds: [prerequisite.task.id],
+      });
+      return { currentId: current.task.id, prerequisiteId: prerequisite.task.id };
+    });
+
+    const currentRow = main.locator(".task-row", { hasText: "验收-详情当前任务" });
+    await expect(currentRow).toBeVisible();
+    await currentRow.locator(".task-body").click();
+    const inspector = main.getByRole("complementary", { name: "任务详情" });
+    const prerequisite = inspector.locator(".dependency-chain-node", {
+      hasText: "验收-详情外部前置",
+    });
+    await expect(prerequisite).toBeVisible();
+    await prerequisite.click();
+
+    await expect(inspector.getByLabel("任务标题", { exact: true })).toHaveValue(
+      "验收-详情外部前置",
+    );
+    await expect(main.locator(".task-row", { hasText: "验收-详情当前任务" })).toBeVisible();
+    expect(taskIds.currentId).not.toBe(taskIds.prerequisiteId);
+  });
+
+  test("keeps recurring editor changes consistent after choosing a scope", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    const taskId = await main.evaluate(async () => {
+      const api = window.desktopApi;
+      if (!api) throw new Error("Desktop API is unavailable");
+      const today = new Date();
+      const plannedDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const result = await api.tasks.create({
+        title: "验收-循环编辑连续性",
+        source: { type: "local" },
+        plannedDate,
+        recurrence: { frequency: "daily", interval: 1 },
+      });
+      return result.task.id;
+    });
+
+    const row = main.locator(".task-row", { hasText: "验收-循环编辑连续性" });
+    await expect(row).toBeVisible();
+    await row.locator(".task-body").click();
+    const notes = main.getByLabel("任务备注", { exact: true });
+    await notes.fill("只修改当前循环实例");
+    await expect(main.getByText("有未保存编辑", { exact: true })).toBeVisible();
+    await notes.press("Tab");
+
+    const scopeDialog = main.getByRole("dialog", { name: "将更改应用到哪里？" });
+    await expect(scopeDialog).toBeVisible();
+    await scopeDialog.getByRole("button", { name: "仅本次", exact: true }).click();
+    await expect(main.getByText("更改已保存", { exact: true })).toBeVisible();
+    await expect(notes).toHaveValue("只修改当前循环实例");
+    await expect(main.getByText("有未保存编辑", { exact: true })).toHaveCount(0);
+
+    await expect.poll(async () =>
+      main.evaluate(async (id) => (await window.desktopApi!.tasks.get(id, true))?.notes, taskId),
+    ).toBe("只修改当前循环实例");
   });
 
   test("persists a freely moved floating window and honors position locking", async () => {
@@ -1688,6 +3577,18 @@ test.describe("Todo Agent desktop shell", () => {
     const quick = await windowFor(app, "quick");
     await quick.waitForLoadState("domcontentloaded");
     const input = quick.getByLabel("快速录入");
+    await app.evaluate(({ clipboard }) => clipboard.writeText("来自剪贴板的上下文"));
+    await quick.getByRole("button", { name: "剪贴板", exact: true }).click();
+    await expect(quick.getByRole("region", { name: "剪贴板上下文预览" })).toBeVisible();
+    await quick.getByRole("button", { name: "带入输入框" }).click();
+    await expect(input).toHaveValue("来自剪贴板的上下文");
+    await quick.getByRole("button", { name: "关闭剪贴板预览" }).click();
+    await quick.getByRole("button", { name: "当前窗口", exact: true }).click();
+    await expect(quick.getByRole("region", { name: "当前窗口上下文预览" })).toBeVisible();
+    await quick.getByRole("button", { name: "关闭当前窗口预览" }).click();
+    await quick.getByRole("button", { name: "选中文本", exact: true }).click();
+    await expect(quick.getByRole("region", { name: "选中文本上下文预览" })).toBeVisible();
+    await quick.getByRole("button", { name: "关闭选中文本预览" }).click();
     const captureText = "今天23:59完成周报，提前1小时提醒 #工作";
     await input.fill(captureText);
     const parsed = await quick.evaluate(
@@ -1747,21 +3648,17 @@ test.describe("Todo Agent desktop shell", () => {
     );
     await chatTab.hover();
     await expect(chatTab).toBeVisible();
-    await floating.locator(".floating-stack").evaluate((element) => {
-      element.dispatchEvent(
-        new MouseEvent("mouseout", { bubbles: true, relatedTarget: null }),
-      );
-    });
+    await floating.locator(".mini-content").hover();
+    await floating.waitForTimeout(320);
+    await expect(chatTab).toBeVisible();
+    await floating.mouse.move(1, 1);
     await expect(chatTab).toBeHidden();
     await floating
       .getByRole("button", { name: "展开 小序" })
       .click();
     await expect(chatTab).toBeVisible();
-    await floating.locator(".floating-stack").evaluate((element) => {
-      element.dispatchEvent(
-        new MouseEvent("mouseout", { bubbles: true, relatedTarget: null }),
-      );
-    });
+    await floating.mouse.move(1, 1);
+    await floating.waitForTimeout(260);
     await expect(chatTab).toBeVisible();
     // Privacy mode intentionally hides and disables the mini-chat. Turn it
     // off explicitly before testing normal inline Agent interaction.
@@ -1772,6 +3669,9 @@ test.describe("Todo Agent desktop shell", () => {
         floating: { ...settings.floating, privacyMode: false },
       });
     });
+    await expect.poll(async () => floating.locator(".floating-shell").evaluate((element) =>
+      element.classList.contains("privacy-mode"),
+    )).toBe(false);
     await chatTab.click();
     const agentPrompt = "请给我一个简短的下午规划";
     await floating.getByLabel("给 Agent 发消息").fill(agentPrompt);
@@ -1782,12 +3682,44 @@ test.describe("Todo Agent desktop shell", () => {
     await expect(
       floating.getByText(/模型未启用。今天有/u).last(),
     ).toBeVisible();
+    // The isolated profile may restore the last main-app route from an earlier
+    // scenario; bring the shared task surface back to Today before asserting
+    // the cross-window fallback copy.
+    await main
+      .getByRole("navigation", { name: "主导航" })
+      .getByRole("button", { name: /^今天(?: \d+)?$/u })
+      .click();
     await expect(main.getByRole("heading", { name: /今天有/u })).toBeVisible();
     await expect(main.getByLabel("给 Agent 发消息")).toBeHidden();
 
     await main.screenshot({
       path: path.join(projectRoot, "test-results", "main-window.png"),
     });
+  });
+
+  test("previews and creates a built-in workflow template from quick capture", async () => {
+    app = await launch(profilePath);
+    const main = await windowFor(app, "main");
+    await main.waitForLoadState("domcontentloaded");
+    await finishOnboarding(main);
+
+    await main.evaluate(() => window.desktopApi?.shell.showQuickCapture());
+    const quick = await windowFor(app, "quick");
+    await quick.waitForLoadState("domcontentloaded");
+    const input = quick.getByRole("textbox", { name: "快速录入" });
+    await input.fill("Todo Pet 发布说明");
+    await quick.getByLabel("工作流模板选择").selectOption("publish-article");
+    const preview = quick.getByRole("region", { name: "工作流模板预览" });
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText("发布文章");
+    await expect(preview).toContainText("确认后会创建 3 项任务");
+    await expect(preview).toContainText("列出提纲：Todo Pet 发布说明");
+    await quick.getByRole("button", { name: "保存到本地" }).click();
+
+    await main.evaluate(() => window.desktopApi?.shell.showMain("all"));
+    await expect(main.getByRole("button", { name: /^列出提纲：Todo Pet 发布说明/u })).toBeVisible();
+    await expect(main.getByRole("button", { name: /^完成初稿：Todo Pet 发布说明/u })).toBeVisible();
+    await expect(main.getByRole("button", { name: /^校对并发布：Todo Pet 发布说明/u })).toBeVisible();
   });
 
   test("uses the latest hover delay when settings change under the floating entry", async () => {
@@ -1808,7 +3740,7 @@ test.describe("Todo Agent desktop shell", () => {
     const expand = floating.getByRole("button", { name: "展开 小序" });
     await expect(expand).toHaveAttribute(
       "title",
-      "停留 0.3 秒或单击展开 · 双击打开主窗口",
+      expect.stringContaining("停留 0.3 秒或单击展开"),
     );
 
     await floating.locator(".pet-compact").hover();
@@ -1822,7 +3754,7 @@ test.describe("Todo Agent desktop shell", () => {
     });
     await expect(expand).toHaveAttribute(
       "title",
-      "停留 1.6 秒或单击展开 · 双击打开主窗口",
+      expect.stringContaining("停留 1.6 秒或单击展开"),
     );
 
     // The original 300ms timer would have opened by now. The panel remains
@@ -1913,6 +3845,10 @@ test.describe("Todo Agent desktop shell", () => {
 
     const floating = await windowFor(app, "floating");
     await floating.waitForLoadState("domcontentloaded");
+    // The previous test may leave the OS pointer over the same screen area
+    // where the new floating window appears. Move it to the transparent
+    // corner so this assertion exercises automatic rotation, not hover pause.
+    await main.mouse.move(1, 1);
     const carousel = floating.locator(".floating-carousel");
     const carouselTitle = carousel.locator(".floating-carousel-item");
     await expect(carousel).toHaveAttribute("data-carousel-mode", "rotating");
@@ -2093,7 +4029,7 @@ test.describe("Todo Agent desktop shell", () => {
       await expect(floating.getByLabel("给 Agent 发消息")).toBeVisible();
       await expect
         .poll(async () => (await floatingWindowState(app!)).bounds)
-        .toEqual({ width: 480, height: 600 });
+        .toEqual({ width: 480, height: 640 });
       await floating
         .getByRole("button", { name: "今天", exact: true })
         .click();

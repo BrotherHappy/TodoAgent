@@ -11,11 +11,19 @@ import type {
   Task,
   TaskFilter,
   TaskSnapshotChange,
+  TaskResearchCard,
   TaskSyncStatus,
   UpdateTaskInput,
 } from "../../src/shared/models";
-import type { ModelDataScope } from "../../src/shared/settings";
+import type {
+  AgentCapabilitySettings,
+  ModelDataScope,
+} from "../../src/shared/settings";
 import type { TaskService } from "../services/task-service";
+import {
+  getNextOccurrence,
+  getTaskRecurrenceAnchor,
+} from "../services/recurrence";
 import type {
   ToolExecutionContext,
   TrustedToolDefinition,
@@ -31,6 +39,7 @@ const taskViewSchema = z.enum([
   "inbox",
   "today",
   "upcoming",
+  "deferred",
   "all",
   "completed",
   "trash",
@@ -56,12 +65,16 @@ const localDateSchema = z
   .refine(isValidLocalDate, "Invalid calendar date.");
 const isoDateSchema = z.string().datetime({ offset: true });
 const idSchema = z.string().trim().min(1).max(512);
+// Local heading text; this is deliberately separate from Feishu tasklist
+// bindings and is never sent to the provider.
+const sectionSchema = z.string().trim().min(1).max(80);
 const operationIdSchema = z.string().trim().min(1).max(512);
 const MAX_BULK_CREATE = 25;
 const MAX_BULK_MUTATE = 50;
+const MAX_SPLIT_STEPS = 7;
 // Feishu currently exposes title, notes, start time and due time as mutable
 // remote fields. Project/list placement remains a private local organization
-// choice, just like plannedDate and tags.
+// choice, just like plannedDate, tags and manual contexts.
 const REMOTE_UPDATE_FIELDS = new Set(["title", "notes", "startAt", "dueAt"]);
 // Keep this in sync with TaskService's snapshot comparison for undo. Unlike a
 // normal update, an undo restores a whole snapshot, so status, all-day flags,
@@ -100,10 +113,14 @@ const listArgumentsSchema = z.strictObject({
   view: taskViewSchema.nullable(),
   text: z.string().max(1_000).nullable(),
   source: sourceSchema.nullable(),
+  // Local heading text only; never interpreted as a Feishu section GUID.
+  sectionId: sectionSchema.nullable().optional().default(null),
+  flagged: z.boolean().optional().default(false),
   limit: z.number().int().min(1).max(500),
 });
 
 const getArgumentsSchema = z.strictObject({ id: idSchema });
+const skipRecurringArgumentsSchema = z.strictObject({ id: idSchema });
 
 const createArgumentsSchema = z.strictObject({
   title: z.string().trim().min(1).max(2_000),
@@ -111,11 +128,15 @@ const createArgumentsSchema = z.strictObject({
   source: sourceSchema,
   projectId: idSchema.nullable(),
   listId: idSchema.nullable(),
+  sectionId: sectionSchema.nullable().optional(),
   plannedDate: localDateSchema.nullable(),
+  deferUntil: localDateSchema.nullable().optional(),
   startAt: isoDateSchema.nullable(),
   dueAt: isoDateSchema.nullable(),
   priority: prioritySchema,
+  flagged: z.boolean().optional().default(false),
   tags: z.array(z.string().trim().min(1).max(120)).max(100),
+  contexts: z.array(z.string().trim().min(1).max(40)).max(20).nullable().optional(),
 });
 
 const updateArgumentsSchema = z
@@ -124,24 +145,32 @@ const updateArgumentsSchema = z
     title: z.string().trim().min(1).max(2_000).nullable(),
     notes: z.string().max(50_000).nullable(),
     privateNotes: z.string().max(50_000).nullable(),
+    flagged: z.boolean().nullable().optional(),
+    deferUntil: localDateSchema.nullable().optional(),
     projectId: idSchema.nullable(),
     listId: idSchema.nullable(),
+    sectionId: sectionSchema.nullable().optional(),
     plannedDate: localDateSchema.nullable(),
     startAt: isoDateSchema.nullable(),
     dueAt: isoDateSchema.nullable(),
     priority: prioritySchema.nullable(),
     tags: z.array(z.string().trim().min(1).max(120)).max(100).nullable(),
+    contexts: z.array(z.string().trim().min(1).max(40)).max(20).nullable().optional(),
     clearFields: z
       .array(
         z.enum([
           "notes",
           "privateNotes",
+          "flagged",
+          "deferUntil",
           "projectId",
           "listId",
+          "sectionId",
           "plannedDate",
           "startAt",
           "dueAt",
           "tags",
+          "contexts",
         ]),
       )
       .max(8),
@@ -153,15 +182,19 @@ const updateArgumentsSchema = z
           "title",
           "notes",
           "privateNotes",
+          "flagged",
+          "deferUntil",
           "projectId",
           "listId",
+          "sectionId",
           "plannedDate",
           "startAt",
           "dueAt",
           "priority",
           "tags",
+          "contexts",
         ] as const
-      ).filter((field) => args[field] !== null),
+      ).filter((field) => args[field] !== null && args[field] !== undefined),
     );
     if (supplied.size === 0 && args.clearFields.length === 0) {
       context.addIssue({
@@ -186,6 +219,26 @@ const updateArgumentsSchema = z
       }
     }
   });
+
+const researchCardArgumentsSchema = z.strictObject({
+  id: idSchema,
+  title: z.string().trim().min(1).max(200),
+  url: z
+    .string()
+    .trim()
+    .max(2_000)
+    .refine((value) => {
+      if (!value) return true;
+      try {
+        const parsed = new URL(value);
+        return ["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password;
+      } catch {
+        return false;
+      }
+    }, "Research card URL must be an HTTP(S) URL without credentials."),
+  summary: z.string().max(5_000),
+  actionItems: z.array(z.string().trim().min(1).max(500)).max(20),
+});
 
 const completeArgumentsSchema = z.strictObject({
   id: idSchema,
@@ -215,16 +268,42 @@ const bulkCreateItemSchema = z.strictObject({
   notes: z.string().max(50_000),
   projectId: idSchema.nullable(),
   listId: idSchema.nullable(),
+  sectionId: sectionSchema.nullable().optional(),
   plannedDate: localDateSchema.nullable(),
+  deferUntil: localDateSchema.nullable().optional(),
   startAt: isoDateSchema.nullable(),
   dueAt: isoDateSchema.nullable(),
   priority: prioritySchema,
   tags: z.array(z.string().trim().min(1).max(120)).max(100),
+  contexts: z.array(z.string().trim().min(1).max(40)).max(20).nullable().optional(),
 });
 
 const bulkCreateArgumentsSchema = z.strictObject({
   tasks: z.array(bulkCreateItemSchema).min(1).max(MAX_BULK_CREATE),
 });
+
+const splitTaskItemSchema = z.strictObject({
+  title: z.string().trim().min(1).max(500),
+  notes: z.string().max(5_000),
+  priority: prioritySchema,
+  estimatedMinutes: z.number().int().min(5).max(720).nullable(),
+});
+
+const splitTaskArgumentsSchema = z
+  .strictObject({
+    id: idSchema,
+    subtasks: z.array(splitTaskItemSchema).min(2).max(MAX_SPLIT_STEPS),
+  })
+  .superRefine((args, context) => {
+    const titles = args.subtasks.map((item) => item.title.toLocaleLowerCase());
+    if (new Set(titles).size !== titles.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["subtasks"],
+        message: "Subtask titles must be unique.",
+      });
+    }
+  });
 
 const bulkUpdateArgumentsSchema = z
   .strictObject({
@@ -314,6 +393,23 @@ const parametersFor = <Arguments extends AgentJsonValue>(
 ): JsonSchema => {
   const converted = z.toJSONSchema(schema) as Record<string, unknown>;
   delete converted.$schema;
+  // The model-facing contract stays strict even for renderer-side backward
+  // compatibility fields such as `contexts`: the runtime parser may accept
+  // an omitted legacy field, while every property is still declared required
+  // in the JSON schema sent to the provider (nullable means “clear/unused”).
+  const requireObjectProperties = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(requireObjectProperties);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (record.type === "object" && record.properties && typeof record.properties === "object") {
+      record.required = Object.keys(record.properties as Record<string, unknown>);
+    }
+    Object.values(record).forEach(requireObjectProperties);
+  };
+  requireObjectProperties(converted);
   return converted as JsonSchema;
 };
 
@@ -348,7 +444,7 @@ const result = (
 const compactTask = (task: Task, scope: ModelDataScope): AgentJsonValue => {
   if (!scope.taskTitlesAndTimes) {
     // Keep only an opaque local reference so a user can still explicitly target the
-    // item later. Status, source, priority, tags and sync state can all reveal task
+    // item later. Status, source, priority, tags, contexts and sync state can all reveal task
     // meaning or origin, so they cross the same privacy boundary as the title.
     return { id: task.id, redacted: true };
   }
@@ -359,11 +455,35 @@ const compactTask = (task: Task, scope: ModelDataScope): AgentJsonValue => {
       scope.notes && (task.source.type === "local" || scope.feishuContent)
         ? task.notes
         : null,
+    comments:
+      scope.notes && (task.source.type === "local" || scope.feishuContent)
+        ? (task.comments ?? []).map((comment) => ({
+            body: comment.body,
+            author: comment.author,
+            createdAt: comment.createdAt,
+          updatedAt: comment.updatedAt,
+        }))
+        : null,
+    researchCards:
+      scope.notes && (task.source.type === "local" || scope.feishuContent)
+        ? (task.researchCards ?? []).map((card) => ({
+            id: card.id,
+            title: card.title,
+            url: card.url ?? null,
+            summary: card.summary,
+            actionItems: card.actionItems,
+            capturedAt: card.capturedAt,
+          }))
+        : null,
     status: task.status,
     priority: task.priority,
+    flagged: task.flagged === true,
+    deferUntil: task.deferUntil ?? null,
     source: task.source.type,
+    parentId: task.parentId ?? null,
     projectId: task.projectId ?? null,
     listId: task.listId ?? null,
+    sectionId: task.sectionId ?? null,
     plannedDate: task.plannedDate ?? null,
     startAt: task.startAt ?? null,
     dueAt: task.dueAt ?? null,
@@ -378,6 +498,7 @@ const compactTask = (task: Task, scope: ModelDataScope): AgentJsonValue => {
           : null,
     })),
     tags: task.tags,
+    contexts: task.contexts ?? [],
     syncStatus: task.sync.status,
   };
 };
@@ -389,21 +510,25 @@ const changedFields = (args: z.infer<typeof updateArgumentsSchema>): string[] =>
         "title",
         "notes",
         "privateNotes",
+        "flagged",
+        "deferUntil",
         "projectId",
         "listId",
+        "sectionId",
         "plannedDate",
         "startAt",
         "dueAt",
         "priority",
         "tags",
+        "contexts",
       ] as const
-    ).filter((field) => args[field] !== null),
+    ).filter((field) => args[field] !== null && args[field] !== undefined),
     ...args.clearFields,
   ].filter((field, index, fields) => fields.indexOf(field) === index);
 
 const clearedFieldValue = (field: string): unknown => {
   if (field === "notes" || field === "privateNotes") return "";
-  if (field === "tags") return [];
+  if (field === "tags" || field === "contexts") return [];
   return undefined;
 };
 
@@ -472,15 +597,23 @@ const patchForUpdate = (
     "title",
     "notes",
     "privateNotes",
+    "flagged",
+    "deferUntil",
     "projectId",
     "listId",
+    "sectionId",
     "plannedDate",
     "startAt",
     "dueAt",
     "priority",
     "tags",
+    "contexts",
   ] as const) {
-    if (fields.includes(field) && args[field] !== null)
+    if (
+      fields.includes(field) &&
+      args[field] !== null &&
+      args[field] !== undefined
+    )
       (patch as Record<string, unknown>)[field] = args[field];
   }
   args.clearFields.forEach((field) => {
@@ -631,6 +764,7 @@ const interruptedBatchResult = (
 export interface TaskToolOptions {
   tasks: TaskService;
   getModelDataScope: () => ModelDataScope;
+  getAgentCapabilities?: () => AgentCapabilitySettings;
   /** Trusted per-user-message creation policy, never supplied by the model. */
   sourcePolicy?: AgentTaskSourcePolicy;
   /** Resolves the currently connected account at both review and execution time. */
@@ -642,19 +776,39 @@ export const createTaskTools = (
   options: TaskToolOptions,
 ): TrustedToolDefinition[] => {
   const notifyChanged = (): void => options.onTasksChanged?.();
+  const assertTaskCapability = (): void => {
+    if (options.getAgentCapabilities?.().taskManagement === false) {
+      throw new Error(
+        "AGENT_TASK_CAPABILITY_DISABLED:任务读写能力已关闭，请在权限中心重新开启。",
+      );
+    }
+  };
+  const assertFeishuCapability = (): void => {
+    if (options.getAgentCapabilities?.().feishuSync === false) {
+      throw new Error(
+        "AGENT_FEISHU_CAPABILITY_DISABLED:飞书同步能力已关闭，请在权限中心重新开启。",
+      );
+    }
+  };
   const requireTask = async (id: string): Promise<Task> => {
+    assertTaskCapability();
     const task = await options.tasks.getTask(id, true);
     if (!task) throw new Error(`TASK_NOT_FOUND:${id}`);
+    if (task.source.type === "feishu") assertFeishuCapability();
     return task;
   };
   const requireActiveTask = async (id: string): Promise<Task> => {
+    assertTaskCapability();
     const task = await options.tasks.getTask(id);
     if (!task) throw new Error(`ACTIVE_TASK_NOT_FOUND:${id}`);
+    if (task.source.type === "feishu") assertFeishuCapability();
     return task;
   };
   const requireDeletedTask = async (id: string): Promise<Task> => {
+    assertTaskCapability();
     const task = await options.tasks.getTask(id, true);
     if (!task) throw new Error(`TASK_NOT_FOUND:${id}`);
+    if (task.source.type === "feishu") assertFeishuCapability();
     if (task.deletedAt === undefined) {
       throw new Error(`TASK_NOT_IN_TRASH:${id}`);
     }
@@ -664,11 +818,14 @@ export const createTaskTools = (
     const accountId = options.getFeishuAccountId?.()?.trim();
     return accountId || undefined;
   };
-  const assertCreationSource = (source: "local" | "feishu"): void =>
+  const assertCreationSource = (source: "local" | "feishu"): void => {
+    assertTaskCapability();
+    if (source === "feishu") assertFeishuCapability();
     assertTaskCreationSource(
       source,
       options.sourcePolicy ?? { kind: "default-local", source: "local" },
     );
+  };
   const assertFeishuCreationAvailable = (accountId: string | undefined): void =>
     assertFeishuTaskCreationAvailable(accountId);
   /**
@@ -678,7 +835,10 @@ export const createTaskTools = (
    * the account-scoped sync queue.
    */
   const assertFeishuMutationAvailable = (task: Task): void => {
-    if (task.source.type !== "feishu" || !options.getFeishuAccountId) return;
+    assertTaskCapability();
+    if (task.source.type !== "feishu") return;
+    assertFeishuCapability();
+    if (!options.getFeishuAccountId) return;
     assertFeishuTaskMutationAccount(task.source.accountId, feishuAccountId());
   };
   const requireOperation = async (operationId: string) => {
@@ -708,29 +868,43 @@ export const createTaskTools = (
     taskTool({
       name: "task_list",
       description:
-        "List and search tasks. Use this before deciding which tasks to edit. Always provide all four arguments: view, text, source, and limit. Use null for an unused nullable filter and 100 for a normal default limit.",
+        "List and search tasks. Use this before deciding which tasks to edit. Always provide view, text, source, sectionId, and limit. Use null for an unused nullable filter and 100 for a normal default limit. sectionId is a local heading text, never a Feishu section GUID.",
       schema: listArgumentsSchema,
-      analyze: (args) => ({
-        risk: "R0",
-        targets: [{ kind: "task", value: args.view ?? "all" }],
-        reads: ["task titles, status, priority and approved time fields"],
-        writes: [],
-        network: [],
-        externalEffects: [],
-        reversible: true,
-        preview: {
-          action: "list-tasks",
-          view: args.view,
-          source: args.source,
-          limit: args.limit,
-        },
-        baseVersions: {},
-      }),
+      analyze: (args) => {
+        assertTaskCapability();
+        if (args.source === "feishu") assertFeishuCapability();
+        return {
+          risk: "R0",
+          targets: [{ kind: "task" as const, value: args.view ?? "all" }],
+          reads: ["task titles, status, priority and approved time fields"],
+          writes: [],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: {
+            action: "list-tasks",
+            view: args.view,
+            source: args.source,
+            sectionId: args.sectionId,
+            flagged: args.flagged,
+            limit: args.limit,
+          },
+          baseVersions: {},
+        };
+      },
       execute: async (args, context) => {
+        assertTaskCapability();
+        if (args.source === "feishu") assertFeishuCapability();
         const filter: TaskFilter = {
           view: args.view ?? undefined,
           text: args.text ?? undefined,
-          sourceTypes: args.source ? [args.source] : undefined,
+          sourceTypes: args.source
+            ? [args.source]
+            : options.getAgentCapabilities?.().feishuSync === false
+              ? ["local"]
+              : undefined,
+          sectionIds: args.sectionId ? [args.sectionId] : undefined,
+          flagged: args.flagged === true,
         };
         const tasks = (await options.tasks.listTasks(filter)).slice(
           0,
@@ -749,17 +923,20 @@ export const createTaskTools = (
       description:
         "Read one task by its exact ID, including a task currently in recoverable trash.",
       schema: getArgumentsSchema,
-      analyze: (args) => ({
-        risk: "R0",
-        targets: [{ kind: "task", value: args.id }],
-        reads: ["one task and its approved fields"],
-        writes: [],
-        network: [],
-        externalEffects: [],
-        reversible: true,
-        preview: { action: "read-task", taskId: args.id },
-        baseVersions: {},
-      }),
+      analyze: async (args) => {
+        await requireTask(args.id);
+        return {
+          risk: "R0" as const,
+          targets: [{ kind: "task" as const, value: args.id }],
+          reads: ["one task and its approved fields"],
+          writes: [],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: { action: "read-task", taskId: args.id },
+          baseVersions: {},
+        };
+      },
       execute: async (args, context) =>
         result(
           context,
@@ -809,9 +986,12 @@ export const createTaskTools = (
             accountId: accountId ?? null,
             projectId: args.projectId,
             listId: args.listId,
+            sectionId: args.sectionId ?? null,
             plannedDate: args.plannedDate,
+            deferUntil: args.deferUntil ?? null,
             startAt: args.startAt,
             dueAt: args.dueAt,
+            flagged: args.flagged,
           },
           baseVersions: {},
         };
@@ -831,11 +1011,15 @@ export const createTaskTools = (
               : { type: "local" },
           projectId: args.projectId ?? undefined,
           listId: args.listId ?? undefined,
+          sectionId: args.sectionId ?? undefined,
           plannedDate: args.plannedDate ?? undefined,
+          deferUntil: args.deferUntil ?? undefined,
           startAt: args.startAt ?? undefined,
           dueAt: args.dueAt ?? undefined,
           priority: args.priority,
+          flagged: args.flagged,
           tags: args.tags,
+          contexts: args.contexts ?? [],
           sync: {
             status: args.source === "feishu" ? "pending" : "local",
           },
@@ -852,7 +1036,7 @@ export const createTaskTools = (
     taskTool({
       name: "task_update",
       description:
-        "Update explicitly supplied fields on one task. Private plan and private notes never sync to Feishu.",
+        "Update explicitly supplied fields on one task. Local heading, project/list, private plan, deferral date and private notes never sync to Feishu.",
       schema: updateArgumentsSchema,
       sensitiveArgumentPaths: ["notes", "privateNotes"],
       analyze: async (args) => {
@@ -902,6 +1086,227 @@ export const createTaskTools = (
               : [],
           undoOperationId: updated.operationId,
         });
+      },
+    }),
+    taskTool({
+      name: "task_add_research_card",
+      description:
+        "Attach a source, concise summary, and optional action items to one task as private local context. This never writes the card back to Feishu.",
+      schema: researchCardArgumentsSchema,
+      sensitiveArgumentPaths: ["url", "summary", "actionItems"],
+      analyze: async (args) => {
+        const task = await requireActiveTask(args.id);
+        const existing = task.researchCards ?? [];
+        if (existing.length >= 20) {
+          throw new Error("RESEARCH_CARD_LIMIT_REACHED");
+        }
+        return {
+          risk: "R1",
+          targets: [{ kind: "task", value: args.id }],
+          reads: ["current task private context"],
+          writes: ["one private research card"],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: {
+            action: "add-research-card",
+            taskId: args.id,
+            title: args.title,
+            actionItemCount: args.actionItems.length,
+            remoteWrite: false,
+          },
+          baseVersions: { [args.id]: task.updatedAt },
+        };
+      },
+      execute: async (args, context) => {
+        const current = await requireActiveTask(args.id);
+        const existing = current.researchCards ?? [];
+        if (existing.length >= 20) {
+          throw new Error("RESEARCH_CARD_LIMIT_REACHED");
+        }
+        const card: TaskResearchCard = {
+          id: randomUUID(),
+          title: args.title,
+          ...(args.url ? { url: args.url } : {}),
+          summary: args.summary.trim(),
+          actionItems: args.actionItems,
+          capturedAt: new Date().toISOString(),
+        };
+        const updated = await options.tasks.updateTask(args.id, {
+          researchCards: [...existing, card],
+        });
+        notifyChanged();
+        return result(context, {
+          task: compactTask(updated.task, options.getModelDataScope()),
+          researchCardId: card.id,
+          undoOperationId: updated.operationId,
+        });
+      },
+    }),
+    taskTool({
+      name: "task_skip_recurring",
+      description:
+        "Skip only the current occurrence of one local recurring task. Keep the same task and move its private schedule to the next occurrence; never use this for Feishu-owned recurring tasks.",
+      schema: skipRecurringArgumentsSchema,
+      analyze: async (args) => {
+        const task = await requireActiveTask(args.id);
+        if (task.source.type === "feishu") {
+          throw new Error(
+            "TASK_RECURRING_SKIP_LOCAL_ONLY:飞书循环由飞书负责生成，请在飞书中操作。",
+          );
+        }
+        if (task.recurrence === undefined) {
+          throw new Error("TASK_NOT_RECURRING:这项任务没有循环规则。");
+        }
+        if (task.status !== "open") {
+          throw new Error("TASK_RECURRING_SKIP_NOT_OPEN:只有未完成任务可以跳过本次。");
+        }
+        if (task.focusStartedAt !== undefined) {
+          throw new Error("TASK_RECURRING_SKIP_FOCUS_ACTIVE:请先暂停专注。");
+        }
+        const anchor = getTaskRecurrenceAnchor(task);
+        if (anchor === undefined) {
+          throw new Error("TASK_RECURRING_SKIP_NO_ANCHOR:任务没有可用日期。");
+        }
+        const nextAnchor = getNextOccurrence(
+          anchor,
+          task.recurrence,
+          task.recurrenceIndex ?? 0,
+        );
+        if (nextAnchor === undefined) {
+          throw new Error("TASK_RECURRING_SKIP_LAST:这已经是循环的最后一次。");
+        }
+        return {
+          risk: "R1" as const,
+          targets: [{ kind: "task" as const, value: task.id }],
+          reads: ["current local recurring task and recurrence rule"],
+          writes: ["move this occurrence's private schedule to the next one"],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: {
+            action: "skip-recurring-task",
+            taskId: task.id,
+            title: task.title,
+            from: anchor,
+            to: nextAnchor,
+            keepTaskId: true,
+            remoteWrite: false,
+          },
+          baseVersions: { [task.id]: task.updatedAt },
+        };
+      },
+      execute: async (args, context) => {
+        const current = await requireActiveTask(args.id);
+        if (current.source.type === "feishu") {
+          throw new Error(
+            "TASK_RECURRING_SKIP_LOCAL_ONLY:飞书循环由飞书负责生成，请在飞书中操作。",
+          );
+        }
+        const mutation = await options.tasks.skipRecurringTask(args.id);
+        notifyChanged();
+        return result(context, {
+          changed: true,
+          task: compactTask(mutation.task, options.getModelDataScope()),
+          syncReceipts: [],
+          undoOperationId: mutation.operationId,
+        });
+      },
+    }),
+    taskTool({
+      name: "task_split",
+      description:
+        `Split one task into 2-${MAX_SPLIT_STEPS} local child tasks. The parent stays unchanged and a Feishu parent never receives remote child writes. Use this after presenting the proposed steps for user approval.`,
+      schema: splitTaskArgumentsSchema,
+      sensitiveArgumentPaths: ["subtasks"],
+      analyze: async (args) => {
+        const parent = await requireActiveTask(args.id);
+        return {
+          risk: "R2",
+          targets: [{ kind: "task", value: parent.id }],
+          reads: ["current parent task"],
+          writes: [`create ${args.subtasks.length} local child tasks`],
+          network: [],
+          externalEffects: [],
+          reversible: true,
+          preview: {
+            action: "split-task",
+            parent: { id: parent.id, title: parent.title },
+            count: args.subtasks.length,
+            remoteWrite: false,
+            subtasks: args.subtasks.map((item, index) => ({
+              index,
+              title: item.title,
+              priority: item.priority,
+              estimatedMinutes: item.estimatedMinutes,
+            })),
+          },
+          baseVersions: { [parent.id]: parent.updatedAt },
+        };
+      },
+      execute: async (args, context) => {
+        const parent = await requireActiveTask(args.id);
+        const createdTasks: Task[] = [];
+        const operationIds: string[] = [];
+        const processedIndexes: number[] = [];
+        const failedItems: Array<{ index: number; code: string }> = [];
+        for (let index = 0; index < args.subtasks.length; index += 1) {
+          if (context.signal.aborted) {
+            if (operationIds.length > 0) notifyChanged();
+            return interruptedBatchResult(
+              context,
+              {
+                parentTaskId: parent.id,
+                createdTasks: createdTasks.map((task) =>
+                  compactTask(task, options.getModelDataScope()),
+                ),
+                operationIds,
+                processedIndexes,
+                failedItems,
+              },
+              processedIndexes.length,
+              args.subtasks.length,
+            );
+          }
+          const item = args.subtasks[index];
+          try {
+            const mutation = await options.tasks.createTask({
+              title: item.title,
+              notes: item.notes,
+              source: { type: "local" },
+              parentId: parent.id,
+              projectId: parent.projectId,
+              listId: parent.listId,
+              sectionId: parent.sectionId,
+              plannedDate: parent.plannedDate,
+              priority: item.priority,
+              estimatedMinutes: item.estimatedMinutes ?? undefined,
+              sync: { status: "local" },
+            });
+            createdTasks.push(mutation.task);
+            operationIds.push(mutation.operationId);
+          } catch (error) {
+            failedItems.push({ index, code: taskErrorCode(error) });
+          }
+          processedIndexes.push(index);
+        }
+        if (operationIds.length > 0) notifyChanged();
+        return result(
+          context,
+          {
+            aborted: false,
+            parentTaskId: parent.id,
+            createdCount: createdTasks.length,
+            failedCount: failedItems.length,
+            processedIndexes,
+            createdTasks: createdTasks.map((task) =>
+              compactTask(task, options.getModelDataScope()),
+            ),
+            failedItems,
+            operationIds,
+          },
+          failedItems.length > 0 ? "partial" : "ok",
+        );
       },
     }),
     taskTool({
@@ -1101,7 +1506,9 @@ export const createTaskTools = (
               title: task.title,
               projectId: task.projectId,
               listId: task.listId,
+              sectionId: task.sectionId ?? null,
               plannedDate: task.plannedDate,
+              deferUntil: task.deferUntil ?? null,
               startAt: task.startAt,
               dueAt: task.dueAt,
               priority: task.priority,
@@ -1141,11 +1548,14 @@ export const createTaskTools = (
               source: { type: "local" },
               projectId: item.projectId ?? undefined,
               listId: item.listId ?? undefined,
+              sectionId: item.sectionId ?? undefined,
               plannedDate: item.plannedDate ?? undefined,
+              deferUntil: item.deferUntil ?? undefined,
               startAt: item.startAt ?? undefined,
               dueAt: item.dueAt ?? undefined,
               priority: item.priority,
               tags: item.tags,
+              contexts: item.contexts ?? [],
               sync: { status: "local" },
             });
             createdTasks.push(mutation.task);

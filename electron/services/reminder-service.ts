@@ -55,12 +55,29 @@ function deliveryKey(candidate: ReminderCandidate): string {
   return `${candidate.id}:${candidate.scheduledAt}`;
 }
 
+function taskSourcePolicyAllows(
+  candidate: ReminderCandidate,
+  settings: NotificationSettings,
+): boolean {
+  const projectMode = candidate.projectId === undefined
+    ? undefined
+    : settings.taskReminderProjectMode[candidate.projectId];
+  const sourceMode = candidate.source === undefined
+    ? undefined
+    : settings.taskReminderSourceMode[candidate.source];
+  const mode = projectMode ?? sourceMode ?? 'normal';
+  if (mode === 'off') return false;
+  if (mode !== 'important-only') return true;
+  return candidate.priority === 'high' || candidate.priority === 'urgent';
+}
+
 function actionsFor(candidate: ReminderCandidate): ReminderDelivery['actions'] {
   if (candidate.kind === 'task') {
     return [
       { id: 'complete', label: '完成' },
       { id: 'snooze-10m', label: '10 分钟后' },
       { id: 'open', label: '打开' },
+      { id: 'dismiss', label: '今天不再提醒' },
     ];
   }
   if (candidate.kind === 'agent-approval') return [{ id: 'open', label: '查看请求' }];
@@ -86,6 +103,9 @@ export class ReminderScheduler {
 
   async load(): Promise<void> {
     this.#state = (await this.#stateStore.load()) ?? emptyReminderRuntimeState();
+    // Runtime files written before the notification budget existed do not
+    // have a log. Keep their delivery and dismissal history intact.
+    this.#state.taskNotificationLog ??= {};
   }
 
   async replaceCandidates(candidates: ReminderCandidate[]): Promise<void> {
@@ -108,28 +128,58 @@ export class ReminderScheduler {
     if (!due.length) return [];
 
     const taskDue = due.filter((candidate) => candidate.kind === 'task');
+    const otherDue = due.filter((candidate) => candidate.kind !== 'task');
     const deliveries: ReminderDelivery[] = [];
-    if (taskDue.length > 3) {
+    const suppressedTaskDue = taskDue.filter((candidate) =>
+      settings.taskIgnoreBackoffEnabled &&
+      (this.#state.dismissed[candidate.id] ?? 0) >= 2,
+    );
+    suppressedTaskDue.forEach((candidate) => this.#markDelivered(candidate, now));
+    const sourceSuppressedTaskDue = taskDue.filter((candidate) =>
+      !suppressedTaskDue.includes(candidate) && !taskSourcePolicyAllows(candidate, settings),
+    );
+    const policyEligibleTaskDue = taskDue.filter((candidate) =>
+      !suppressedTaskDue.includes(candidate) && !sourceSuppressedTaskDue.includes(candidate),
+    );
+    const minIntervalMinutes = Number.isInteger(settings.taskReminderMinIntervalMinutes)
+      ? Math.max(0, settings.taskReminderMinIntervalMinutes)
+      : 0;
+    const latestTaskNotification = this.#latestTaskNotification();
+    const cooldownActive = latestTaskNotification !== undefined &&
+      minIntervalMinutes > 0 &&
+      now.getTime() - latestTaskNotification.timestamp < minIntervalMinutes * 60_000;
+    const actionableTaskDue = policyEligibleTaskDue.filter((candidate) =>
+      !cooldownActive || latestTaskNotification?.key === deliveryKey(candidate),
+    );
+    const dailyLimit = Number.isInteger(settings.dailyTaskReminderLimit) && settings.dailyTaskReminderLimit > 0
+      ? settings.dailyTaskReminderLimit
+      : 0;
+    const usedToday = this.#countTaskNotifications(now);
+    const remainingTaskNotifications = dailyLimit > 0
+      ? Math.max(0, dailyLimit - usedToday)
+      : Number.POSITIVE_INFINITY;
+
+    if (actionableTaskDue.length > 3 && remainingTaskNotifications > 0) {
       const summary: ReminderDelivery = {
         id: `missed:${localDateKey(now)}:${now.getHours()}`,
-        title: `你有 ${taskDue.length} 个待处理提醒`,
-        body: taskDue.slice(0, 3).map((candidate) => candidate.title).join('、'),
+        title: `你有 ${actionableTaskDue.length} 个待处理提醒`,
+        body: actionableTaskDue.slice(0, 3).map((candidate) => candidate.title).join('、'),
         kind: 'missed-summary',
         actions: [{ id: 'open', label: '查看 Today' }],
+        reason: {
+          code: 'missed-summary',
+          label: '合并了错过的提醒',
+          detail: `有 ${actionableTaskDue.length} 项提醒同时到期，已合并成一条，避免连续打扰。`,
+        },
       };
       await this.#sink.show(summary);
       deliveries.push(summary);
-      taskDue.forEach((candidate) => this.#markDelivered(candidate, now));
-    } else {
-      for (const candidate of due) {
-        if (candidate.kind === 'morning-brief' && this.#state.lastMorningBriefDate === localDateKey(now)) {
-          this.#markDelivered(candidate, now);
-          continue;
-        }
-        if (candidate.kind === 'sync-risk' && this.#state.lastRiskNoticeDate === localDateKey(now)) {
-          this.#markDelivered(candidate, now);
-          continue;
-        }
+      actionableTaskDue.forEach((candidate) => this.#markDelivered(candidate, now));
+      // A missed-summary is one user-facing task notification, regardless of
+      // how many underlying tasks it coalesces.
+      this.#recordTaskNotification(summary.id, now);
+    } else if (remainingTaskNotifications > 0) {
+      for (const candidate of actionableTaskDue.slice(0, remainingTaskNotifications)) {
         const delivery: ReminderDelivery = {
           id: candidate.id,
           taskId: candidate.taskId,
@@ -137,13 +187,41 @@ export class ReminderScheduler {
           body: candidate.body,
           kind: candidate.kind,
           actions: actionsFor(candidate),
+          ...(candidate.reason === undefined ? {} : { reason: structuredClone(candidate.reason) }),
         };
         await this.#sink.show(delivery);
         deliveries.push(delivery);
         this.#markDelivered(candidate, now);
-        if (candidate.kind === 'morning-brief') this.#state.lastMorningBriefDate = localDateKey(now);
-        if (candidate.kind === 'sync-risk') this.#state.lastRiskNoticeDate = localDateKey(now);
+        this.#recordTaskNotification(deliveryKey(candidate), now);
       }
+    }
+
+    // Non-task reminders (morning brief, sync risk and agent approvals) have a
+    // separate channel and remain actionable when ordinary task notifications
+    // have reached their daily budget.
+    for (const candidate of otherDue) {
+      if (candidate.kind === 'morning-brief' && this.#state.lastMorningBriefDate === localDateKey(now)) {
+        this.#markDelivered(candidate, now);
+        continue;
+      }
+      if (candidate.kind === 'sync-risk' && this.#state.lastRiskNoticeDate === localDateKey(now)) {
+        this.#markDelivered(candidate, now);
+        continue;
+      }
+      const delivery: ReminderDelivery = {
+        id: candidate.id,
+        taskId: candidate.taskId,
+        title: candidate.title,
+        body: candidate.body,
+        kind: candidate.kind,
+        actions: actionsFor(candidate),
+        ...(candidate.reason === undefined ? {} : { reason: structuredClone(candidate.reason) }),
+      };
+      await this.#sink.show(delivery);
+      deliveries.push(delivery);
+      this.#markDelivered(candidate, now);
+      if (candidate.kind === 'morning-brief') this.#state.lastMorningBriefDate = localDateKey(now);
+      if (candidate.kind === 'sync-risk') this.#state.lastRiskNoticeDate = localDateKey(now);
     }
     await this.#stateStore.save(this.#state);
     return deliveries;
@@ -208,5 +286,34 @@ export class ReminderScheduler {
   #markDelivered(candidate: ReminderCandidate, now: Date): void {
     this.#state.delivered[deliveryKey(candidate)] = now.toISOString();
     delete this.#state.snoozedUntil[candidate.id];
+  }
+
+  #recordTaskNotification(key: string, now: Date): void {
+    this.#state.taskNotificationLog[key] = now.toISOString();
+    const cutoff = now.getTime() - 62 * 24 * 60 * 60_000;
+    for (const [entryKey, timestamp] of Object.entries(this.#state.taskNotificationLog)) {
+      const parsed = Date.parse(timestamp);
+      if (Number.isNaN(parsed) || parsed < cutoff) delete this.#state.taskNotificationLog[entryKey];
+    }
+  }
+
+  #latestTaskNotification(): { key: string; timestamp: number } | undefined {
+    let latest: { key: string; timestamp: number } | undefined;
+    for (const [key, value] of Object.entries(this.#state.taskNotificationLog)) {
+      const timestamp = Date.parse(value);
+      if (Number.isNaN(timestamp)) continue;
+      if (latest === undefined || timestamp > latest.timestamp) latest = { key, timestamp };
+    }
+    return latest;
+  }
+
+  #countTaskNotifications(now: Date): number {
+    const today = localDateKey(now);
+    return Object.values(this.#state.taskNotificationLog)
+      .filter((timestamp) => {
+        const parsed = new Date(timestamp);
+        return !Number.isNaN(parsed.getTime()) && localDateKey(parsed) === today;
+      })
+      .length;
   }
 }

@@ -219,7 +219,9 @@ export class OAuthLoopbackServer {
     this.settled = true;
     const resolve = this.resolveCallback;
     this.clearPending();
-    void this.close().finally(() => resolve?.(callback));
+    void this.close()
+      .finally(() => resolve?.(callback))
+      .catch(() => undefined);
   }
 
   private finishWithError(error: Error): void {
@@ -227,7 +229,9 @@ export class OAuthLoopbackServer {
     this.settled = true;
     const reject = this.rejectCallback;
     this.clearPending();
-    void this.close().finally(() => reject?.(error));
+    void this.close()
+      .finally(() => reject?.(error))
+      .catch(() => undefined);
   }
 
   async cancel(message = 'OAuth authorization was cancelled.'): Promise<void> {

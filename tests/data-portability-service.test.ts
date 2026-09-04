@@ -15,6 +15,8 @@ import {
   type Task,
   type TaskDraft,
   type TaskOperation,
+  type TaskProject,
+  type TaskList,
 } from '../src/shared/models';
 import { defaultSettings } from '../src/shared/settings';
 
@@ -60,15 +62,39 @@ const makeOperation = (id: string, task: Task): TaskOperation => ({
   changes: [{ taskId: task.id, before: clone(task), after: clone(task) }],
 });
 
+const makeProject = (id: string, name: string): TaskProject => ({
+  id,
+  name,
+  color: 'violet',
+  archived: false,
+  privateOrder: 0,
+  createdAt: '2026-08-09T00:00:00.000Z',
+  updatedAt: '2026-08-09T00:00:00.000Z',
+});
+
+const makeList = (id: string, name: string): TaskList => ({
+  id,
+  name,
+  color: 'green',
+  archived: false,
+  privateOrder: 0,
+  createdAt: '2026-08-09T00:00:00.000Z',
+  updatedAt: '2026-08-09T00:00:00.000Z',
+});
+
 const snapshot = (
   tasks: Task[] = [],
   drafts: TaskDraft[] = [],
   operations: TaskOperation[] = [],
+  projects: TaskProject[] = [],
+  lists: TaskList[] = [],
 ): DataPortabilitySnapshot => {
   const taskState = createEmptyLocalAppState();
   taskState.tasks = Object.fromEntries(tasks.map((task) => [task.id, clone(task)]));
   taskState.drafts = Object.fromEntries(drafts.map((draft) => [draft.id, clone(draft)]));
   taskState.operations = clone(operations);
+  taskState.projects = Object.fromEntries(projects.map((project) => [project.id, clone(project)]));
+  taskState.lists = Object.fromEntries(lists.map((list) => [list.id, clone(list)]));
   return {
     taskState,
     settings: clone(defaultSettings),
@@ -110,6 +136,133 @@ const serviceFor = (
 });
 
 describe('DataPortabilityService export safety', () => {
+  it('renders a readable Markdown task export without private paths or notes by default', async () => {
+    const project = makeProject('project-1', '研究项目');
+    const list = makeList('list-1', '今天');
+    const task = makeTask('task-md', '整理 Markdown 说明', {
+      projectId: project.id,
+      listId: list.id,
+      notes: '公开说明不应出现在默认私人导出中',
+      privateNotes: '只给自己看的内容',
+      plannedDate: '2026-08-09',
+      deferUntil: '2026-08-12',
+      estimatedMinutes: 45,
+      flagged: true,
+      recurrence: { frequency: 'weekly', interval: 1, weekdays: [1, 3, 5] },
+      attachments: [{
+        id: 'attachment-md',
+        name: 'brief.pdf',
+        mimeType: 'application/pdf',
+        size: 1234,
+        localPath: '/Users/secret/brief.pdf',
+      }],
+    });
+    const source = new MemoryPortabilityRepository(
+      snapshot([task], [], [], [project], [list]),
+    );
+
+    const markdown = await serviceFor(source).exportMarkdown();
+
+    expect(markdown).toContain('# Todo Agent 任务导出');
+    expect(markdown).toContain('- [ ] **整理 Markdown 说明**');
+    expect(markdown).toContain('项目：研究项目');
+    expect(markdown).toContain('预计：45 分钟');
+    expect(markdown).toContain('重点标记');
+    expect(markdown).toContain('稍后：2026-08-12');
+    expect(markdown).toContain('循环：每周（周一、三、五）');
+    expect(markdown).not.toContain('公开说明不应出现在默认私人导出中');
+    expect(markdown).not.toContain('只给自己看的内容');
+    expect(markdown).not.toContain('/Users/secret/brief.pdf');
+  });
+
+  it('keeps task notes and safe links when Markdown export explicitly opts out of redaction', async () => {
+    const task = makeTask('task-md-none', '发布说明', {
+      notes: '## 说明\n\n请查看公开链接。',
+      links: [{ id: 'link-1', url: 'https://example.com/docs', label: '文档' }],
+    });
+    const source = new MemoryPortabilityRepository(snapshot([task]));
+
+    const markdown = await serviceFor(source).exportMarkdown({ redaction: 'none' });
+
+    expect(markdown).toContain('请查看公开链接。');
+    expect(markdown).toContain('[文档](https://example.com/docs)');
+  });
+
+  it('optionally renders a readable event summary without exporting snapshots', async () => {
+    const before = makeTask('task-event', '整理旧标题', {
+      privateNotes: '绝不应出现在事件摘要中',
+      attachments: [{
+        id: 'attachment-event',
+        name: 'secret.txt',
+        mimeType: 'text/plain',
+        localPath: '/Users/secret/secret.txt',
+      }],
+    });
+    const after = {
+      ...before,
+      title: '整理新标题',
+      status: 'completed' as const,
+      completedAt: '2026-08-09T13:00:00.000Z',
+      updatedAt: '2026-08-09T13:00:00.000Z',
+    };
+    const operation: TaskOperation = {
+      id: 'operation-event',
+      kind: 'complete',
+      createdAt: '2026-08-09T13:00:00.000Z',
+      changes: [{ taskId: before.id, before, after }],
+    };
+    const source = new MemoryPortabilityRepository(
+      snapshot([after], [], [operation]),
+    );
+
+    const defaultMarkdown = await serviceFor(source).exportMarkdown();
+    expect(defaultMarkdown).not.toContain('任务事件日志');
+
+    const markdown = await serviceFor(source).exportMarkdown({
+      include: { operations: true },
+    });
+    expect(markdown).toContain('## 任务事件日志');
+    expect(markdown).toContain('标记完成');
+    expect(markdown).toContain('整理新标题');
+    expect(markdown).toContain('字段：标题、状态、完成时间');
+    expect(markdown).not.toContain('"before"');
+    expect(markdown).not.toContain('"after"');
+    expect(markdown).not.toContain('整理旧标题');
+    expect(markdown).not.toContain('绝不应出现在事件摘要中');
+    expect(markdown).not.toContain('/Users/secret/secret.txt');
+  });
+
+  it('round-trips local list entities and remaps copied list references', async () => {
+    const list = makeList('list-1', '学习');
+    const task = makeTask('task-list', '清单任务', { listId: list.id });
+    const source = new MemoryPortabilityRepository(snapshot([task], [], [], [], [list]));
+    const json = await serviceFor(source).exportJson({ include: { permissionAudit: false } });
+    expect(JSON.parse(json).data.lists).toHaveLength(1);
+
+    const target = new MemoryPortabilityRepository(snapshot([], [], [], [], [makeList(list.id, '已有学习')]));
+    const result = await serviceFor(target).importJson(json, { strategy: 'copy' });
+    const copiedListId = Object.keys(target.state.taskState.lists).find((id) => id !== list.id);
+    expect(result.lists.copy).toBe(1);
+    expect(copiedListId).toBeTruthy();
+    expect(target.state.taskState.tasks['task-list']?.listId).toBe(copiedListId);
+  });
+
+  it('round-trips local project entities and remaps copied project references', async () => {
+    const project = makeProject('project-1', '发布');
+    const task = makeTask('task-project', '项目任务', { projectId: project.id });
+    const source = new MemoryPortabilityRepository(snapshot([task], [], [], [project]));
+    const json = await serviceFor(source).exportJson({ include: { permissionAudit: false } });
+    expect(JSON.parse(json).data.projects).toHaveLength(1);
+
+    const targetProject = makeProject(project.id, '已有发布');
+    const target = new MemoryPortabilityRepository(snapshot([], [], [], [targetProject]));
+    const result = await serviceFor(target).importJson(json, { strategy: 'copy' });
+    const copiedProjectId = Object.keys(target.state.taskState.projects).find((id) => id !== project.id);
+    expect(result.projects.copy).toBe(1);
+    expect(copiedProjectId).toBeTruthy();
+    expect(target.state.taskState.tasks['task-project']?.projectId).toBe(copiedProjectId);
+  });
+
   it.each(['bearer', 'none'] as const)(
     'round-trips the supported %s model authentication mode without credentials',
     async (authMode) => {
@@ -135,6 +288,33 @@ describe('DataPortabilityService export safety', () => {
       expect(target.state.settings.ai.credentialId).toBeUndefined();
     },
   );
+
+  it('round-trips user-entered model prices without exporting credentials', async () => {
+    const source = new MemoryPortabilityRepository(snapshot());
+    source.state.settings.ai.pricing = {
+      promptUsdPerMillionTokens: 2.5,
+      completionUsdPerMillionTokens: 10,
+    };
+    source.state.settings.ai.fallback.pricing = {
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    };
+    const json = await serviceFor(source).exportJson({
+      include: { permissionAudit: false },
+    });
+    const target = new MemoryPortabilityRepository(snapshot());
+    await serviceFor(target).importJson(json, { strategy: 'overwrite' });
+
+    expect(target.state.settings.ai.pricing).toEqual({
+      promptUsdPerMillionTokens: 2.5,
+      completionUsdPerMillionTokens: 10,
+    });
+    expect(target.state.settings.ai.fallback.pricing).toEqual({
+      promptUsdPerMillionTokens: 0,
+      completionUsdPerMillionTokens: 0,
+    });
+    expect(json).not.toContain('credentialId');
+  });
 
   it('defaults a legacy model authentication mode to Bearer and rejects unknown values', async () => {
     const source = new MemoryPortabilityRepository(snapshot());
@@ -165,12 +345,16 @@ describe('DataPortabilityService export safety', () => {
   it('imports legacy floating settings as the unique Todo Pet defaults', async () => {
     const source = new MemoryPortabilityRepository(snapshot());
     const bundle = JSON.parse(await serviceFor(source).exportJson()) as {
-      data: { settings: { floating: Record<string, unknown> } };
+      data: { settings: { floating: Record<string, unknown>; pet: Record<string, unknown>; agentCapabilities?: Record<string, unknown> } };
     };
     delete bundle.data.settings.floating.hoverExpandDelayMs;
     delete bundle.data.settings.floating.topMode;
     delete bundle.data.settings.floating.selectedTab;
     delete bundle.data.settings.floating.scalePercent;
+    delete bundle.data.settings.floating.mousePassthrough;
+    delete bundle.data.settings.pet.inputReactionsEnabled;
+    delete bundle.data.settings.pet.vacationMode;
+    delete bundle.data.settings.agentCapabilities;
     bundle.data.settings.floating.shape = 'capsule';
     const target = new MemoryPortabilityRepository(snapshot());
 
@@ -182,6 +366,10 @@ describe('DataPortabilityService export safety', () => {
     expect(target.state.settings.floating.topMode).toBe('always');
     expect(target.state.settings.floating.selectedTab).toBe('all');
     expect(target.state.settings.floating.scalePercent).toBe(100);
+    expect(target.state.settings.floating.mousePassthrough).toBe(false);
+    expect(target.state.settings.pet.inputReactionsEnabled).toBe(false);
+    expect(target.state.settings.pet.vacationMode).toBe(false);
+    expect(target.state.settings.agentCapabilities).toEqual(defaultSettings.agentCapabilities);
     expect(target.state.settings.floating).not.toHaveProperty('shape');
   });
 
@@ -202,6 +390,38 @@ describe('DataPortabilityService export safety', () => {
       expect(target.state.settings.floating.topMode).toBe('always');
     },
   );
+
+  it('imports legacy focus settings with safe shield defaults and validates new values', async () => {
+    const source = new MemoryPortabilityRepository(snapshot());
+    const bundle = JSON.parse(await serviceFor(source).exportJson()) as {
+      data: { settings: { focus: Record<string, unknown> } };
+    };
+    delete bundle.data.settings.focus.shieldMode;
+    delete bundle.data.settings.focus.shieldApplications;
+    const target = new MemoryPortabilityRepository(snapshot());
+
+    await serviceFor(target).importJson(JSON.stringify(bundle), { strategy: 'overwrite' });
+    expect(target.state.settings.focus.shieldMode).toBe('off');
+    expect(target.state.settings.focus.shieldApplications).toEqual([]);
+
+    const invalid = JSON.parse(JSON.stringify(bundle)) as typeof bundle;
+    invalid.data.settings.focus.shieldMode = 'block-other-apps';
+    await expect(
+      serviceFor(new MemoryPortabilityRepository(snapshot())).previewImport(
+        JSON.stringify(invalid),
+        'overwrite',
+      ),
+    ).rejects.toThrow('Expected one of: off, gentle, pause');
+
+    const tooLong = JSON.parse(JSON.stringify(bundle)) as typeof bundle;
+    tooLong.data.settings.focus.shieldApplications = ['x'.repeat(81)];
+    await expect(
+      serviceFor(new MemoryPortabilityRepository(snapshot())).previewImport(
+        JSON.stringify(tooLong),
+        'overwrite',
+      ),
+    ).rejects.toThrow('Application name is too long');
+  });
 
   it('exports selected domains while applying a non-bypassable credential firewall', async () => {
     const secretTask = makeTask('task-1', 'Private task', {
@@ -258,11 +478,34 @@ describe('DataPortabilityService export safety', () => {
       notes: 'Customer details',
       privateNotes: 'Private thinking',
       tags: ['customer'],
+      comments: [{
+        id: 'comment-1',
+        body: 'Only for this device',
+        author: 'user',
+        createdAt: '2026-08-09T00:00:00.000Z',
+        updatedAt: '2026-08-09T00:00:00.000Z',
+      }],
+      researchCards: [{
+        id: 'research-1',
+        title: 'Source summary',
+        url: 'https://example.com/source',
+        summary: 'Private research context',
+        actionItems: ['Follow up'],
+        capturedAt: '2026-08-09T00:00:00.000Z',
+      }],
     });
     const repository = new MemoryPortabilityRepository(
       snapshot([task], [makeDraft('draft-1', task.id, 'unfinished thought')]),
     );
     const service = serviceFor(repository);
+
+    const fullBundle = await service.createExport({
+      redaction: 'none',
+      include: { operations: false, permissionAudit: false },
+    });
+    expect(fullBundle.data.tasks?.[0]?.researchCards).toMatchObject([
+      expect.objectContaining({ title: 'Source summary', actionItems: ['Follow up'] }),
+    ]);
 
     const privateBundle = await service.createExport({
       redaction: 'private',
@@ -273,6 +516,8 @@ describe('DataPortabilityService export safety', () => {
       notes: '',
       privateNotes: '',
       customFields: {},
+      comments: [],
+      researchCards: [],
     });
     expect(privateBundle.data.drafts?.[0]?.text).toBe('[REDACTED]');
     expect(privateBundle.data.operations).toBeUndefined();
@@ -328,6 +573,45 @@ describe('DataPortabilityService import validation', () => {
 
     expect(target.commits).toBe(0);
     expect(target.state.taskState.tasks).toEqual({});
+  });
+
+  it('rejects duplicate or shared-field Today plan operation snapshots', async () => {
+    const task = makeTask('task-plan', 'Private plan');
+    const after = clone(task);
+    after.plannedDate = '2026-08-09';
+    after.updatedAt = '2026-08-09T01:00:00.000Z';
+    const operation: TaskOperation = {
+      id: 'operation-plan',
+      kind: 'plan-today',
+      createdAt: '2026-08-09T01:00:00.000Z',
+      changes: [{ taskId: task.id, before: clone(task), after }],
+    };
+    const source = new MemoryPortabilityRepository(
+      snapshot([task], [], [operation]),
+    );
+    const safeBundle = JSON.parse(
+      await serviceFor(source).exportJson(),
+    ) as Record<string, any>;
+
+    const duplicate = clone(safeBundle);
+    duplicate.data.operations[0].changes.push(
+      clone(duplicate.data.operations[0].changes[0]),
+    );
+    await expect(
+      serviceFor(new MemoryPortabilityRepository(snapshot())).previewImport(
+        JSON.stringify(duplicate),
+        'overwrite',
+      ),
+    ).rejects.toThrow('Operation contains duplicate task changes');
+
+    const sharedField = clone(safeBundle);
+    sharedField.data.operations[0].changes[0].after.title = 'Injected title';
+    await expect(
+      serviceFor(new MemoryPortabilityRepository(snapshot())).previewImport(
+        JSON.stringify(sharedField),
+        'overwrite',
+      ),
+    ).rejects.toThrow('Today plan operation changes shared field: title');
   });
 
   it('pins execution to the exact bytes semantically represented by a preview digest', async () => {

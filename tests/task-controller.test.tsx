@@ -393,4 +393,214 @@ describe("useTaskController", () => {
     expect(result.current.selectedId).toBeUndefined();
     expect(get).toHaveBeenCalledWith(task.id, true);
   });
+
+  it("loads a task opened from the inspector even when it is outside the current collection", async () => {
+    const visibleTask = makeTask("2026-08-10T10:00:00.000Z");
+    const hiddenTask = {
+      ...visibleTask,
+      id: "task-hidden-from-today",
+      title: "未安排的前置任务",
+      plannedDate: undefined,
+    };
+    const otherHiddenTask = {
+      ...hiddenTask,
+      id: "task-second-hidden-from-today",
+      title: "另一个前置任务",
+    };
+    const hiddenLookup = deferred<Task | undefined>();
+    const get = vi.fn((id: string) =>
+      id === hiddenTask.id
+        ? hiddenLookup.promise
+        : Promise.resolve(otherHiddenTask),
+    );
+    const sections = vi
+      .fn<() => Promise<TaskViewSection[]>>()
+      .mockResolvedValue([{ id: "due-today", tasks: [visibleTask] }]);
+    window.desktopApi = {
+      tasks: { sections, get },
+      events: { onTasksChanged: () => () => undefined },
+    } as unknown as DesktopApi;
+
+    const { result } = renderHook(() => useTaskController("today", ""));
+    await waitFor(() => expect(result.current.selected?.id).toBe(visibleTask.id));
+
+    act(() => result.current.select(hiddenTask.id));
+    expect(result.current.selectedId).toBe(hiddenTask.id);
+    expect(result.current.selected).toBeUndefined();
+
+    act(() => result.current.select(otherHiddenTask.id));
+    await waitFor(() =>
+      expect(result.current.selected?.id).toBe(otherHiddenTask.id),
+    );
+
+    hiddenLookup.resolve(hiddenTask);
+    await Promise.resolve();
+    expect(result.current.selected?.id).toBe(otherHiddenTask.id);
+    expect(get).toHaveBeenNthCalledWith(1, hiddenTask.id, true);
+    expect(get).toHaveBeenNthCalledWith(2, otherHiddenTask.id, true);
+  });
+
+  it("does not let a stale refresh lookup replace a newer explicit selection", async () => {
+    const visibleTask = makeTask("2026-08-10T10:00:00.000Z");
+    const otherTask = {
+      ...visibleTask,
+      id: "task-newer-explicit-selection",
+      title: "用户刚打开的任务",
+      plannedDate: undefined,
+    };
+    const refreshLookup = deferred<Task | undefined>();
+    const listeners = new Set<() => void>();
+    const sections = vi
+      .fn<() => Promise<TaskViewSection[]>>()
+      .mockResolvedValueOnce([{ id: "due-today", tasks: [visibleTask] }])
+      .mockResolvedValueOnce([]);
+    const get = vi.fn((id: string) =>
+      id === visibleTask.id
+        ? refreshLookup.promise
+        : Promise.resolve(otherTask),
+    );
+    window.desktopApi = {
+      tasks: { sections, get },
+      events: {
+        onTasksChanged: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    } as unknown as DesktopApi;
+
+    const { result } = renderHook(() => useTaskController("today", ""));
+    await waitFor(() => expect(result.current.selected?.id).toBe(visibleTask.id));
+
+    act(() => listeners.forEach((listener) => listener()));
+    await waitFor(() => expect(get).toHaveBeenCalledWith(visibleTask.id, true));
+
+    act(() => result.current.select(otherTask.id));
+    await waitFor(() => expect(result.current.selected?.id).toBe(otherTask.id));
+
+    refreshLookup.resolve(visibleTask);
+    await Promise.resolve();
+    expect(result.current.selected?.id).toBe(otherTask.id);
+  });
+
+  it("does not reopen the inspector when an in-flight save finishes after close", async () => {
+    const initialTask = makeTask("2026-08-10T10:00:00.000Z");
+    const updatedTask = {
+      ...initialTask,
+      notes: "保存后的备注",
+      updatedAt: "2026-08-10T00:06:00.000Z",
+    };
+    const pendingUpdate = deferred<TaskMutationResult>();
+    const sections = vi
+      .fn<() => Promise<TaskViewSection[]>>()
+      .mockResolvedValueOnce([{ id: "due-today", tasks: [initialTask] }])
+      .mockResolvedValueOnce([{ id: "due-today", tasks: [updatedTask] }]);
+    const update = vi.fn(() => pendingUpdate.promise);
+    window.desktopApi = {
+      tasks: { sections, update },
+      events: { onTasksChanged: () => () => undefined },
+    } as unknown as DesktopApi;
+
+    const { result } = renderHook(() => useTaskController("today", ""));
+    await waitFor(() => expect(result.current.selected?.id).toBe(initialTask.id));
+
+    let save!: Promise<string | undefined>;
+    act(() => {
+      save = result.current.update(initialTask.id, { notes: updatedTask.notes });
+    });
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.select(undefined));
+    expect(result.current.selectedId).toBeUndefined();
+
+    await act(async () => {
+      pendingUpdate.resolve({
+        task: updatedTask,
+        operationId: "operation-after-close",
+      });
+      await save;
+    });
+
+    expect(result.current.selectedId).toBeUndefined();
+    expect(result.current.selected).toBeUndefined();
+    expect(result.current.tasks[0]?.notes).toBe(updatedTask.notes);
+  });
+
+  it("routes skip recurring through the desktop API and refreshes the same task", async () => {
+    const task = {
+      ...makeTask("2026-08-10T10:00:00.000Z"),
+      recurrence: { frequency: "daily" as const, interval: 1 },
+      recurrenceSeriesId: "task-date-refresh",
+      recurrenceIndex: 0,
+      plannedDate: "2026-08-10",
+    };
+    const skipped = {
+      ...task,
+      recurrenceIndex: 1,
+      plannedDate: "2026-08-11",
+      updatedAt: "2026-08-10T00:01:00.000Z",
+    };
+    const sections = vi
+      .fn<() => Promise<TaskViewSection[]>>()
+      .mockResolvedValueOnce([{ id: "due-today", tasks: [task] }])
+      .mockResolvedValueOnce([{ id: "upcoming", tasks: [skipped] }]);
+    const skipRecurring = vi.fn().mockResolvedValue({
+      task: skipped,
+      operationId: "operation-skip-recurring",
+    });
+    window.desktopApi = {
+      tasks: { sections, skipRecurring },
+      events: { onTasksChanged: () => () => undefined },
+    } as unknown as DesktopApi;
+
+    const { result } = renderHook(() => useTaskController("all", ""));
+    await waitFor(() => expect(result.current.selected?.id).toBe(task.id));
+
+    await act(async () => {
+      await result.current.skipRecurring(task.id);
+    });
+
+    expect(skipRecurring).toHaveBeenCalledWith(task.id);
+    expect(result.current.selected).toMatchObject({
+      id: task.id,
+      recurrenceIndex: 1,
+      plannedDate: "2026-08-11",
+    });
+    expect(result.current.lastOperationId).toBe("operation-skip-recurring");
+  });
+
+  it("keeps a phone fallback list unselected until the user opens a task", async () => {
+    const previousMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query === "(max-width: 520px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    try {
+      const { result } = renderHook(() => useTaskController("today", ""));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.tasks.length).toBeGreaterThan(0);
+      expect(result.current.selected).toBeUndefined();
+
+      act(() => result.current.select(result.current.tasks[0]?.id));
+      await waitFor(() =>
+        expect(result.current.selected?.id).toBe(result.current.tasks[0]?.id),
+      );
+    } finally {
+      Object.defineProperty(window, "matchMedia", {
+        configurable: true,
+        value: previousMatchMedia,
+      });
+    }
+  });
 });

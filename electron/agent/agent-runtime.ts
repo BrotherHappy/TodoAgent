@@ -508,6 +508,17 @@ export class AgentRuntime {
               tool_call_id: call.id,
               content: permissionToolOutput(permission),
             });
+            this.emit(
+              runId,
+              "tool-finished",
+              asJson({
+                invocationId: prepared.invocation.invocationId,
+                providerCallId: prepared.invocation.providerCallId,
+                toolName: prepared.invocation.toolName,
+                status: "denied",
+                errorCode: permission.reasonCode,
+              }),
+            );
             await this.dependencies.auditLog.append({
               runId,
               invocationId: prepared.invocation.invocationId,

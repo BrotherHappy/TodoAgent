@@ -89,8 +89,47 @@ describe('projectReminderCandidates', () => {
         body: '提前准备',
         scheduledAt,
         source: 'local',
+        priority: 'medium',
+        reason: {
+          code: 'explicit',
+          label: '你设置的提醒',
+          detail: '提醒内容：提前准备',
+        },
       },
     ]);
+  });
+
+  it('explains deadline and morning-brief candidates with local, deterministic reasons', () => {
+    const deadline = projectReminderCandidates([
+      makeTask({ dueAt: '2026-08-09T01:00:00.000Z' }),
+    ], {
+      ...defaultSettings.notifications,
+      morningBrief: false,
+    }, {
+      now: new Date('2026-08-09T01:00:00.000Z'),
+      startedAt: new Date('2026-08-09T00:00:00.000Z'),
+      timeZone: 'UTC',
+    });
+    expect(deadline[0]?.reason).toEqual({
+      code: 'deadline',
+      label: '任务已到截止时间',
+      detail: '截止时间已到，先决定完成、稍后处理，或打开任务查看详情。',
+    });
+
+    const morning = projectReminderCandidates([], {
+      ...defaultSettings.notifications,
+      morningBrief: true,
+      morningBriefTime: '09:00',
+    }, {
+      now: new Date('2026-08-09T09:00:00.000Z'),
+      startedAt: new Date('2026-08-09T08:00:00.000Z'),
+      timeZone: 'UTC',
+    });
+    expect(morning[0]?.reason).toEqual({
+      code: 'morning-brief',
+      label: '每日晨间简报',
+      detail: '根据今天的逾期与计划任务生成，不会自动修改任务。',
+    });
   });
 
   it('converts the configured morning wall time in the selected IANA zone', () => {

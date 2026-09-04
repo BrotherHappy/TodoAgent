@@ -55,6 +55,14 @@ export interface FeishuTokenSet {
   refreshToken?: string;
   /** The authorized user's Feishu open_id, when returned by OAuth. */
   openId?: string;
+  /** Tenant identity returned by OAuth on surfaces that expose it. */
+  tenantKey?: string;
+  /**
+   * Opaque, non-secret digest of the OAuth app/relay configuration. Added by
+   * the desktop identity binder so a token cannot be restored under another
+   * client id.
+   */
+  appIdentityId?: string;
   tokenType: string;
   scope: string[];
   /** Absolute Unix time in milliseconds. */
@@ -148,6 +156,18 @@ export interface FeishuTaskListPage {
   has_more: boolean;
 }
 
+/** A Task v2 list that the authorized identity can read. */
+export interface FeishuAccessibleTasklist {
+  guid: string;
+  name?: string;
+}
+
+export interface FeishuAccessibleTasklistPage {
+  items: FeishuAccessibleTasklist[];
+  page_token?: string;
+  has_more: boolean;
+}
+
 export interface FeishuCreateTaskPayload {
   summary: string;
   description?: string;
@@ -175,6 +195,12 @@ export interface FeishuListTasksOptions {
 
 export interface FeishuTaskApi {
   listAllTasks(options?: FeishuListTasksOptions): Promise<FeishuTaskV2[]>;
+  /**
+   * Enumerates tasks visible through every readable tasklist. Implementations
+   * may omit this capability when the account has only the basic task scope;
+   * the sync layer will then keep the safe `my_tasks` fallback.
+   */
+  listAllAccessibleTasks?(): Promise<FeishuTaskV2[]>;
   getTask(taskGuid: string): Promise<FeishuTaskV2>;
   createTask(
     task: FeishuCreateTaskPayload,

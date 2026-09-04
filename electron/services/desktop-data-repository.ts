@@ -57,6 +57,8 @@ const replaceLocalState = (target: LocalAppState, source: LocalAppState): void =
   target.schemaVersion = 1;
   // LocalStore owns the revision and increments it after the mutator returns.
   target.tasks = clone(source.tasks);
+  target.projects = clone(source.projects ?? {});
+  target.lists = clone(source.lists ?? {});
   target.drafts = clone(source.drafts);
   target.operations = clone(source.operations);
 };
@@ -89,6 +91,8 @@ const assertSnapshotShape = (snapshot: DataPortabilitySnapshot): void => {
     !Number.isSafeInteger(taskState.revision) ||
     Number(taskState.revision) < 0 ||
     !isRecord(taskState.tasks) ||
+    (taskState.projects !== undefined && !isRecord(taskState.projects)) ||
+    (taskState.lists !== undefined && !isRecord(taskState.lists)) ||
     !isRecord(taskState.drafts) ||
     !Array.isArray(taskState.operations) ||
     !isRecord(settings) ||
@@ -121,6 +125,8 @@ const expectedCommittedState = (
   schemaVersion: 1,
   revision: baseline.revision + 1,
   tasks: clone(desired.tasks),
+  projects: clone(desired.projects ?? {}),
+  lists: clone(desired.lists ?? {}),
   drafts: clone(desired.drafts),
   operations: clone(desired.operations),
 });

@@ -63,6 +63,8 @@ export interface PreparedToolInvocation {
 export interface ToolRegistryOptions {
   now?: () => Date;
   idFactory?: () => string;
+  /** Re-check capability layers at review and execution time. */
+  isToolEnabled?: (toolName: string) => boolean;
 }
 
 interface StoredPreparedInvocation {
@@ -190,6 +192,7 @@ export class ToolRegistry {
   >();
   private readonly now: () => Date;
   private readonly idFactory: () => string;
+  private readonly isToolEnabled?: (toolName: string) => boolean;
 
   constructor(
     definitions: TrustedToolDefinition[] = [],
@@ -197,6 +200,7 @@ export class ToolRegistry {
   ) {
     this.now = options.now ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
+    this.isToolEnabled = options.isToolEnabled;
     for (const definition of definitions) {
       this.register(definition);
     }
@@ -244,6 +248,12 @@ export class ToolRegistry {
   ): Promise<PreparedToolInvocation> {
     if (signal.aborted) {
       throw new ToolRegistryError('ANALYSIS_ABORTED', 'The tool run was stopped before analysis.');
+    }
+    if (this.isToolEnabled && !this.isToolEnabled(call.name)) {
+      throw new ToolRegistryError(
+        'TOOL_CAPABILITY_DISABLED',
+        `The Agent capability for ${call.name} is currently disabled.`,
+      );
     }
     const definition = this.requireDefinition(call.name);
     const parsed = definition.argumentsSchema.safeParse(call.arguments);
@@ -350,6 +360,12 @@ export class ToolRegistry {
       throw new ToolRegistryError(
         'PREPARED_INVOCATION_MISMATCH',
         'The execution request does not match the invocation prepared for review.',
+      );
+    }
+    if (this.isToolEnabled && !this.isToolEnabled(invocation.toolName)) {
+      throw new ToolRegistryError(
+        'TOOL_CAPABILITY_DISABLED',
+        `The Agent capability for ${invocation.toolName} is currently disabled.`,
       );
     }
     const definition = this.requireDefinition(invocation.toolName);

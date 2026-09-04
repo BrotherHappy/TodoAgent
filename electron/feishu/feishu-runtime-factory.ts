@@ -36,6 +36,10 @@ import {
   type FeishuTaskServicePort,
 } from "./feishu-task-adapter";
 import { FeishuStateStore } from "./feishu-state-store";
+import {
+  deriveFeishuAppIdentityId,
+  deriveFeishuSyncIdentityId,
+} from "./feishu-credential-ids";
 
 export interface FeishuSettingsPort {
   /** SettingsService decrypts this value using OS-backed secure storage. */
@@ -152,7 +156,7 @@ function cloneToken(value: FeishuTokenSet): FeishuTokenSet {
   return { ...value, scope: [...value.scope] };
 }
 
-function parseToken(raw: string): FeishuTokenSet {
+export function parseStoredFeishuToken(raw: string): FeishuTokenSet {
   let value: unknown;
   try {
     value = JSON.parse(raw) as unknown;
@@ -185,6 +189,12 @@ function parseToken(raw: string): FeishuTokenSet {
         ? candidate.refreshToken
         : undefined,
     openId: typeof candidate.openId === "string" ? candidate.openId : undefined,
+    tenantKey:
+      typeof candidate.tenantKey === "string" ? candidate.tenantKey : undefined,
+    appIdentityId:
+      typeof candidate.appIdentityId === "string"
+        ? candidate.appIdentityId
+        : undefined,
     tokenType: candidate.tokenType,
     scope: [...candidate.scope] as string[],
     expiresAt: candidate.expiresAt,
@@ -193,6 +203,10 @@ function parseToken(raw: string): FeishuTokenSet {
         ? candidate.refreshTokenExpiresAt
         : undefined,
   };
+}
+
+export function serializeStoredFeishuToken(token: FeishuTokenSet): string {
+  return JSON.stringify(cloneToken(token));
 }
 
 /** Token plaintext only crosses the SettingsService encryption boundary in memory. */
@@ -217,7 +231,9 @@ class SettingsBackedFeishuTokenStore implements FeishuTokenStore {
 
   async read(): Promise<FeishuTokenSet | undefined> {
     const raw = this.settings.getCredential(this.credentialId);
-    return raw === undefined ? undefined : cloneToken(parseToken(raw));
+    return raw === undefined
+      ? undefined
+      : cloneToken(parseStoredFeishuToken(raw));
   }
 
   async compareAndSwap(
@@ -239,7 +255,7 @@ class SettingsBackedFeishuTokenStore implements FeishuTokenStore {
   private async write(next: FeishuTokenSet): Promise<void> {
     await this.settings.setCredential(
       "feishu-token",
-      JSON.stringify(cloneToken(next)),
+      serializeStoredFeishuToken(next),
       this.credentialId,
     );
   }
@@ -283,6 +299,7 @@ class DefaultFeishuRuntime implements FeishuRuntime {
     const scopes = options.scopes ?? [
       "task:task:read",
       "task:task:write",
+      "task:tasklist:read",
       "offline_access",
     ];
 
@@ -538,26 +555,89 @@ export async function createFeishuRuntime(
     sleep: options.sleep,
   });
   const storedToken = await tokenStore.read();
+  const appIdentityId = deriveFeishuAppIdentityId({
+    mode: options.mode.mode,
+    clientId: options.mode.mode === "relay" ? options.mode.clientId : options.mode.clientId,
+    relayBaseUrl:
+      options.mode.mode === "relay" ? options.mode.relayBaseUrl : undefined,
+  });
+  if (
+    storedToken?.appIdentityId !== undefined &&
+    storedToken.appIdentityId !== appIdentityId
+  ) {
+    throw new FeishuRuntimeConfigurationError(
+      "The encrypted Feishu token belongs to another OAuth application.",
+    );
+  }
+  const syncIdentityId = storedToken?.openId
+    ? deriveFeishuSyncIdentityId({
+        appIdentityId,
+        openId: storedToken.openId,
+        tenantKey: storedToken.tenantKey,
+      })
+    : undefined;
   const adapter = new FeishuTaskAdapter({
     taskService: options.taskService,
     localStore: options.localStore,
     accountId: options.accountId,
     currentUserOpenId: options.currentUserOpenId ?? storedToken?.openId,
+    syncIdentityId,
     now,
   });
-  const accountDirectory = createHash("sha256")
+  const legacyAccountDirectory = createHash("sha256")
     .update(options.accountId, "utf8")
     .digest("hex")
     .slice(0, 24);
-  const stateStore =
-    options.stateStore ??
-    new FeishuStateStore({
-      directory: path.join(options.userDataPath, "feishu", accountDirectory),
-    });
+  let stateStore = options.stateStore;
+  if (!stateStore) {
+    if (syncIdentityId) {
+      const identityStore = new FeishuStateStore({
+        directory: path.join(
+          options.userDataPath,
+          "feishu",
+          "identities",
+          syncIdentityId.replace(/^feishu-sync-/u, ""),
+        ),
+      });
+      if ((await identityStore.load()) === undefined) {
+        const legacyStore = new FeishuStateStore({
+          directory: path.join(
+            options.userDataPath,
+            "feishu",
+            legacyAccountDirectory,
+          ),
+        });
+        const legacy = await legacyStore.load();
+        if (
+          legacy &&
+          (legacy.syncIdentityId === undefined ||
+            legacy.syncIdentityId === syncIdentityId)
+        ) {
+          const claimed = { ...legacy, syncIdentityId };
+          // Mark the legacy source before copying it. A later login by another
+          // open_id can see the owner and must start with an empty namespace.
+          await legacyStore.save(claimed);
+          // Keep the copy unbound for one load so FeishuSyncService can also
+          // claim the exact local task ids proven by its mappings/queue.
+          await identityStore.save(legacy);
+        }
+      }
+      stateStore = identityStore;
+    } else {
+      stateStore = new FeishuStateStore({
+        directory: path.join(
+          options.userDataPath,
+          "feishu",
+          legacyAccountDirectory,
+        ),
+      });
+    }
+  }
   const syncService = new FeishuSyncService({
     remote: client,
     adapter,
     stateStore,
+    syncIdentityId,
     connectivity: options.connectivity,
     scheduler: options.scheduler,
     sleep: options.sleep,

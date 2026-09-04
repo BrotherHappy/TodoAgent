@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "id": "wanko-live2d",
+  "displayName": "Wanko / 动物伙伴",
+  "version": "0.1.0",
+  "author": "Live2D sample / Desktop Buddy wrapper",
+  "type": "animal",
+  "renderer": "live2d",
+  "description": "官方 Cubism Web Samples 中的动物预设，用来验证非人形宠物的注意力、触摸和释放反馈。",
+  "source": {
+    "type": "official-sample",
+    "url": "https://github.com/Live2D/CubismWebSamples/tree/develop/Samples/Resources/Wanko",
+    "license": "Live2D Sample Data Terms"
+  },
+  "layout": {
+    "defaultSize": 92,
+    "minSize": 24,
+    "maxSize": 160,
+    "anchor": "bottomCenter",
+    "preferredDock": "bottomRight"
+  },
+  "model": {
+    "core": "assets/live2d-presets/wanko/live2dcubismcore.min.js",
+    "model3": "assets/live2d-presets/wanko/Wanko.model3.json",
+    "preview": "assets/live2d-presets/wanko/Wanko.model3.json"
+  },
+  "colors": {
+    "swatches": ["#f2d08d", "#5a3d25", "#fff7df"],
+    "cssClass": "pet-wanko-live2d"
+  },
+  "capabilities": {
+    "idleMotion": true,
+    "attention": true,
+    "touchReaction": true,
+    "dragReaction": true,
+    "lifeRoutine": true,
+    "ambientMood": true,
+    "optionalCare": ["play", "rest"],
+    "aiExpression": false,
+    "lookAtCursor": true,
+    "audioFeedback": false
+  },
+  "motions": {
+    "idleMotion": { "default": "Idle", "sleepy": "Idle" },
+    "attention": { "cursorNear": "Idle", "cursorLeave": "Idle", "called": "TapBody" },
+    "touchReaction": { "default": "TapBody", "head": "TapBody" },
+    "dragReaction": { "start": "TapBody", "holding": "Idle" },
+    "dropReaction": { "default": "TapBody" },
+    "lifeRoutine": {
+      "morning": "TapBody",
+      "focusTime": "Idle",
+      "idleLong": "TapBody",
+      "night": "Idle",
+      "sleep": "Idle",
+      "rest": "Idle",
+      "wake": "TapBody"
+    },
+    "optionalCare": { "play": "TapBody", "rest": "Idle" },
+    "aiThinking": { "default": "Idle" },
+    "aiSpeaking": { "default": "TapBody" },
+    "aiNeedConfirm": { "default": "Idle" },
+    "aiSuccess": { "default": "TapBody" },
+    "aiError": { "default": "Idle", "cancelled": "Idle" },
+    "aiExpression": { "thinking": "Idle", "speaking": "TapBody", "success": "TapBody", "error": "Idle" }
+  },
+  "interactions": [
+    { "id": "touch", "label": "摸摸", "behavior": "touchReaction.default", "cooldownMs": 800 },
+    { "id": "play", "label": "逗一下", "behavior": "optionalCare.play", "cooldownMs": 4500 },
+    { "id": "rest", "label": "趴一会儿", "behavior": "lifeRoutine.rest", "cooldownMs": 5000 }
+  ],
+  "routine": {
+    "timezoneMode": "system",
+    "segments": [
+      { "id": "morning", "from": "08:00", "to": "10:30", "behavior": "lifeRoutine.morning", "cooldownMs": 1500000, "weight": 1.4, "message": "它伸了伸身体，开始今天的桌面巡逻。", "mood": "happy" },
+      { "id": "focusTime", "when": "userActiveLong", "behavior": "lifeRoutine.focusTime", "minQuietMs": 360000, "cooldownMs": 900000, "weight": 1, "message": "它安静趴在旁边陪你工作。", "mood": "neutral" },
+      { "id": "idleLong", "when": "noInteraction", "behavior": "lifeRoutine.idleLong", "afterMs": 300000, "cooldownMs": 720000, "weight": 1.3, "message": "它自己找到了一个小乐子。", "mood": "happy" },
+      { "id": "night", "from": "22:30", "to": "07:00", "behavior": "lifeRoutine.night", "cooldownMs": 1800000, "weight": 1.6, "message": "它进入安静的夜间陪伴。", "mood": "sleepy" }
+    ]
+  },
+  "fallback": {
+    "renderer": "live2d",
+    "motion": {
+      "attention.cursorNear": "idleMotion.default",
+      "attention.cursorLeave": "idleMotion.default",
+      "lifeRoutine.sleep": "idleMotion.sleepy",
+      "lifeRoutine.night": "lifeRoutine.sleep",
+      "aiThinking": "idleMotion.default",
+      "aiSpeaking": "touchReaction.default",
+      "aiNeedConfirm": "idleMotion.default",
+      "aiSuccess": "touchReaction.default",
+      "aiError": "idleMotion.default"
+    }
+  }
+}

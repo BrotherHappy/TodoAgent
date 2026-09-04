@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename } from "node:fs/promises";
 import path from "node:path";
-import type { WeatherSnapshot } from "../../src/shared/pet-types";
+import type { WeatherForecastDay, WeatherSnapshot } from "../../src/shared/pet-types";
 import type { WeatherSettings } from "../../src/shared/settings";
 
 interface GeocodingResponse {
@@ -23,6 +23,7 @@ interface ForecastResponse {
     weather_code?: number;
   };
   daily?: {
+    time?: string[];
     temperature_2m_max?: number[];
     temperature_2m_min?: number[];
     precipitation_probability_max?: number[];
@@ -138,7 +139,7 @@ export class WeatherService {
       "daily",
       "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
     );
-    url.searchParams.set("forecast_days", "1");
+    url.searchParams.set("forecast_days", "3");
     url.searchParams.set("timezone", "auto");
     const forecast = await this.#fetchJson<ForecastResponse>(url);
     const temperature = forecast.current?.temperature_2m;
@@ -148,6 +149,7 @@ export class WeatherService {
     }
 
     const now = this.#now();
+    const forecastDays = buildForecastDays(forecast.daily);
     const snapshot: WeatherSnapshot = {
       city: resolvedName || settings.city.trim(),
       latitude: Number(latitude),
@@ -163,6 +165,7 @@ export class WeatherService {
       precipitationProbability: finiteOrUndefined(
         forecast.daily?.precipitation_probability_max?.[0],
       ),
+      forecast: forecastDays.length > 0 ? forecastDays : undefined,
       severe: [95, 96, 99].includes(Number(weatherCode)),
       fetchedAt: new Date(now).toISOString(),
       expiresAt: new Date(
@@ -193,6 +196,30 @@ export class WeatherService {
   #isExpired(snapshot: WeatherSnapshot): boolean {
     return new Date(snapshot.expiresAt).getTime() <= this.#now();
   }
+}
+
+function buildForecastDays(
+  daily: ForecastResponse["daily"],
+): WeatherForecastDay[] {
+  const dates = daily?.time ?? [];
+  return dates
+    .map((date, index): WeatherForecastDay | undefined => {
+      if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) return undefined;
+      const conditionCode = finiteOrUndefined(daily?.weather_code?.[index]);
+      if (conditionCode === undefined) return undefined;
+      return {
+        date,
+        conditionCode,
+        conditionLabel: weatherCodeLabel(conditionCode),
+        lowC: finiteOrUndefined(daily?.temperature_2m_min?.[index]),
+        highC: finiteOrUndefined(daily?.temperature_2m_max?.[index]),
+        precipitationProbability: finiteOrUndefined(
+          daily?.precipitation_probability_max?.[index],
+        ),
+        severe: [95, 96, 99].includes(conditionCode),
+      };
+    })
+    .filter((day): day is WeatherForecastDay => day !== undefined);
 }
 
 function finiteOrUndefined(value: unknown): number | undefined {

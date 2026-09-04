@@ -5,6 +5,7 @@ import { isTrustedFeishuAuthorizationUrl } from "./feishu-authorization-url";
 export const FEISHU_APP_REGISTRATION_USER_SCOPES = [
   "task:task:read",
   "task:task:write",
+  "task:tasklist:read",
   "offline_access",
 ] as const;
 

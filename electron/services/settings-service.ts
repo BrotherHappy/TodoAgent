@@ -8,6 +8,7 @@ import {
   type AppSettings,
   type PublicCredentialState,
 } from '../../src/shared/settings';
+import { normalizeTaskAutomationRules } from '../../src/shared/task-automations';
 
 export interface EncryptionAdapter {
   isAvailable(): boolean;
@@ -27,6 +28,20 @@ interface StoredSecrets {
 const clone = <T>(value: T): T => structuredClone(value);
 const petTabs = new Set(['all', 'today', 'focus', 'chat', 'home']);
 const environmentSounds = new Set(['off', 'rain', 'forest', 'cafe', 'white-noise']);
+const petActionPacks = new Set(['balanced', 'calm', 'playful', 'focused']);
+const petAnimationIntensities = new Set(['gentle', 'lively']);
+const focusShieldModes = new Set(['off', 'gentle', 'pause']);
+const aiRoutingModes = new Set(['primary-only', 'fallback-on-error', 'local-only']);
+const aiAuthenticationModes = new Set(['bearer', 'none']);
+const taskReminderSourceModes = new Set(['normal', 'important-only', 'off']);
+const externalAgentIds = new Set([
+  'claude-code', 'codex', 'copilot-cli', 'gemini-cli',
+  'antigravity-cli', 'cursor-agent', 'codebuddy', 'workbuddy',
+  'kiro-cli', 'kimi-cli', 'qwen-code', 'zcode', 'codewhale',
+  'openclaw', 'hermes', 'opencode', 'mimocode', 'pi',
+  'qoder', 'qoderwork', 'qwenwork', 'reasonix-cli', 'traecode',
+  'deepseek-harness', 'custom',
+]);
 
 function clampInteger(
   value: unknown,
@@ -37,6 +52,54 @@ function clampInteger(
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.min(maximum, Math.max(minimum, Math.round(value)))
     : fallback;
+}
+
+function clampNumber(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, value))
+    : fallback;
+}
+
+function normalizeModelPricing(
+  value: unknown,
+  fallback: { promptUsdPerMillionTokens: number; completionUsdPerMillionTokens: number },
+): { promptUsdPerMillionTokens: number; completionUsdPerMillionTokens: number } {
+  const source = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    promptUsdPerMillionTokens: clampNumber(
+      source.promptUsdPerMillionTokens,
+      fallback.promptUsdPerMillionTokens,
+      0,
+      100_000,
+    ),
+    completionUsdPerMillionTokens: clampNumber(
+      source.completionUsdPerMillionTokens,
+      fallback.completionUsdPerMillionTokens,
+      0,
+      100_000,
+    ),
+  };
+}
+
+function normalizeProjectReminderModes(value: unknown): Record<string, 'normal' | 'important-only' | 'off'> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized: Record<string, 'normal' | 'important-only' | 'off'> = {};
+  for (const [rawProjectId, rawMode] of Object.entries(value as Record<string, unknown>)) {
+    const projectId = rawProjectId.trim();
+    if (!projectId || projectId.length > 512 || normalized[projectId] !== undefined) continue;
+    if (typeof rawMode === 'string' && taskReminderSourceModes.has(rawMode)) {
+      normalized[projectId] = rawMode as 'normal' | 'important-only' | 'off';
+    }
+    if (Object.keys(normalized).length >= 100) break;
+  }
+  return normalized;
 }
 
 async function atomicJsonWrite(filePath: string, value: unknown): Promise<void> {
@@ -59,12 +122,47 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     notifications: { ...defaultSettings.notifications, ...value?.notifications },
     floating: { ...defaultSettings.floating, ...value?.floating },
     focus: { ...defaultSettings.focus, ...value?.focus },
+    planning: {
+      ...defaultSettings.planning,
+      ...value?.planning,
+      urgencyWeights: {
+        ...defaultSettings.planning.urgencyWeights,
+        ...value?.planning?.urgencyWeights,
+      },
+    },
     weather: { ...defaultSettings.weather, ...value?.weather },
     pet: { ...defaultSettings.pet, ...value?.pet },
-    ai: { ...defaultSettings.ai, ...value?.ai },
+    ai: {
+      ...defaultSettings.ai,
+      ...value?.ai,
+      pricing: {
+        ...defaultSettings.ai.pricing,
+        ...value?.ai?.pricing,
+      },
+      fallback: {
+        ...defaultSettings.ai.fallback,
+        ...value?.ai?.fallback,
+        pricing: {
+          ...defaultSettings.ai.fallback.pricing,
+          ...value?.ai?.fallback?.pricing,
+        },
+      },
+    },
+    agentActivity: {
+      ...defaultSettings.agentActivity,
+      ...value?.agentActivity,
+      allowedAgents: Array.isArray(value?.agentActivity?.allowedAgents)
+        ? value.agentActivity!.allowedAgents
+        : defaultSettings.agentActivity.allowedAgents,
+    },
     feishu: { ...defaultSettings.feishu, ...value?.feishu },
     modelDataScope: { ...defaultSettings.modelDataScope, ...value?.modelDataScope },
+    agentCapabilities: {
+      ...defaultSettings.agentCapabilities,
+      ...value?.agentCapabilities,
+    },
     persona: { ...defaultSettings.persona, ...value?.persona },
+    automations: normalizeTaskAutomationRules(value?.automations),
     schemaVersion: 1,
   };
   // Early alpha builds defaulted to Relay even though no Relay service was
@@ -102,6 +200,39 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   merged.floating.scalePercent = Number.isFinite(merged.floating.scalePercent)
     ? Math.min(125, Math.max(75, Math.round(merged.floating.scalePercent)))
     : defaultSettings.floating.scalePercent;
+  merged.notifications.dailyTaskReminderLimit = clampInteger(
+    merged.notifications.dailyTaskReminderLimit,
+    defaultSettings.notifications.dailyTaskReminderLimit,
+    0,
+    50,
+  );
+  merged.notifications.taskIgnoreBackoffEnabled =
+    typeof merged.notifications.taskIgnoreBackoffEnabled === 'boolean'
+      ? merged.notifications.taskIgnoreBackoffEnabled
+      : defaultSettings.notifications.taskIgnoreBackoffEnabled;
+  merged.notifications.taskReminderMinIntervalMinutes = clampInteger(
+    merged.notifications.taskReminderMinIntervalMinutes,
+    defaultSettings.notifications.taskReminderMinIntervalMinutes,
+    0,
+    1_440,
+  );
+  if (!merged.notifications.taskReminderSourceMode || typeof merged.notifications.taskReminderSourceMode !== 'object') {
+    merged.notifications.taskReminderSourceMode = {
+      ...defaultSettings.notifications.taskReminderSourceMode,
+    };
+  } else {
+    merged.notifications.taskReminderSourceMode = {
+      local: taskReminderSourceModes.has(merged.notifications.taskReminderSourceMode.local)
+        ? merged.notifications.taskReminderSourceMode.local
+        : defaultSettings.notifications.taskReminderSourceMode.local,
+      feishu: taskReminderSourceModes.has(merged.notifications.taskReminderSourceMode.feishu)
+        ? merged.notifications.taskReminderSourceMode.feishu
+        : defaultSettings.notifications.taskReminderSourceMode.feishu,
+    };
+  }
+  merged.notifications.taskReminderProjectMode = normalizeProjectReminderModes(
+    merged.notifications.taskReminderProjectMode,
+  );
   merged.focus.focusMinutes = clampInteger(
     merged.focus.focusMinutes,
     defaultSettings.focus.focusMinutes,
@@ -129,6 +260,66 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   if (!environmentSounds.has(merged.focus.environmentSound)) {
     merged.focus.environmentSound = defaultSettings.focus.environmentSound;
   }
+  merged.focus.shieldMode = focusShieldModes.has(merged.focus.shieldMode)
+    ? merged.focus.shieldMode
+    : defaultSettings.focus.shieldMode;
+  const shieldApplications = Array.isArray(merged.focus.shieldApplications)
+    ? merged.focus.shieldApplications
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim().slice(0, 80))
+        .filter(Boolean)
+    : [];
+  const seenShieldApplications = new Set<string>();
+  merged.focus.shieldApplications = shieldApplications.filter((value) => {
+    const key = value.toLocaleLowerCase();
+    if (seenShieldApplications.has(key)) return false;
+    seenShieldApplications.add(key);
+    return true;
+  }).slice(0, 12);
+  merged.planning.urgencyWeights = {
+    deadline: clampInteger(
+      merged.planning.urgencyWeights.deadline,
+      defaultSettings.planning.urgencyWeights.deadline,
+      0,
+      100,
+    ),
+    plannedToday: clampInteger(
+      merged.planning.urgencyWeights.plannedToday,
+      defaultSettings.planning.urgencyWeights.plannedToday,
+      0,
+      100,
+    ),
+    priority: clampInteger(
+      merged.planning.urgencyWeights.priority,
+      defaultSettings.planning.urgencyWeights.priority,
+      0,
+      100,
+    ),
+    quickWin: clampInteger(
+      merged.planning.urgencyWeights.quickWin,
+      defaultSettings.planning.urgencyWeights.quickWin,
+      0,
+      100,
+    ),
+  };
+  if (!petActionPacks.has(merged.pet.actionPack)) {
+    merged.pet.actionPack = defaultSettings.pet.actionPack;
+  }
+  if (!petAnimationIntensities.has(merged.pet.animationIntensity)) {
+    merged.pet.animationIntensity = defaultSettings.pet.animationIntensity;
+  }
+  merged.pet.proactiveIntervalMinutes = clampInteger(
+    merged.pet.proactiveIntervalMinutes,
+    defaultSettings.pet.proactiveIntervalMinutes,
+    15,
+    240,
+  );
+  merged.pet.proactiveDailyLimit = clampInteger(
+    merged.pet.proactiveDailyLimit,
+    defaultSettings.pet.proactiveDailyLimit,
+    0,
+    20,
+  );
   merged.weather.cacheMinutes = clampInteger(
     merged.weather.cacheMinutes,
     defaultSettings.weather.cacheMinutes,
@@ -137,6 +328,53 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   );
   if (!Number.isFinite(merged.weather.latitude)) delete merged.weather.latitude;
   if (!Number.isFinite(merged.weather.longitude)) delete merged.weather.longitude;
+
+  if (!aiRoutingModes.has(merged.ai.routing)) {
+    merged.ai.routing = defaultSettings.ai.routing;
+  }
+  if (!aiAuthenticationModes.has(merged.ai.authMode)) {
+    merged.ai.authMode = defaultSettings.ai.authMode;
+  }
+  if (merged.ai.protocol !== 'ollama' && merged.ai.protocol !== 'openai-compatible') delete merged.ai.protocol;
+  merged.agentActivity.port = clampInteger(
+    merged.agentActivity.port,
+    defaultSettings.agentActivity.port,
+    0,
+    65_535,
+  );
+  merged.agentActivity.staleAfterSeconds = clampInteger(
+    merged.agentActivity.staleAfterSeconds,
+    defaultSettings.agentActivity.staleAfterSeconds,
+    15,
+    3_600,
+  );
+  const allowedExternalAgents = Array.isArray(merged.agentActivity.allowedAgents)
+    ? merged.agentActivity.allowedAgents.filter(
+        (value): value is AppSettings['agentActivity']['allowedAgents'][number] =>
+          typeof value === 'string' && externalAgentIds.has(value),
+      )
+    : [];
+  merged.agentActivity.allowedAgents = Array.from(new Set(allowedExternalAgents));
+  merged.ai.pricing = normalizeModelPricing(
+    merged.ai.pricing,
+    defaultSettings.ai.pricing,
+  );
+  if (!merged.ai.fallback || typeof merged.ai.fallback !== 'object') {
+    merged.ai.fallback = clone(defaultSettings.ai.fallback);
+  } else {
+    merged.ai.fallback = {
+      ...defaultSettings.ai.fallback,
+      ...merged.ai.fallback,
+    };
+    if (!aiAuthenticationModes.has(merged.ai.fallback.authMode)) {
+      merged.ai.fallback.authMode = defaultSettings.ai.fallback.authMode;
+    }
+    if (merged.ai.fallback.protocol !== 'ollama' && merged.ai.fallback.protocol !== 'openai-compatible') delete merged.ai.fallback.protocol;
+    merged.ai.fallback.pricing = normalizeModelPricing(
+      merged.ai.fallback.pricing,
+      defaultSettings.ai.fallback.pricing,
+    );
+  }
 
   // Keep the ordinary settings document on an explicit allow-list. Types and
   // the renderer IPC schema are useful boundaries, but callers in the main
@@ -159,6 +397,14 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       quietHoursEnabled: merged.notifications.quietHoursEnabled,
       quietHoursStart: merged.notifications.quietHoursStart,
       quietHoursEnd: merged.notifications.quietHoursEnd,
+      dailyTaskReminderLimit: merged.notifications.dailyTaskReminderLimit,
+      taskIgnoreBackoffEnabled: merged.notifications.taskIgnoreBackoffEnabled,
+      taskReminderMinIntervalMinutes: merged.notifications.taskReminderMinIntervalMinutes,
+      taskReminderSourceMode: {
+        local: merged.notifications.taskReminderSourceMode.local,
+        feishu: merged.notifications.taskReminderSourceMode.feishu,
+      },
+      taskReminderProjectMode: clone(merged.notifications.taskReminderProjectMode),
       mutedUntil: merged.notifications.mutedUntil,
     },
     floating: {
@@ -172,6 +418,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       scalePercent: merged.floating.scalePercent,
       lastDisplayId: merged.floating.lastDisplayId,
       positions: clone(merged.floating.positions),
+      mousePassthrough: merged.floating.mousePassthrough,
     },
     focus: {
       focusMinutes: merged.focus.focusMinutes,
@@ -181,6 +428,16 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       autoStartBreak: merged.focus.autoStartBreak,
       autoStartNextRound: merged.focus.autoStartNextRound,
       environmentSound: merged.focus.environmentSound,
+      shieldMode: merged.focus.shieldMode,
+      shieldApplications: [...merged.focus.shieldApplications],
+    },
+    planning: {
+      urgencyWeights: {
+        deadline: merged.planning.urgencyWeights.deadline,
+        plannedToday: merged.planning.urgencyWeights.plannedToday,
+        priority: merged.planning.urgencyWeights.priority,
+        quickWin: merged.planning.urgencyWeights.quickWin,
+      },
     },
     weather: {
       enabled: merged.weather.enabled,
@@ -193,20 +450,55 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     pet: {
       interactionsEnabled: merged.pet.interactionsEnabled,
       proactiveMessages: merged.pet.proactiveMessages,
+      inputReactionsEnabled: merged.pet.inputReactionsEnabled,
+      vacationMode: merged.pet.vacationMode,
       wellbeingReminders: merged.pet.wellbeingReminders,
       autoDiary: merged.pet.autoDiary,
       relationshipMemory: merged.pet.relationshipMemory,
+      actionPack: merged.pet.actionPack,
+      animationIntensity: merged.pet.animationIntensity,
+      proactiveIntervalMinutes: merged.pet.proactiveIntervalMinutes,
+      proactiveDailyLimit: merged.pet.proactiveDailyLimit,
+      meetingMode: merged.pet.meetingMode,
+      seasonalEvents: merged.pet.seasonalEvents,
     },
     ai: {
       enabled: merged.ai.enabled,
       endpoint: merged.ai.endpoint,
+      ...(merged.ai.protocol ? { protocol: merged.ai.protocol } : {}),
       model: merged.ai.model,
       authMode: merged.ai.authMode,
+      routing: merged.ai.routing,
+      fallback: {
+        enabled: merged.ai.fallback.enabled,
+        endpoint: merged.ai.fallback.endpoint,
+        ...(merged.ai.fallback.protocol ? { protocol: merged.ai.fallback.protocol } : {}),
+        model: merged.ai.fallback.model,
+        authMode: merged.ai.fallback.authMode,
+        pricing: {
+          promptUsdPerMillionTokens:
+            merged.ai.fallback.pricing.promptUsdPerMillionTokens,
+          completionUsdPerMillionTokens:
+            merged.ai.fallback.pricing.completionUsdPerMillionTokens,
+        },
+        credentialId: merged.ai.fallback.credentialId,
+      },
       timeoutMs: merged.ai.timeoutMs,
       retries: merged.ai.retries,
       dailyTokenLimit: merged.ai.dailyTokenLimit,
       dailyCostLimit: merged.ai.dailyCostLimit,
+      pricing: {
+        promptUsdPerMillionTokens: merged.ai.pricing.promptUsdPerMillionTokens,
+        completionUsdPerMillionTokens: merged.ai.pricing.completionUsdPerMillionTokens,
+      },
       credentialId: merged.ai.credentialId,
+    },
+    agentActivity: {
+      enabled: merged.agentActivity.enabled,
+      port: merged.agentActivity.port,
+      allowedAgents: [...merged.agentActivity.allowedAgents],
+      staleAfterSeconds: merged.agentActivity.staleAfterSeconds,
+      showInPet: merged.agentActivity.showInPet,
     },
     feishu: {
       configured: merged.feishu.configured,
@@ -228,6 +520,13 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       attachmentText: merged.modelDataScope.attachmentText,
       chatHistory: merged.modelDataScope.chatHistory,
     },
+    agentCapabilities: {
+      taskManagement: merged.agentCapabilities.taskManagement,
+      feishuSync: merged.agentCapabilities.feishuSync,
+      webResearch: merged.agentCapabilities.webResearch,
+      filesAndTerminal: merged.agentCapabilities.filesAndTerminal,
+      clipboardAndScreen: merged.agentCapabilities.clipboardAndScreen,
+    },
     persona: {
       preset: merged.persona.preset,
       name: merged.persona.name,
@@ -235,7 +534,9 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
       responseLength: merged.persona.responseLength,
       proactiveLevel: merged.persona.proactiveLevel,
       reminderStrength: merged.persona.reminderStrength,
+      syncWithPet: merged.persona.syncWithPet !== false,
     },
+    automations: normalizeTaskAutomationRules(merged.automations),
     permissionMode: merged.permissionMode,
     onboardingComplete: merged.onboardingComplete,
   };
@@ -263,11 +564,30 @@ export class SettingsService {
       if (
         raw.floating?.topMode !== this.#settings.floating.topMode ||
         raw.ai?.authMode !== this.#settings.ai.authMode ||
+        raw.ai?.routing !== this.#settings.ai.routing ||
+        raw.ai?.pricing === undefined ||
+        raw.ai?.fallback === undefined ||
+        raw.ai?.fallback?.pricing === undefined ||
+        raw.agentActivity === undefined ||
+        raw.agentActivity.staleAfterSeconds !== this.#settings.agentActivity.staleAfterSeconds ||
+        raw.agentActivity.port !== this.#settings.agentActivity.port ||
+        JSON.stringify(raw.agentActivity.allowedAgents) !== JSON.stringify(this.#settings.agentActivity.allowedAgents) ||
+        raw.notifications?.dailyTaskReminderLimit !== this.#settings.notifications.dailyTaskReminderLimit ||
+        raw.notifications?.taskIgnoreBackoffEnabled !== this.#settings.notifications.taskIgnoreBackoffEnabled ||
+        raw.notifications?.taskReminderMinIntervalMinutes !== this.#settings.notifications.taskReminderMinIntervalMinutes ||
+        JSON.stringify(raw.notifications?.taskReminderSourceMode) !== JSON.stringify(this.#settings.notifications.taskReminderSourceMode) ||
+        JSON.stringify(raw.notifications?.taskReminderProjectMode) !== JSON.stringify(this.#settings.notifications.taskReminderProjectMode) ||
+        raw.pet?.proactiveDailyLimit !== this.#settings.pet.proactiveDailyLimit ||
+        raw.pet?.inputReactionsEnabled !== this.#settings.pet.inputReactionsEnabled ||
+        raw.pet?.vacationMode !== this.#settings.pet.vacationMode ||
+        raw.automations === undefined ||
         raw.floating?.selectedTab !== this.#settings.floating.selectedTab ||
         raw.floating?.scalePercent !== this.#settings.floating.scalePercent ||
+        raw.floating?.mousePassthrough !== this.#settings.floating.mousePassthrough ||
         raw.focus === undefined ||
         raw.weather === undefined ||
         raw.pet === undefined ||
+        raw.agentCapabilities === undefined ||
         Object.prototype.hasOwnProperty.call(raw.floating ?? {}, 'shape')
       ) {
         await this.saveSettings();

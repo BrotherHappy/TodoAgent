@@ -20,25 +20,13 @@ test.skip(
   "Run only after installing the packaged macOS app.",
 );
 
+import { waitForElectronWindow } from '../helpers/electron-window';
 async function mainWindow(app: ElectronApplication): Promise<Page> {
-  const existing = app
-    .windows()
-    .find((page) => new URL(page.url()).searchParams.get("window") === "main");
-  return (
-    existing ??
-    app.waitForEvent("window", {
-      predicate: (page) => {
-        try {
-          return new URL(page.url()).searchParams.get("window") === "main";
-        } catch {
-          return false;
-        }
-      },
-    })
-  );
+  return waitForElectronWindow(app, 'main');
 }
 
-test("installed macOS bundle starts securely and persists a local task", async () => {
+test("installed macOS bundle loads original Live2D assets and persists its character and local task", async () => {
+  test.setTimeout(90_000);
   await access(executablePath);
   const profilePath = await mkdtemp(
     path.join(os.tmpdir(), "todo-agent-installed-smoke-"),
@@ -48,14 +36,18 @@ test("installed macOS bundle starts securely and persists a local task", async (
     app = await electron.launch({
       executablePath,
       args: [`--user-data-dir=${profilePath}`],
-      env: { ...process.env, TODO_AGENT_E2E: "1" },
+      env: {
+        ...process.env,
+        TODO_AGENT_E2E: "1",
+        TODO_AGENT_E2E_BACKGROUND: "1",
+      },
     });
     let main = await mainWindow(app);
     await main.waitForLoadState("domcontentloaded");
     const skip = main.getByRole("button", {
       name: "跳过并使用本地任务",
     });
-    if (await skip.isVisible().catch(() => false)) await skip.click();
+    await skip.click();
 
     const appInfo = await main.evaluate(() =>
       window.desktopApi!.shell.getInfo(),
@@ -65,6 +57,19 @@ test("installed macOS bundle starts securely and persists a local task", async (
       arch: "arm64",
       isPackaged: true,
     });
+
+    const buddy = await main.evaluate(() => window.desktopApi!.buddy!.snapshot());
+    expect(buddy.themes).toHaveLength(5);
+    expect(buddy.themes.every(theme => theme.ready && theme.enabled)).toBe(true);
+    expect(buddy.preferences.themeId).toBe("wanko-live2d");
+    await main.evaluate(() => window.desktopApi!.shell.setFloatingVisible(true));
+    const floating = await waitForElectronWindow(app, 'floating');
+    await expect(floating.locator('[data-buddy-renderer="live2d"]').first()).toHaveAttribute("data-buddy-status", "ready", { timeout: 20_000 });
+    const frame = Number(await floating.locator('[data-buddy-renderer="live2d"]').first().getAttribute("data-buddy-frame"));
+    await expect.poll(async () => Number(await floating.locator('[data-buddy-renderer="live2d"]').first().getAttribute("data-buddy-frame"))).toBeGreaterThan(frame + 10);
+    await main.evaluate(() => window.desktopApi!.buddy!.setPreferences({ themeId: "haru-live2d" }));
+    await expect(floating.locator('[data-buddy-active="haru-live2d"]').first()).toBeVisible();
+    await expect(floating.locator('.buddy-theme-layer')).toHaveCount(1, { timeout: 20_000 });
 
     const title = "Codex验收-安装包本地任务";
     await main.getByRole("button", { name: "新建", exact: true }).click();
@@ -82,10 +87,16 @@ test("installed macOS bundle starts securely and persists a local task", async (
     app = await electron.launch({
       executablePath,
       args: [`--user-data-dir=${profilePath}`],
-      env: { ...process.env, TODO_AGENT_E2E: "1" },
+      env: {
+        ...process.env,
+        TODO_AGENT_E2E: "1",
+        TODO_AGENT_E2E_BACKGROUND: "1",
+      },
     });
     main = await mainWindow(app);
     await main.waitForLoadState("domcontentloaded");
+    await main.waitForFunction(() => !!window.desktopApi?.buddy);
+    expect((await main.evaluate(() => window.desktopApi!.buddy!.snapshot())).preferences.themeId).toBe("haru-live2d");
     await expect(
       main.getByText(title, { exact: true }).first(),
     ).toBeVisible();

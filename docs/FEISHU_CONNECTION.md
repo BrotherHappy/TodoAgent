@@ -41,6 +41,7 @@ sequenceDiagram
 
 - `task:task:read`
 - `task:task:write`
+- `task:tasklist:read`
 - `offline_access`
 
 创建时固定使用 `createOnly: true`，避免误选并改写已有飞书应用；`preset: false` 从官方最小基座开始，但飞书平台仍可能保留基座能力，真实账号验收必须以最终确认页和应用后台为准。第二阶段 Device OAuth 也会包含 `offline_access`，用于后台刷新用户 Token。
@@ -51,7 +52,7 @@ sequenceDiagram
 
 如果用户已经有通过审核或已发布的飞书应用，可选择 `existing-direct`。用户只需填写该应用的 App ID 与 App Secret；客户端会跳过应用注册，直接使用同一套 Device OAuth 在系统浏览器授权账号。这个路径同样不需要 Todo Agent Relay 或回调域名。
 
-App Secret 会立即进入系统安全存储，普通设置、IPC、日志和导出只保留凭据引用；发起 Device OAuth 和刷新 Token 时，Secret 只在 Electron 主进程内存中短暂使用。已有应用仍须在飞书后台启用相应能力并具备 `task:task:read`、`task:task:write`、`offline_access`，应用审核或发布状态本身不等于这些权限已经可用。
+App Secret 会立即进入系统安全存储，普通设置、IPC、日志和导出只保留凭据引用；发起 Device OAuth 和刷新 Token 时，Secret 只在 Electron 主进程内存中短暂使用。已有应用仍须在飞书后台启用相应能力并具备 `task:task:read`、`task:task:write`、`task:tasklist:read`、`offline_access`，应用审核或发布状态本身不等于这些权限已经可用。缺少清单读取权限时会安全降级为“我负责”任务，并在同步状态中提示重新授权。
 
 ## 3. 连接方式定位
 
@@ -73,7 +74,7 @@ Relay 不是默认发布前置条件，当前仓库也不提供公共 Relay 服�
 - 状态明确区分“创建专属应用”和“授权飞书账号”，用户可在任一阶段取消。
 - 注册取消、用户拒绝、链接过期、网络错误和无效响应映射为稳定的中文错误；飞书原始响应和密钥不跨 IPC。
 - 第一阶段只创建连接应用，不代表账号已连接；只有第二阶段取得并安全保存用户 Token 后才显示 `connected`。
-- 断开连接、重新授权和同步失败不会自动上传本地任务；私人 Today、排序、时间块和专注记录永不写回飞书。
+- 断开连接、重新授权和同步失败不会自动上传本地任务；私人 Today、排序、时间块和专注记录永不写回飞书。每个 OAuth 应用与授权用户组合拥有独立的凭据槽、映射和队列，防止相同显示标签混用账号数据。
 
 ## 5. 当前验证范围
 
@@ -86,7 +87,7 @@ Relay 不是默认发布前置条件，当前仓库也不提供公共 Relay 服�
 - `existing-direct` 跳过注册、从安全凭据引用取用已有应用 Secret，并复用 Device OAuth；不会启动本机回调服务器。
 - Relay 和本机回调开发路径仍有回归测试，未被默认方案删除。
 
-仓库当前 Vitest 基线为 **36 个测试文件、273/273 项通过**。覆盖还包括应用身份切换时的 Secret/Token 隔离、旧连接立即停止、Device OAuth 实际到期时间，以及缺少 `task:task:write` 或 `offline_access` 时拒绝连接。这些测试使用 SDK 替身或 Mock HTTP 响应，没有证明真实飞书账号、租户策略和 Task v2 权限已经可用。
+仓库当前 Vitest 基线为 **61 个测试文件、518/518 项通过**。覆盖还包括应用身份切换时的 Secret/Token 隔离、旧连接立即停止、Device OAuth 实际到期时间、跨用户队列隔离、Tasklist 全量枚举、拉取并发保护，以及缺少 `task:task:write` 或 `offline_access` 时拒绝连接。这些测试使用 SDK 替身或 Mock HTTP 响应，没有证明真实飞书账号、租户策略和 Task v2 权限已经可用。
 
 ## 6. 真实账号验收门槛
 

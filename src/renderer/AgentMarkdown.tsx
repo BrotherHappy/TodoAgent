@@ -1,6 +1,9 @@
-import type { MouseEvent, ReactElement } from "react";
+import { BookOpen, Check, Clipboard, ListChecks, Sparkles } from "lucide-react";
+import { useEffect, useState, type MouseEvent, type ReactElement } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { SpeechOutputButton } from "./SpeechOutputButton";
+import { rememberContextCapture } from "./context-capture-history";
 
 const safeExternalUrl = (value: string | undefined): string | undefined => {
   if (!value) return undefined;
@@ -14,9 +17,117 @@ const safeExternalUrl = (value: string | undefined): string | undefined => {
   }
 };
 
-export function AgentMarkdown({ text }: { text: string }): ReactElement {
+export function AgentMarkdown({
+  text,
+  streaming = false,
+  onExtractActionItems,
+  onSaveResearchCard,
+}: {
+  text: string;
+  streaming?: boolean;
+  onExtractActionItems?: (text: string, trigger?: HTMLElement) => void;
+  onSaveResearchCard?: (text: string, trigger?: HTMLElement) => void;
+}): ReactElement {
+  const [savedContext, setSavedContext] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setSavedContext(false);
+    setCopied(false);
+  }, [text]);
+  const saveContext = () => {
+    const normalized = text.trim();
+    if (streaming || !normalized || savedContext) return;
+    const labelText = normalized
+      .replace(/[#*_~`]/gu, "")
+      .replace(/^\s{0,3}#{1,6}\s*/gmu, "")
+      .replace(/^\s*[-*+]\s+/gmu, "")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, 44);
+    rememberContextCapture({
+      id: `context-${crypto.randomUUID()}`,
+      kind: "agent-reply",
+      label: labelText ? `Agent：${labelText}` : "Agent 回复",
+      text: normalized,
+      createdAt: new Date().toISOString(),
+    });
+    setSavedContext(true);
+  };
+  const copyReply = async () => {
+    const normalized = text.trim();
+    if (streaming || !normalized || copied) return;
+    try {
+      if (!navigator.clipboard?.writeText) return;
+      await navigator.clipboard.writeText(normalized);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard permissions are optional. Keep the reply available without
+      // surfacing a second error channel in the conversation.
+    }
+  };
   return (
     <div className="agent-markdown">
+      <div className="agent-markdown-toolbar">
+        {onExtractActionItems && (
+          <button
+            type="button"
+            className="agent-action-items-button"
+            aria-label="从 Agent 回复提取行动项"
+            title="先预览并确认，再创建本地任务"
+            disabled={streaming || !text.trim()}
+            onClick={(event) =>
+              onExtractActionItems(text.trim(), event.currentTarget)
+            }
+          >
+            <ListChecks size={12} />
+            <span>提取行动项</span>
+          </button>
+        )}
+        {onSaveResearchCard && (
+          <button
+            type="button"
+            className="agent-research-card-button"
+            aria-label="保存到当前任务研究卡"
+            title="先编辑并确认，再保存为当前任务的私人研究卡"
+            disabled={streaming || !text.trim()}
+            onClick={(event) =>
+              onSaveResearchCard(text.trim(), event.currentTarget)
+            }
+          >
+            <BookOpen size={12} />
+            <span>保存研究卡</span>
+          </button>
+        )}
+        <button
+          type="button"
+          className="agent-reply-copy-button"
+          aria-label={copied ? "已复制 Markdown 回复" : "复制 Markdown 回复"}
+          title="复制原始 Markdown 到系统剪贴板"
+          disabled={streaming || copied || !text.trim() || !navigator.clipboard?.writeText}
+          onClick={() => void copyReply()}
+        >
+          {copied ? <Check size={12} /> : <Clipboard size={12} />}
+          <span>{copied ? "已复制" : "复制 Markdown"}</span>
+        </button>
+        <button
+          type="button"
+          className="agent-context-save-button"
+          aria-label={savedContext ? "已保存到最近上下文" : "保存到最近上下文"}
+          title={streaming ? "回答完成后才能保存" : "仅保存到本机最近上下文"}
+          disabled={streaming || savedContext || !text.trim()}
+          onClick={saveContext}
+        >
+          <Sparkles size={12} />
+          <span>{savedContext ? "已保存" : "保存上下文"}</span>
+        </button>
+        <SpeechOutputButton
+          text={text}
+          label="朗读"
+          ariaLabel="朗读回答"
+          disabled={streaming}
+        />
+      </div>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         skipHtml

@@ -136,4 +136,36 @@ describe("Agent task model-data boundary", () => {
     expect(serialized).not.toContain("private-source-document");
     expect(serialized).not.toContain("/private/path");
   });
+
+  it("gates local discussion bodies behind the existing notes scope", async () => {
+    const task = (
+      await tasks.createTask({
+        title: "讨论范围任务",
+        comments: [{
+          id: "comment-scope",
+          body: "discussion-secret-42",
+          author: "user",
+          createdAt: "2026-08-09T00:00:00.000Z",
+          updatedAt: "2026-08-09T00:00:00.000Z",
+        }],
+      })
+    ).task;
+    const read = async (notes: boolean) => {
+      const scope: ModelDataScope = {
+        ...defaultSettings.modelDataScope,
+        notes,
+      };
+      const tool = createTaskTools({
+        tasks,
+        getModelDataScope: () => scope,
+      }).find((candidate) => candidate.name === "task_get")!;
+      return (await tool.execute({ id: task.id }, contextFor("task_get-comments"))).data;
+    };
+
+    const hidden = JSON.stringify(await read(false));
+    expect(hidden).not.toContain("discussion-secret-42");
+    expect(await read(true)).toMatchObject({
+      comments: [{ body: "discussion-secret-42", author: "user" }],
+    });
+  });
 });

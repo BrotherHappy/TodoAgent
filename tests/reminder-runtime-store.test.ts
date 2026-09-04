@@ -68,6 +68,27 @@ describe('ReminderRuntimeStore', () => {
     expect(JSON.parse(await readFile(store.filePath, 'utf8')).state).toEqual(first);
   });
 
+  it('upgrades a pre-budget runtime file without discarding reminder history', async () => {
+    const directory = await createDirectory();
+    const store = new ReminderRuntimeStore(directory);
+    const legacyState = {
+      delivered: { first: '2026-08-09T01:00:00.000Z' },
+      dismissed: {},
+      snoozedUntil: {},
+      lastRiskNoticeDate: '2026-08-09',
+    };
+    await writeFile(
+      store.filePath,
+      `${JSON.stringify({ schemaVersion: 1, state: legacyState })}\n`,
+      'utf8',
+    );
+
+    await expect(store.load()).resolves.toEqual({
+      ...legacyState,
+      taskNotificationLog: {},
+    });
+  });
+
   it('falls back to an empty scheduler state when both copies are unusable', async () => {
     const directory = await createDirectory();
     const store = new ReminderRuntimeStore(directory);

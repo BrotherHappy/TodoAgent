@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { FeishuTasklistBinding, Task } from '../../src/shared/models';
+import { hasTaskTitle } from '../../src/shared/task-title';
 import {
   type FeishuCreateTaskPayload,
   type FeishuFieldConflict,
@@ -51,6 +52,18 @@ const MEMBER_FIELDS = new Set<FeishuSyncedTaskField>([
   'assigneeIds',
   'followerIds',
 ]);
+
+/** Incomplete provider content is not a user request to erase local data. */
+export class FeishuTaskDataError extends Error {
+  constructor() {
+    super('飞书任务标题不完整，已保留本地数据。请在飞书补全标题后重试同步，其他正常任务仍会同步。');
+    this.name = 'FeishuTaskDataError';
+  }
+}
+
+export function assertFeishuTaskTitle(title: unknown): asserts title is string {
+  if (!hasTaskTitle(title)) throw new FeishuTaskDataError();
+}
 
 // `is_all_day` is not an independent field in Task v2: it changes the
 // meaning of the corresponding start/due timestamp. Keep it out of the
@@ -440,11 +453,12 @@ function remoteMemberIds(
 export function remoteTaskToFeishuSnapshot(
   task: FeishuTaskV2,
 ): FeishuTaskSyncSnapshot {
+  assertFeishuTaskTitle(task.summary);
   const status = isFeishuTaskCompleted(task) ? 'completed' : 'open';
   const startAt = timestampToIso(task.start);
   const dueAt = timestampToIso(task.due);
   const snapshot: FeishuTaskSyncSnapshot = {
-    title: task.summary ?? '',
+    title: task.summary,
     notes: task.description ?? '',
     startAt,
     dueAt,
@@ -585,6 +599,7 @@ export function buildFeishuCreatePayload(
   task: Task,
   options: BuildFeishuPayloadOptions = {},
 ): FeishuCreateTaskPayload {
+  assertFeishuTaskTitle(task.title);
   const payload: FeishuCreateTaskPayload = {
     summary: task.title,
     description: task.notes,
@@ -617,6 +632,7 @@ export function buildFeishuPatchPayload(
 
   for (const field of changedFields) {
     if (field === 'title') {
+      assertFeishuTaskTitle(snapshot.title);
       task.summary = snapshot.title;
       updateFields.push('summary');
     } else if (field === 'notes') {
@@ -652,6 +668,7 @@ function applySnapshot(
   snapshot: FeishuTaskSyncSnapshot,
   now: () => number,
 ): Task {
+  assertFeishuTaskTitle(snapshot.title);
   const completedAt =
     snapshot.status === 'completed'
       ? task.completedAt ?? isoNow(now)

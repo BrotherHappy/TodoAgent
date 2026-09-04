@@ -44,6 +44,58 @@ describe("task Agent tools", () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it("isolates Feishu tasks when the Feishu capability is disabled", async () => {
+    const localTask = (
+      await tasks.createTask({
+        title: "本地任务",
+        source: { type: "local" },
+        sync: { status: "local" },
+      })
+    ).task;
+    const feishuTask = (
+      await tasks.createTask({
+        title: "飞书任务",
+        source: { type: "feishu", accountId: "primary" },
+        sync: { status: "synced" },
+      })
+    ).task;
+    const tools = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+      getAgentCapabilities: () => ({
+        ...defaultSettings.agentCapabilities,
+        feishuSync: false,
+      }),
+    });
+    const get = tools.find((tool) => tool.name === "task_get")!;
+    await expect(
+      get.execute({ id: feishuTask.id }, executionContext("task_get")),
+    ).rejects.toThrow("AGENT_FEISHU_CAPABILITY_DISABLED");
+    await expect(
+      get.execute({ id: localTask.id }, executionContext("task_get")),
+    ).resolves.toMatchObject({ status: "ok" });
+
+    const create = tools.find((tool) => tool.name === "task_create")!;
+    expect(() =>
+      create.analyze(
+        {
+          title: "远端任务",
+          notes: "",
+          source: "feishu",
+          projectId: null,
+          listId: null,
+          plannedDate: null,
+          startAt: null,
+          dueAt: null,
+          priority: "none",
+          tags: [],
+          contexts: [],
+        },
+        { runId: "run" },
+      ),
+    ).toThrow("AGENT_FEISHU_CAPABILITY_DISABLED");
+  });
+
   it("classifies private Feishu planning as local and remote fields as external", async () => {
     const task = (
       await tasks.createTask({
@@ -67,6 +119,7 @@ describe("task Agent tools", () => {
         dueAt: null,
         priority: null,
         tags: null,
+        contexts: null,
         clearFields: [],
       },
       { runId: "run", signal },
@@ -81,6 +134,7 @@ describe("task Agent tools", () => {
         dueAt: null,
         priority: null,
         tags: null,
+        contexts: null,
         clearFields: [],
       },
       { runId: "run", signal },
@@ -92,6 +146,53 @@ describe("task Agent tools", () => {
     expect(remoteEffects.preview).toMatchObject({
       action: "update-task",
       changes: [{ field: "title", before: "飞书任务", after: "新标题" }],
+    });
+  });
+
+  it("treats the attention marker as a local Feishu edit", async () => {
+    const task = (
+      await tasks.createTask({
+        title: "飞书重点标记",
+        source: { type: "feishu", accountId: "primary", externalId: "flagged-agent" },
+        sync: { status: "synced" },
+      })
+    ).task;
+    const update = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    }).find((tool) => tool.name === "task_update")!;
+    const args = {
+      id: task.id,
+      title: null,
+      notes: null,
+      privateNotes: null,
+      flagged: true,
+      projectId: null,
+      listId: null,
+      plannedDate: null,
+      startAt: null,
+      dueAt: null,
+      priority: null,
+      tags: null,
+      contexts: null,
+      clearFields: [],
+    };
+    await expect(update.analyze(args, {
+      runId: "flagged-local",
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({
+      risk: "R1",
+      network: [],
+      externalEffects: [],
+      preview: {
+        changes: [{ field: "flagged", before: null, after: true }],
+      },
+    });
+    const output = await update.execute(args, executionContext("task_update"));
+    expect(output.data).toMatchObject({ changed: true, syncReceipts: [] });
+    expect(await tasks.getTask(task.id)).toMatchObject({
+      flagged: true,
+      sync: { status: "synced" },
     });
   });
 
@@ -124,6 +225,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: [],
     };
 
@@ -206,6 +308,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: [] as Array<
         "notes" | "privateNotes" | "plannedDate" | "dueAt" | "tags"
       >,
@@ -281,6 +384,154 @@ describe("task Agent tools", () => {
     expect(await tasks.listTasks({ text: "由 Agent 创建" })).toHaveLength(1);
   });
 
+  it("lets Agent query the local attention marker", async () => {
+    await tasks.createTask({ title: "Agent 重点", flagged: true });
+    await tasks.createTask({ title: "Agent 普通" });
+    const list = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    }).find((tool) => tool.name === "task_list")!;
+    const output = await list.execute(
+      { view: "all", text: null, source: null, flagged: true, limit: 100 },
+      executionContext("task_list"),
+    );
+    expect(output.data).toMatchObject({
+      count: 1,
+      tasks: [expect.objectContaining({ title: "Agent 重点", flagged: true })],
+    });
+  });
+
+  it("lets Agent query a local section heading without treating it as Feishu metadata", async () => {
+    await tasks.createTask({ title: "发布组任务", sectionId: "本周发布" });
+    await tasks.createTask({ title: "未分组任务" });
+    const list = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    }).find((tool) => tool.name === "task_list")!;
+    const output = await list.execute(
+      {
+        view: "all",
+        text: null,
+        source: null,
+        sectionId: "本周发布",
+        flagged: false,
+        limit: 100,
+      },
+      executionContext("task_list-section"),
+    );
+    expect(output.data).toMatchObject({
+      count: 1,
+      tasks: [expect.objectContaining({ title: "发布组任务", sectionId: "本周发布" })],
+    });
+  });
+
+  it("lets Agent defer and restore a task without a Feishu write", async () => {
+    const tools = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    });
+    const create = tools.find((tool) => tool.name === "task_create")!;
+    const update = tools.find((tool) => tool.name === "task_update")!;
+    const list = tools.find((tool) => tool.name === "task_list")!;
+    const created = await create.execute(
+      {
+        title: "稍后处理",
+        notes: "",
+        source: "local",
+        projectId: null,
+        listId: null,
+        plannedDate: null,
+        deferUntil: "2099-01-01",
+        startAt: null,
+        dueAt: null,
+        priority: "none",
+        tags: [],
+        contexts: [],
+      },
+      executionContext("task_create-defer"),
+    );
+    const taskId = (created.data as { task: { id: string } }).task.id;
+    expect(
+      (await list.execute(
+        { view: "deferred", text: null, source: null, flagged: false, limit: 100 },
+        executionContext("task_list-deferred"),
+      )).data,
+    ).toMatchObject({ count: 1 });
+    await update.execute(
+      {
+        id: taskId,
+        title: null,
+        notes: null,
+        privateNotes: null,
+        deferUntil: null,
+        projectId: null,
+        listId: null,
+        plannedDate: null,
+        startAt: null,
+        dueAt: null,
+        priority: null,
+        tags: null,
+        contexts: null,
+        clearFields: ["deferUntil"],
+      },
+      executionContext("task_update-clear-defer"),
+    );
+    expect((await tasks.getTask(taskId))?.deferUntil).toBeUndefined();
+  });
+
+  it("lets Agent assign and clear a local section heading", async () => {
+    const tools = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    });
+    const create = tools.find((tool) => tool.name === "task_create")!;
+    const update = tools.find((tool) => tool.name === "task_update")!;
+    const created = await create.execute(
+      {
+        title: "分组任务",
+        notes: "",
+        source: "local",
+        projectId: null,
+        listId: null,
+        sectionId: "本周发布",
+        plannedDate: null,
+        deferUntil: null,
+        startAt: null,
+        dueAt: null,
+        priority: "none",
+        tags: [],
+        contexts: [],
+      },
+      executionContext("task_create-section"),
+    );
+    expect(created.data).toMatchObject({
+      task: { sectionId: "本周发布" },
+    });
+    const taskId = (created.data as { task: { id: string } }).task.id;
+    await update.execute(
+      {
+        id: taskId,
+        title: null,
+        notes: null,
+        privateNotes: null,
+        flagged: null,
+        deferUntil: null,
+        projectId: null,
+        listId: null,
+        sectionId: null,
+        plannedDate: null,
+        startAt: null,
+        dueAt: null,
+        priority: null,
+        tags: null,
+        contexts: null,
+        clearFields: ["sectionId"],
+      },
+      executionContext("task_update-clear-section"),
+    );
+    expect((await tasks.getTask(taskId))?.sectionId).toBeUndefined();
+  });
+
   it("creates, reads, updates, and clears start/project/list task fields", async () => {
     const tools = createTaskTools({
       tasks,
@@ -299,7 +550,9 @@ describe("task Agent tools", () => {
       startAt: "2026-08-10T09:00:00+08:00",
       dueAt: "2026-08-10T10:00:00+08:00",
       priority: "high" as const,
+      flagged: true,
       tags: ["agent"],
+      contexts: null,
     };
     expect(create.argumentsSchema.safeParse(createArgs).success).toBe(true);
     const created = await create.execute(
@@ -314,6 +567,7 @@ describe("task Agent tools", () => {
     expect(read.data).toMatchObject({
       projectId: "project-agent",
       listId: "list-today",
+      flagged: true,
       startAt: "2026-08-10T09:00:00+08:00",
       dueAt: "2026-08-10T10:00:00+08:00",
     });
@@ -323,6 +577,7 @@ describe("task Agent tools", () => {
       title: null,
       notes: null,
       privateNotes: null,
+      flagged: false,
       projectId: "project-updated",
       listId: "list-updated",
       plannedDate: null,
@@ -330,6 +585,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: [],
     };
     expect(update.argumentsSchema.safeParse(changeArgs).success).toBe(true);
@@ -337,6 +593,7 @@ describe("task Agent tools", () => {
     expect(await tasks.getTask(taskId)).toMatchObject({
       projectId: "project-updated",
       listId: "list-updated",
+      flagged: false,
       startAt: "2026-08-10T09:15:00+08:00",
     });
 
@@ -352,6 +609,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: ["projectId", "listId", "startAt"] as Array<
         "projectId" | "listId" | "startAt"
       >,
@@ -373,6 +631,112 @@ describe("task Agent tools", () => {
         projectId: "project-agent",
       }).success,
     ).toBe(false);
+  });
+
+  it("lets Agent attach a private research card without a Feishu write", async () => {
+    const task = (await tasks.createTask({ title: "Agent 研究上下文" })).task;
+    const tool = createTaskTools({
+      tasks,
+      getModelDataScope: () => ({
+        ...defaultSettings.modelDataScope,
+        notes: true,
+      }),
+    }).find((candidate) => candidate.name === "task_add_research_card")!;
+    const args = {
+      id: task.id,
+      title: "官方定价页",
+      url: "https://example.com/pricing",
+      summary: "提炼免费版和团队版的差异",
+      actionItems: ["补充席位数对比"],
+    };
+    expect(tool.argumentsSchema.safeParse(args).success).toBe(true);
+    const analysis = await tool.analyze(args, {
+      runId: "run",
+      signal: new AbortController().signal,
+    });
+    expect(analysis).toMatchObject({
+      risk: "R1",
+      network: [],
+      externalEffects: [],
+      preview: { remoteWrite: false },
+    });
+    const result = await tool.execute(args, executionContext("task_add_research_card"));
+    expect(result.data).toMatchObject({
+      task: {
+        researchCards: [{
+          title: "官方定价页",
+          summary: "提炼免费版和团队版的差异",
+          actionItems: ["补充席位数对比"],
+        }],
+      },
+    });
+    expect((await tasks.getTask(task.id))?.sync.status).toBe("local");
+  });
+
+  it("splits a task into reviewed local subtasks without writing the Feishu parent", async () => {
+    let changedEvents = 0;
+    const parent = (
+      await tasks.createTask({
+        title: "准备发布",
+        source: {
+          type: "feishu",
+          accountId: "primary",
+          externalId: "remote-parent",
+        },
+        projectId: "发布项目",
+        plannedDate: "2026-08-20",
+        priority: "high",
+        sync: { status: "synced" },
+      })
+    ).task;
+    const tool = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+      onTasksChanged: () => {
+        changedEvents += 1;
+      },
+    }).find((candidate) => candidate.name === "task_split")!;
+    const args = {
+      id: parent.id,
+      subtasks: [
+        { title: "整理素材", notes: "", priority: "high", estimatedMinutes: 30 },
+        { title: "撰写说明", notes: "", priority: "medium", estimatedMinutes: 45 },
+        { title: "发布检查", notes: "", priority: "low", estimatedMinutes: null },
+      ],
+    };
+    expect(tool.argumentsSchema.safeParse(args).success).toBe(true);
+    expect(tool.argumentsSchema.safeParse({
+      ...args,
+      subtasks: [args.subtasks[0], args.subtasks[0]],
+    }).success).toBe(false);
+    await expect(tool.analyze(args, {
+      runId: "split",
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({
+      risk: "R2",
+      network: [],
+      externalEffects: [],
+      preview: { action: "split-task", count: 3, remoteWrite: false },
+    });
+
+    const result = await tool.execute(args, executionContext("task_split"));
+    expect(result.status).toBe("ok");
+    expect(result.data).toMatchObject({
+      parentTaskId: parent.id,
+      createdCount: 3,
+      failedCount: 0,
+    });
+    const children = await tasks.listTasks({ includeDeleted: false });
+    const createdChildren = children.filter((task) => task.parentId === parent.id);
+    expect(createdChildren).toHaveLength(3);
+    expect(createdChildren.every((task) => task.source.type === "local")).toBe(true);
+    expect(createdChildren.map((task) => task.plannedDate)).toEqual([
+      "2026-08-20",
+      "2026-08-20",
+      "2026-08-20",
+    ]);
+    expect((await tasks.getTask(parent.id))?.sync.status).toBe("synced");
+    expect(changedEvents).toBe(1);
   });
 
   it("treats a Feishu start-time update as a reviewed remote mutation", async () => {
@@ -433,6 +797,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: "none",
       tags: [],
+      contexts: null,
     };
     expect(() =>
       definition.analyze(args, {
@@ -655,6 +1020,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: null,
       tags: null,
+      contexts: null,
       clearFields: [],
     };
     const prepared = await registry.prepare("stale-run", {
@@ -764,6 +1130,7 @@ describe("task Agent tools", () => {
       dueAt: null,
       priority: "none",
       tags: [],
+      contexts: null,
     };
     expect(
       bulkCreate.argumentsSchema.safeParse({
@@ -1463,5 +1830,75 @@ describe("task Agent tools", () => {
     });
     expect((await tasks.getTask(local.id))?.status).toBe("completed");
     expect((await tasks.getTask(allAssignees.id))?.status).toBe("open");
+  });
+
+  it("previews and executes local recurring skip without creating a second task", async () => {
+    const recurring = (
+      await tasks.createTask({
+        title: "Agent 跳过本次",
+        source: { type: "local" },
+        plannedDate: "2026-08-10",
+        recurrence: { frequency: "daily", interval: 1 },
+      })
+    ).task;
+    const tools = createTaskTools({
+      tasks,
+      getModelDataScope: () => defaultSettings.modelDataScope,
+    });
+    const skip = tools.find((tool) => tool.name === "task_skip_recurring")!;
+    const effects = await skip.analyze(
+      { id: recurring.id },
+      { runId: "run", signal: new AbortController().signal },
+    );
+    expect(effects).toMatchObject({
+      risk: "R1",
+      network: [],
+      externalEffects: [],
+      preview: {
+        action: "skip-recurring-task",
+        from: "2026-08-10",
+        to: "2026-08-11",
+        keepTaskId: true,
+        remoteWrite: false,
+      },
+    });
+    const output = await skip.execute(
+      { id: recurring.id },
+      executionContext("task_skip_recurring"),
+    );
+    expect(output.status).toBe("ok");
+    expect(output.data).toMatchObject({
+      changed: true,
+      undoOperationId: expect.any(String),
+      task: {
+        id: recurring.id,
+        plannedDate: "2026-08-11",
+      },
+      syncReceipts: [],
+    });
+    expect((await tasks.getTask(recurring.id))?.recurrenceIndex).toBe(1);
+    expect((await tasks.listTasks({ includeDeleted: true })).map((task) => task.id)).toEqual([
+      recurring.id,
+    ]);
+
+    const remote = (
+      await tasks.createTask({
+        title: "飞书循环不可跳过",
+        source: {
+          type: "feishu",
+          accountId: "primary",
+          externalId: "remote-skip",
+        },
+        dueAt: "2026-08-10T09:00:00.000Z",
+        recurrence: { frequency: "daily", interval: 1 },
+        sync: { status: "synced" },
+      })
+    ).task;
+    await expect(
+      skip.analyze(
+        { id: remote.id },
+        { runId: "run", signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("TASK_RECURRING_SKIP_LOCAL_ONLY");
   });
 });
