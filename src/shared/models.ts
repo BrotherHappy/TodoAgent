@@ -504,7 +504,17 @@ export interface TaskOperation {
   createdAt: IsoDateTime;
   changes: TaskSnapshotChange[];
   undoneAt?: IsoDateTime;
+  /** Monotonic local transaction order used when multiple undos share a timestamp. */
+  undoneSequence?: number;
+  /** Set when a new task mutation makes this undone operation non-redoable. */
+  redoInvalidatedAt?: IsoDateTime;
 }
+
+/** A renderer-safe pointer to the latest undoable task operation. */
+export type TaskOperationSummary = Pick<
+  TaskOperation,
+  "id" | "kind" | "createdAt"
+>;
 
 /** A renderer-safe, task-scoped view of the local mutation log.  History
  * intentionally exposes changed field names rather than before/after task
@@ -575,6 +585,12 @@ export interface BulkTaskRequest {
 }
 
 export interface UndoResult {
+  operationId: string;
+  restoredTasks: Task[];
+  removedTaskIds: TaskId[];
+}
+
+export interface RedoResult {
   operationId: string;
   restoredTasks: Task[];
   removedTaskIds: TaskId[];

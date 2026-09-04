@@ -43,6 +43,8 @@ describe("PetCharacter personality", () => {
     expect(pet).toHaveAttribute("data-pet-atlas-animation", "head-pat");
     expect(pet).toHaveAttribute("data-pet-atlas-step", "0");
     expect(pet).toHaveAttribute("data-pet-atlas-ready", "false");
-    expect(pet.querySelectorAll(".pet-atlas-buffer-stack > canvas")).toHaveLength(2);
+    expect(pet.querySelectorAll(".pet-atlas-buffer-stack > canvas")).toHaveLength(1);
+    expect(pet.querySelector(".pet-atlas-buffer-stack"))
+      .toHaveAttribute("data-render-path", "single-canvas");
   });
 });

@@ -6,6 +6,7 @@ import type {
 } from "../shared/desktop-api";
 import type { ApprovalChoice, AgentJsonValue, RiskLevel } from "../shared/agent-types";
 import { mergeAgentDelta } from "./agent-stream-state";
+import type { AgentContextPreview } from '../shared/agent-context';
 import {
   AGENT_CONVERSATIONS_STORAGE_KEY,
   AGENT_CONVERSATION_STORAGE_KEY,
@@ -151,7 +152,7 @@ const storedMessagesFromUi = (
 ): StoredAgentMessage[] =>
   messages
     .filter((message) => !message.streaming && message.text.trim().length > 0)
-    .slice(-50)
+    .slice(-100)
     .map((message) => ({
       id: message.id,
       role: message.role,
@@ -184,6 +185,19 @@ const uiMessagesFromStored = (
     feishuSyncReceipts: message.feishuSyncReceipts,
     syncBaseText: message.syncBaseText,
   }));
+
+const legacyTaskCountWelcome = /^我可以查询、创建和整理任务。(?:正在读取当前视图的任务…|当前有 \d+ 项任务在这个视图里。)$/u;
+
+const normalizeInitialWelcome = (
+  messages: AgentUiMessage[],
+  initialMessage: string,
+): AgentUiMessage[] => {
+  const first = messages[0];
+  if (!first || first.role !== "assistant" || !legacyTaskCountWelcome.test(first.text)) {
+    return messages;
+  }
+  return [{ ...first, text: initialMessage }, ...messages.slice(1)];
+};
 
 const feishuActionLabel: Record<AgentFeishuSyncReceipt["action"], string> = {
   created: "已创建",
@@ -237,6 +251,9 @@ export function useAgentChat({
   persistConversation = false,
   conversationStorageKey = AGENT_CONVERSATION_STORAGE_KEY,
 }: UseAgentChatOptions) {
+  const [contexts, setContexts] = useState<AgentContextPreview[]>([]);
+  const contextsRef = useRef(contexts);
+  contextsRef.current = contexts;
   const conversationSessionsStorageKey =
     conversationStorageKey === AGENT_CONVERSATION_STORAGE_KEY
       ? AGENT_CONVERSATIONS_STORAGE_KEY
@@ -261,9 +278,12 @@ export function useAgentChat({
       : undefined,
   );
   const [messages, setMessages] = useState<AgentUiMessage[]>(() =>
-    storedConversationRef.current
-      ? uiMessagesFromStored(storedConversationRef.current)
-      : [{ role: "assistant", text: initialMessage }],
+    normalizeInitialWelcome(
+      storedConversationRef.current
+        ? uiMessagesFromStored(storedConversationRef.current)
+        : [{ role: "assistant", text: initialMessage }],
+      initialMessage,
+    ),
   );
   const [input, setInput] = useState("");
   const [approval, setApproval] = useState<AgentApprovalView>();
@@ -279,6 +299,7 @@ export function useAgentChat({
     storedCollectionRef.current.conversations,
   );
   const messagesRef = useRef(messages);
+  const initialMessageRef = useRef(initialMessage);
   const activeStreamRef = useRef<ActiveAgentStream | undefined>(undefined);
   const conversationIdRef = useRef(
     storedConversationRef.current?.conversationId ?? crypto.randomUUID(),
@@ -291,6 +312,24 @@ export function useAgentChat({
   messagesRef.current = messages;
   fallbackRef.current = onFallback;
   approvalCallbackRef.current = onApproval;
+
+  useEffect(() => {
+    const previousInitialMessage = initialMessageRef.current;
+    if (previousInitialMessage === initialMessage) return;
+    initialMessageRef.current = initialMessage;
+    setMessages((current) => {
+      const first = current[0];
+      if (
+        !first ||
+        first.role !== "assistant" ||
+        (first.text !== previousInitialMessage &&
+          !legacyTaskCountWelcome.test(first.text))
+      ) {
+        return current;
+      }
+      return [{ ...first, text: initialMessage }, ...current.slice(1)];
+    });
+  }, [initialMessage]);
 
   useEffect(() => {
     if (!persistConversation || messages.length === 0) return undefined;
@@ -753,13 +792,13 @@ export function useAgentChat({
   }, [messages]);
 
   const send = useCallback(async (suggestion?: string): Promise<boolean> => {
-    const text = (suggestion ?? input).trim();
+    const text = (suggestion ?? input).trim() || (contextsRef.current.length ? '请总结本次选择的资料，并回答其中最重要的问题。' : '');
     if (!text || sendingRef.current) return false;
     sendingRef.current = true;
     setIsSending(true);
     setApproval(undefined);
     setToolActivity([]);
-    const history = messagesRef.current.slice(-50).map((message) => ({
+    const history = messagesRef.current.slice(-100).map((message) => ({
       role: message.role,
       content: message.text,
     }));
@@ -770,6 +809,7 @@ export function useAgentChat({
     try {
       if (window.desktopApi) {
         const status = await refreshStatus();
+        if (contextsRef.current.length && (!status?.enabled || !status.configured)) throw new Error('请先配置并启用模型。本次资料尚未发送。');
         if (status?.enabled && status.configured) {
           const runId = crypto.randomUUID();
           const messageId = `agent-response-${runId}`;
@@ -781,11 +821,14 @@ export function useAgentChat({
             { id: messageId, role: "assistant", text: "", streaming: true },
           ]);
           setRunState("思考中");
+          const contextTokens = contextsRef.current.map(context => context.token);
+          setContexts([]);
           const output = await window.desktopApi.agent.send({
             runId,
             conversationId: conversationIdRef.current,
             message: text,
             history,
+            ...(contextTokens.length ? { contextTokens } : {}),
           });
           setMessages((current) =>
             current.map((message) => {
@@ -889,6 +932,8 @@ export function useAgentChat({
   }, []);
 
   return {
+    contexts,
+    setContexts,
     messages,
     input,
     setInput,

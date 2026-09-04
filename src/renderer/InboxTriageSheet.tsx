@@ -7,8 +7,10 @@ import {
   SkipForward,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Task, UpdateTaskInput } from "../shared/models";
+import { isInboxTask } from "../shared/task-view-predicates";
+import { useDialogFocus } from "./dialog-focus";
 
 export interface InboxTriageSheetProps {
   tasks: readonly Task[];
@@ -47,12 +49,7 @@ export function InboxTriageSheet({
   const [initialTotal] = useState(
     () =>
       tasks.filter(
-        (candidate) =>
-          candidate.status === "open" &&
-          !candidate.deletedAt &&
-          !candidate.plannedDate &&
-          !candidate.projectId &&
-          !candidate.listId,
+        (candidate) => isInboxTask(candidate),
       ).length,
   );
   const [processedIds, setProcessedIds] = useState<Set<string>>(
@@ -61,16 +58,12 @@ export function InboxTriageSheet({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [index, setIndex] = useState(0);
+  const dialogRef = useRef<HTMLElement>(null);
+  const focusTargetRef = useRef<HTMLButtonElement>(null);
   const queue = useMemo(
     () =>
       tasks.filter(
-        (task) =>
-          task.status === "open" &&
-          !task.deletedAt &&
-          !task.plannedDate &&
-          !task.projectId &&
-          !task.listId &&
-          !processedIds.has(task.id),
+        (task) => isInboxTask(task) && !processedIds.has(task.id),
       ),
     [processedIds, tasks],
   );
@@ -85,6 +78,14 @@ export function InboxTriageSheet({
       setIndex(queue.length - 1);
     }
   }, [index, queue.length]);
+
+  // Keep the triage ritual keyboard-first. The target is intentionally tied
+  // to the current task so skipping or finishing a task moves focus to the
+  // next decision instead of dropping it onto the document body.
+  useEffect(() => {
+    focusTargetRef.current?.focus({ preventScroll: true });
+  }, [task?.id]);
+  useDialogFocus(dialogRef, focusTargetRef);
 
   const markProcessed = (id: string) => {
     setProcessedIds((current) => {
@@ -130,6 +131,9 @@ export function InboxTriageSheet({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog || event.key === "Tab") return;
+      if (event.isComposing) return;
       if (event.key === "Escape") {
         event.preventDefault();
         if (!busy) onClose();
@@ -167,9 +171,12 @@ export function InboxTriageSheet({
     }}>
       <section
         className="modal-sheet inbox-triage-sheet"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         aria-labelledby="inbox-triage-title"
+        aria-describedby="inbox-triage-description"
         aria-busy={busy}
       >
         <header className="inbox-triage-header">
@@ -177,7 +184,9 @@ export function InboxTriageSheet({
           <div>
             <span>暂存整理</span>
             <h2 id="inbox-triage-title">把想法放到合适的位置</h2>
-            <p>{queue.length ? `还剩 ${queue.length} 件，每次只处理一件。` : "这一轮已经整理完了。"}</p>
+            <p id="inbox-triage-description">
+              {queue.length ? `还剩 ${queue.length} 件，每次只处理一件。` : "这一轮已经整理完了。"}
+            </p>
           </div>
           <button type="button" className="icon-button" aria-label="关闭暂存整理" disabled={busy} onClick={onClose}>
             <X size={18} />
@@ -186,7 +195,15 @@ export function InboxTriageSheet({
 
         {task ? (
           <>
-            <div className="inbox-triage-progress" aria-label={`已处理 ${processedCount} 项，剩余 ${queue.length} 项`}>
+            <div
+              className="inbox-triage-progress"
+              role="progressbar"
+              aria-label="暂存整理进度"
+              aria-valuemin={0}
+              aria-valuemax={initialTotal}
+              aria-valuenow={processedCount}
+              aria-valuetext={`已处理 ${processedCount} 项，剩余 ${queue.length} 项`}
+            >
               <span style={{ width: `${initialTotal ? Math.round((processedCount / initialTotal) * 100) : 100}%` }} />
             </div>
             <article className="inbox-triage-card">
@@ -194,7 +211,7 @@ export function InboxTriageSheet({
               <h3>{task.title}</h3>
               {task.notes.trim() && <p>{task.notes.trim().slice(0, 240)}</p>}
               <div className="inbox-triage-actions" aria-label="暂存整理动作">
-                <button type="button" className="primary-button" disabled={busy} onClick={() => planFor(localDateKey())}>
+                <button ref={focusTargetRef} type="button" className="primary-button" disabled={busy} onClick={() => planFor(localDateKey())}>
                   <CalendarDays size={16} /> 今天 <kbd>1</kbd>
                 </button>
                 <button type="button" className="soft-button" disabled={busy} onClick={() => planFor(tomorrowKey())}>
@@ -217,7 +234,7 @@ export function InboxTriageSheet({
             <Check size={30} />
             <strong>暂存清爽了</strong>
             <p>刚才跳过的任务仍然保留在暂存，不会被删除。</p>
-            <button type="button" className="primary-button" onClick={onClose}>回到任务列表</button>
+            <button ref={focusTargetRef} type="button" className="primary-button" onClick={onClose}>回到任务列表</button>
           </div>
         )}
         {error && <p className="inbox-triage-error" role="alert">{error}</p>}

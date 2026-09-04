@@ -17,6 +17,7 @@ import type {
 } from "../../src/shared/feishu-types";
 import {
   buildFeishuCreatePayload,
+  assertFeishuTaskTitle,
   buildFeishuPatchPayload,
   canonicalFeishuMemberIds,
   feishuSnapshotFieldsEqual,
@@ -27,6 +28,7 @@ import {
   threeWayMergeFeishuTask,
 } from "./sync-engine";
 import { cloneFeishuTasklistBinding } from "./tasklist-binding";
+import { hasTaskTitle } from "../../src/shared/task-title";
 
 /** Minimal structural interface implemented by TaskService. */
 export interface FeishuTaskServicePort {
@@ -330,6 +332,22 @@ export class FeishuTaskAdapter {
     return result.task;
   }
 
+  /** Repair only a missing legacy title from this exact account/GUID's last
+   * confirmed snapshot. Never overwrite a concurrent valid edit, infer a new
+   * title, alter other fields or queue this repair as a remote mutation. */
+  async restoreMissingTitle(localId: string, guid: string, cachedTitle: string): Promise<boolean> {
+    if (!hasTaskTitle(cachedTitle)) return false;
+    return this.localStore.transact(state => {
+      const task = state.tasks[localId];
+      if (!task || task.deletedAt || hasTaskTitle(task.title) || task.source.type !== 'feishu' ||
+        task.source.accountId !== this.accountId || task.source.externalId !== guid ||
+        (this.syncIdentityId !== undefined && task.source.syncIdentityId !== this.syncIdentityId)) return false;
+      task.title = cachedTitle;
+      task.updatedAt = new Date(this.now()).toISOString();
+      return true;
+    });
+  }
+
   private applyRemoteInTransaction(
     state: LocalAppState,
     localId: string,
@@ -339,6 +357,7 @@ export class FeishuTaskAdapter {
     locallyDeleted = false,
   ): Task {
     const snapshot = options.snapshot ?? remoteTaskToFeishuSnapshot(remote);
+    assertFeishuTaskTitle(snapshot.title);
     const syncStatus = options.status ?? "synced";
     const task = state.tasks[localId];
     if (!task) throw new Error(`Local task ${localId} does not exist.`);

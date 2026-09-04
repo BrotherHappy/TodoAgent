@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { PetPersonality } from "../shared/pet-types";
 import type { PetWeatherEffect } from "./pet-weather-effect";
+import { BuddyCharacter } from './desktopbuddy/BuddyCharacter';
 import {
   petActionLabels,
   type PetAction,
@@ -36,6 +37,7 @@ interface PetCharacterProps {
   mood?: PetMood;
   emotion?: PetEmotion;
   action?: PetAction;
+  actionKey?: string;
   name?: string;
   scalePercent?: number;
   compact?: boolean;
@@ -155,9 +157,10 @@ function schedulePetAtlasWarmup(): void {
  * Paint atlas cells on a canvas on the display refresh cadence. Updating a
  * CSS transform from a timer can land between compositor frames and expose a
  * one-pixel seam from the neighboring cell. Canvas source-rect drawing keeps
- * the cell boundary exact. Frames are swapped atomically instead of
- * cross-fading complete silhouettes: two overlapping transparent pets read as
- * a tearing tail/ear, especially during carrying and rope actions.
+ * the cell boundary exact. Frames are committed to one compositor surface
+ * instead of cross-fading or opacity-flipping two complete silhouettes: two
+ * transparent layers can land on different vsync commits and read as a
+ * tearing tail/ear, especially during carrying and rope actions.
  */
 const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep, onReady }: PetAtlasCanvasProps) {
   const stackRef = useRef<HTMLSpanElement>(null);
@@ -247,8 +250,8 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
       cancelled = true;
       setReady(false);
       // Do not demote a visible canvas to the SVG fallback during an action
-      // switch. The new sheet will paint into the hidden buffer first and
-      // then flip it into view as one complete frame.
+      // switch. The new sheet will paint into the same visible Canvas as one
+      // complete frame once its texture is decoded.
       if (!presentedFrameRef.current) onReady?.(false);
     };
   }, [initialPage, initialSrc, onReady, sources]);
@@ -256,37 +259,30 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
   useEffect(() => {
     if (!ready) return undefined;
     const stack = stackRef.current;
-    const canvases = stack
-      ? Array.from(stack.querySelectorAll("canvas"))
-      : [];
-    if (!stack || canvases.length < 2) return undefined;
-    const contexts = canvases
-      .map((canvas) => canvas.getContext("2d", { alpha: true }));
-    if (contexts.some((context) => !context)) return undefined;
+    const canvas = stack?.querySelector<HTMLCanvasElement>("canvas");
+    if (!stack || !canvas) return undefined;
+    const context = canvas.getContext("2d", { alpha: true });
+    if (!context) return undefined;
     // Keep the normal compositor/vsync path for sprite animation. Chromium's
     // `desynchronized` hint is useful for low-latency video, but can expose a
     // surface between paints under load; a desktop pet should prefer a fully
     // presented cell over shaving a few milliseconds of latency.
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     const resize = (): void => {
-      const cssWidth = canvases[0]?.clientWidth || 256;
-      const cssHeight = canvases[0]?.clientHeight || cssWidth;
+      const cssWidth = canvas.clientWidth || 256;
+      const cssHeight = canvas.clientHeight || cssWidth;
       const width = Math.max(1, Math.round(cssWidth * dpr));
       const height = Math.max(1, Math.round(cssHeight * dpr));
-      canvases.forEach((canvas, index) => {
-        if (canvas.width === width && canvas.height === height) return;
-        canvas.width = width;
-        canvas.height = height;
-        const context = contexts[index];
-        if (!context) return;
-        context.imageSmoothingEnabled = true;
-        context.imageSmoothingQuality = "high";
-      });
+      if (canvas.width === width && canvas.height === height) return;
+      canvas.width = width;
+      canvas.height = height;
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
     };
     resize();
     const resizeObserver =
       typeof ResizeObserver === "function" ? new ResizeObserver(resize) : undefined;
-    resizeObserver?.observe(canvases[0]);
+    resizeObserver?.observe(canvas);
 
     const frameCount = Math.max(1, animation.frames.length);
     const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -317,11 +313,12 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
     };
     const authoredFrameDuration = Math.max(1, animation.frameDurationMs);
     // Keep a fractional playhead instead of tying motion to integer wall-clock
-    // ticks. The atlas contains dense 8ms source cells. On a 60Hz panel the
-    // playhead therefore advances roughly two source cells per refresh, then
-    // blends only those adjacent cells inside the same action. This preserves
-    // the authored action duration while retaining a 60Hz complete-pose
-    // presentation cadence (rather than slowing every action to half speed).
+    // ticks. The atlas contains dense 2ms source cells for fast loops. The
+    // playhead therefore advances as many source cells as the real display
+    // interval needs (roughly 4–5 on a 120Hz panel and 8–10 on a 60Hz panel), then
+    // presents the nearest complete cell. This preserves the authored action
+    // duration without alpha-blending two moving silhouettes on top of each
+    // other (the previous blend was a visible source of ear/tail tearing).
     let sequencePosition = 0;
     let sequenceStarted = false;
     // The first two refresh callbacks can straddle image decode and a window
@@ -394,22 +391,19 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
       );
     };
 
-    // Paint into the hidden buffer, then flip the two complete canvases. A
-    // single visible canvas can be sampled between clearRect/drawImage on a
-    // busy desktop compositor; the double buffer makes every presented pose
-    // complete, so ears, tails and rope strokes cannot tear independently.
-    // Preserve whichever buffer is currently visible when an action or sheet
-    // changes. Resetting to buffer 0 unconditionally can expose an older pose
-    // for one compositor tick before the new hidden frame is painted.
-    let activeBuffer = stack.dataset.activeBuffer === "1" ? 1 : 0;
+    // Keep one visible compositor surface for the entire action lifetime. A
+    // previous implementation painted two canvases and flipped their opacity;
+    // Chromium can commit those opacity changes on adjacent vsyncs while a
+    // transparent always-on-top window is composited, exposing one buffer's
+    // tail with the other's head. A single canvas with `copy` gives the
+    // compositor one complete source-rect commit per rAF instead.
     let firstFramePainted = false;
-    if (!stack.dataset.activeBuffer) stack.dataset.activeBuffer = String(activeBuffer);
+    stack.dataset.renderPath = "single-canvas";
     // The handoff is a short hold, not a fade. Blending the old and new
     // full-pet canvases across an action boundary creates a translucent
-    // duplicate whenever an arm, rope or tail changes direction. Adjacent
-    // cells inside one action may blend below; the boundary itself always
-    // presents the previous pose for two display beats, then one complete
-    // target pose.
+    // duplicate whenever an arm, rope or tail changes direction. The one
+    // canvas remains visible while the next sheet decodes, then receives one
+    // complete target pose.
     let handoffPending = handoffRef.current;
     handoffRef.current = false;
     let handoffFramesRemaining = handoffPending ? 2 : 0;
@@ -417,11 +411,12 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
 
     const paint = (now: number): void => {
       // Do not fast-forward across a long main-thread/compositor pause. The
-      // atlas is deliberately dense, so skipping two or three cells in one
-      // display beat makes the pet look like a low-FPS flipbook even though
-      // the source sheet contains hundreds of frames. Present at most one
-      // neighbouring cell per refresh; after a long pause the companion may
-      // briefly slow down, but it never teleports across an arm/ear pose. The
+      // atlas is deliberately dense, so skipping a whole authored pose in one
+      // display beat makes the pet look like a low-FPS flipbook even though the
+      // source sheet contains hundreds of frames. Present only the bounded
+      // number of dense neighbouring cells required by the measured display
+      // interval; after a long pause the companion may briefly slow down, but
+      // it never teleports across an arm/ear pose. The
       // small warm-up gate prevents the first post-decode callback from
       // inheriting a stale timestamp.
       if (previousTimestamp === undefined) previousTimestamp = now;
@@ -456,12 +451,25 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
         sequenceStarted = true;
       } else {
         const cappedDelta = Math.min(
-          Math.max(refreshQuantum * 2, 1),
+          Math.max(refreshQuantum * 1.15, 1),
           Math.max(0, delta),
+        );
+        // The offline atlas already contains dense contour frames. Match the
+        // real display interval instead of forcing every refresh to advance
+        // only one or two cells (which stretches a 2ms timeline into slow
+        // motion). Keep a hard upper bound so a busy refresh cannot jump over
+        // an authored pose; the maximum is expressed in dense in-betweens, not
+        // source keyframes.
+        const maxAdvancePerRefresh = Math.max(
+          2,
+          Math.min(
+            12,
+            Math.ceil((refreshQuantum * 1.15) / authoredFrameDuration),
+          ),
         );
         const positionAdvance = warmupPaints < 2
           ? 0
-          : Math.min(3, cappedDelta / authoredFrameDuration);
+          : Math.min(maxAdvancePerRefresh, cappedDelta / authoredFrameDuration);
         if (shouldLoop) {
           sequencePosition = (sequencePosition + positionAdvance) % travelCount;
         } else {
@@ -505,47 +513,29 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
       }
       // The current cell can arrive a few milliseconds before the next cell
       // on a cold page. Keep the current complete pose until the adjacent
-      // cell is ready; once both are decoded, a tiny blend between adjacent
-      // in-betweens removes the flipbook feel without ever blending across
-      // different actions or unrelated key poses.
-      if (!nextImage && fractionalProgress > 0 && next !== current) {
+      // cell is ready; once both are decoded, switch at the halfway point.
+      // The generated atlas already contains the in-between contour, so
+      // alpha-blending two complete rasters here would create a translucent
+      // duplicate (the exact ear/tail tear users perceive as low FPS).
+      const wantsNextImage = fractionalProgress >= 0.5 && next !== current;
+      if (wantsNextImage && !nextImage) {
         sequencePosition = previousSequencePosition;
         frameRequest = window.requestAnimationFrame(paint);
         return;
       }
 
       resize();
-      const nextBuffer = activeBuffer === 0 ? 1 : 0;
-      const nextCanvas = canvases[nextBuffer];
-      const nextContext = contexts[nextBuffer];
-      if (!nextCanvas || !nextContext) return;
-      // Paint the complete pose(s) into the hidden surface before the
-      // one-attribute buffer flip. `copy` replaces the hidden surface in one
-      // draw operation, so there is no clear → draw gap for the compositor to
-      // observe. The two images are adjacent cells from the same generated
-      // transition; unlike a handoff fade, this blend never contains both
-      // the old and new action at once.
-      nextContext.globalCompositeOperation = "copy";
-      const blendProgress = nextImage && next !== current
-        ? Math.max(0, Math.min(1, fractionalProgress))
-        : 0;
-      drawFrame(
-        nextContext,
-        nextCanvas,
-        currentImage,
-        current,
-        1 - blendProgress,
-      );
-      if (blendProgress > 0 && nextImage) {
-        nextContext.globalCompositeOperation = "source-over";
-        drawFrame(nextContext, nextCanvas, nextImage, next, blendProgress);
-      }
-      nextContext.globalCompositeOperation = "source-over";
-      nextContext.globalAlpha = 1;
-      // The hidden buffer is fully painted before this one-attribute flip.
-      // CSS only changes opacity; no intermediate pixels are exposed.
-      stack.dataset.activeBuffer = String(nextBuffer);
-      activeBuffer = nextBuffer;
+      // Replace the visible surface in one Canvas 2D `copy` operation. The
+      // source rectangle covers the whole destination, including its
+      // transparent margin, so no clear → draw gap or stale pixel can be
+      // sampled by the compositor between frames.
+      context.globalCompositeOperation = "copy";
+      context.globalAlpha = 1;
+      const presentationImage = wantsNextImage && nextImage ? nextImage : currentImage;
+      const presentationFrame = wantsNextImage && nextImage ? next : current;
+      drawFrame(context, canvas, presentationImage, presentationFrame, 1);
+      context.globalCompositeOperation = "source-over";
+      context.globalAlpha = 1;
       if (!firstFramePainted) {
         firstFramePainted = true;
         presentedFrameRef.current = true;
@@ -571,18 +561,14 @@ const PetAtlasCanvas = memo(function PetAtlasCanvas({ sources, animation, onStep
     return () => {
       if (frameRequest) window.cancelAnimationFrame(frameRequest);
       resizeObserver?.disconnect();
-      contexts.forEach((context) => {
-        if (!context) return;
-        context.globalCompositeOperation = "source-over";
-        context.globalAlpha = 1;
-      });
+      context.globalCompositeOperation = "source-over";
+      context.globalAlpha = 1;
     };
   }, [animation, onReady, onStep, ready]);
 
   return (
-    <span ref={stackRef} className="pet-atlas-buffer-stack" data-active-buffer="0">
-      <canvas className="pet-atlas-canvas pet-atlas-motion pet-atlas-buffer-0" aria-hidden="true" data-ready={ready ? "true" : "false"} />
-      <canvas className="pet-atlas-canvas pet-atlas-motion pet-atlas-buffer-1" aria-hidden="true" data-ready={ready ? "true" : "false"} />
+    <span ref={stackRef} className="pet-atlas-buffer-stack" data-render-path="single-canvas">
+      <canvas className="pet-atlas-canvas pet-atlas-motion" aria-hidden="true" data-ready={ready ? "true" : "false"} />
     </span>
   );
 }, (previous, next) =>
@@ -962,10 +948,19 @@ function PetCharacterView({
  * are the only inputs that can change the pet, so memoising on this small
  * surface keeps the animation clock independent from the rest of the app.
  */
-export const PetCharacter = memo(PetCharacterView, (previous, next) =>
+function PetCharacterRouter(props: PetCharacterProps) {
+  if (props.visualStyle === 'atlas' && window.desktopApi?.buddy) {
+    const moodAction: Record<PetMood, PetAction> = { idle: 'idle', focus: 'focus', syncing: 'sync', alert: 'alert', happy: 'celebrate' };
+    return <BuddyCharacter action={props.action ?? moodAction[props.mood ?? 'idle']} actionKey={props.actionKey} emotion={props.emotion ?? moodEmotion[props.mood ?? 'idle']} name={props.name} compact={props.compact} scalePercent={props.scalePercent} interactive={props.interactive} palette={props.palette} outfit={props.outfit} season={props.season} weatherEffect={props.weatherEffect} personality={props.personality} />;
+  }
+  return <PetCharacterView {...props} />;
+}
+
+export const PetCharacter = memo(PetCharacterRouter, (previous, next) =>
   previous.mood === next.mood &&
   previous.emotion === next.emotion &&
   previous.action === next.action &&
+  previous.actionKey === next.actionKey &&
   previous.name === next.name &&
   previous.scalePercent === next.scalePercent &&
   previous.compact === next.compact &&

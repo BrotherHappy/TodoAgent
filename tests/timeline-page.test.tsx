@@ -72,6 +72,58 @@ describe("TimelinePage", () => {
     expect(screen.getByText("待安排 1 项")).toBeVisible();
   });
 
+  it("reports a failed timeline undo instead of leaving an unhandled rejection", async () => {
+    const notify = vi.fn();
+    const onUndo = vi.fn(async () => {
+      throw new Error("Operation op-1 cannot be undone because task task-1 changed afterwards.");
+    });
+    render(
+      <TimelinePage
+        {...props({
+          tasks: [makeTask("安排评审", { startAt: localIsoAt(date, 9 * 60) })],
+          onUndo,
+          notify,
+        })}
+      />,
+    );
+
+    const task = screen.getByRole("button", { name: /安排评审/u });
+    const dataTransfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn(),
+      getData: vi.fn(() => "安排评审"),
+    };
+    fireEvent.dragStart(task, { dataTransfer });
+    const dropTarget = document.querySelector<HTMLDivElement>(
+      '[data-slot-minute="600"]',
+    );
+    expect(dropTarget).not.toBeNull();
+    fireEvent.drop(dropTarget!, {
+      dataTransfer,
+    });
+
+    await waitFor(() => {
+      expect(notify).toHaveBeenCalledWith(
+        "已将“安排评审”安排在 10:00",
+        "success",
+        expect.objectContaining({ label: "撤销" }),
+      );
+    });
+    const success = notify.mock.calls.find(
+      (call) => call[0] === "已将“安排评审”安排在 10:00",
+    );
+    const undo = success?.[2] as { run: () => void } | undefined;
+    undo?.run();
+
+    await waitFor(() => {
+      expect(notify).toHaveBeenCalledWith(
+        "这项变更已被后续修改，无法安全撤销",
+        "error",
+      );
+    });
+  });
+
   it("focuses the requested date when opened from a calendar search result", async () => {
     const targetDate = addLocalDays(date, 2);
     render(<TimelinePage {...props({ focusDate: targetDate })} />);
@@ -220,7 +272,7 @@ describe("TimelinePage", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "从“产品同步会”提取行动项" }));
-    expect(onExtractActionItems).toHaveBeenCalledWith(event);
+    expect(onExtractActionItems).toHaveBeenCalledWith(event, expect.any(HTMLElement));
   });
 
   it("projects calendar busy blocks onto the half-hour timeline", () => {

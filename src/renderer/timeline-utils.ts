@@ -47,6 +47,15 @@ export const localDateKey = (date = new Date()): string => {
   return `${year}-${month}-${day}`;
 };
 
+/** Convert a persisted instant into the user's local calendar date. */
+export const localDateKeyFromInstant = (
+  value?: string,
+): string | undefined => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : localDateKey(date);
+};
+
 export const addLocalDays = (value: string, amount: number): string => {
   const [year, month, day] = value.split("-").map(Number);
   const date = new Date(year, month - 1, day, 12, 0, 0, 0);
@@ -63,11 +72,7 @@ export const weekDateKeys = (anchor: string): string[] => {
   return Array.from({ length: 7 }, (_, index) => addLocalDays(start, index));
 };
 
-const temporalDateKey = (value?: string): string | undefined => {
-  if (!value) return undefined;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? undefined : localDateKey(date);
-};
+const temporalDateKey = localDateKeyFromInstant;
 
 const taskDateKey = (task: Task): string | undefined => {
   if (task.status === "completed" && task.completedAt) {

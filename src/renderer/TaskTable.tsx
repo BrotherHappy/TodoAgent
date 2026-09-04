@@ -19,6 +19,8 @@ import type {
 } from "../shared/models";
 import { buildTaskAgentPrompt } from "./task-agent-context";
 import type { TaskController } from "./task-controller";
+import { undoTaskOperationWithFeedback } from "./task-operation-feedback";
+import { localDateKey, localDateKeyFromInstant } from "./timeline-utils";
 import {
   subtaskProgressLabel,
   type SubtaskProgress,
@@ -47,15 +49,12 @@ export function taskTableDateLabel(
       ...(task.dueAtIsAllDay ? {} : { hour: "2-digit", minute: "2-digit", hour12: false }),
     }).format(parsed);
   };
-  const dateKey = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-  const todayKey = dateKey(today);
+  const todayKey = localDateKey(today);
   if (task.dueAt) {
-    const dueKey = task.dueAt.slice(0, 10);
+    // dueAt is persisted as an instant. Project it into the user's local
+    // calendar before deciding whether the compact label can say “今天”; a
+    // raw ISO prefix is UTC and is wrong around local midnight.
+    const dueKey = localDateKeyFromInstant(task.dueAt);
     const dueLabel = dueKey === todayKey ? "今天" : formatDate(task.dueAt);
     return `截止 ${dueLabel}`;
   }
@@ -137,7 +136,7 @@ export interface TaskTableProps {
   lists?: readonly TaskList[];
   selectionMode?: boolean;
   selectedIds?: ReadonlySet<string>;
-  onToggleBulk?: (taskId: string) => void;
+  onToggleBulk?: (taskId: string, event?: ReactMouseEvent<HTMLElement>) => void;
   interactionDisabled?: boolean;
   subtaskProgress?: ReadonlyMap<string, SubtaskProgress>;
   onAskAgent: (prompt: string) => void;
@@ -176,7 +175,12 @@ export function TaskTable({
               : "任务已完成",
         "success",
         operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
           : undefined,
       );
     } catch (reason) {
@@ -201,7 +205,12 @@ export function TaskTable({
         task.flagged === true ? "已取消重点标记" : "已标记为重点任务",
         "success",
         operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
           : undefined,
       );
     } catch (reason) {
@@ -270,10 +279,19 @@ export function TaskTable({
                   <button
                     type="button"
                     className="task-table-title"
+                    aria-pressed={selectionMode ? selectedForBulk : undefined}
                     disabled={interactionDisabled}
-                    onClick={() =>
-                      selectionMode && onToggleBulk
-                        ? onToggleBulk(task.id)
+                    title={
+                      onToggleBulk
+                        ? selectionMode
+                          ? "点击选择；按住 Shift 选择范围，⌘/Ctrl 点选不连续任务"
+                          : "按住 Shift 选择范围，⌘/Ctrl 点选任务"
+                        : undefined
+                    }
+                    onClick={(event) =>
+                      onToggleBulk &&
+                      (selectionMode || event.shiftKey || event.metaKey || event.ctrlKey)
+                        ? onToggleBulk(task.id, event)
                         : controller.select(task.id)
                     }
                   >

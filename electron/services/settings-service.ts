@@ -335,6 +335,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
   if (!aiAuthenticationModes.has(merged.ai.authMode)) {
     merged.ai.authMode = defaultSettings.ai.authMode;
   }
+  if (merged.ai.protocol !== 'ollama' && merged.ai.protocol !== 'openai-compatible') delete merged.ai.protocol;
   merged.agentActivity.port = clampInteger(
     merged.agentActivity.port,
     defaultSettings.agentActivity.port,
@@ -368,6 +369,7 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     if (!aiAuthenticationModes.has(merged.ai.fallback.authMode)) {
       merged.ai.fallback.authMode = defaultSettings.ai.fallback.authMode;
     }
+    if (merged.ai.fallback.protocol !== 'ollama' && merged.ai.fallback.protocol !== 'openai-compatible') delete merged.ai.fallback.protocol;
     merged.ai.fallback.pricing = normalizeModelPricing(
       merged.ai.fallback.pricing,
       defaultSettings.ai.fallback.pricing,
@@ -463,12 +465,14 @@ function mergeSettings(value: Partial<AppSettings> | undefined): AppSettings {
     ai: {
       enabled: merged.ai.enabled,
       endpoint: merged.ai.endpoint,
+      ...(merged.ai.protocol ? { protocol: merged.ai.protocol } : {}),
       model: merged.ai.model,
       authMode: merged.ai.authMode,
       routing: merged.ai.routing,
       fallback: {
         enabled: merged.ai.fallback.enabled,
         endpoint: merged.ai.fallback.endpoint,
+        ...(merged.ai.fallback.protocol ? { protocol: merged.ai.fallback.protocol } : {}),
         model: merged.ai.fallback.model,
         authMode: merged.ai.fallback.authMode,
         pricing: {

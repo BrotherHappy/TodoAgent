@@ -41,6 +41,8 @@ import {
   calendarBusyMinutesForDate,
   type CalendarEvent,
 } from "../shared/calendar-events";
+import { hasTaskTitle, taskTitleForDisplay } from "../shared/task-title";
+import { taskOperationErrorMessage } from "../shared/task-errors";
 
 const CAPACITY_OPTIONS = [60, 120, 240, 360] as const;
 const STANDARD_ESTIMATES = [15, 30, 45, 60, 90, 120] as const;
@@ -176,7 +178,7 @@ export function DailyPlanSheet({
   const [query, setQuery] = useState("");
   const [showAllCandidates, setShowAllCandidates] = useState(false);
   const [pendingAction, setPendingAction] = useState<
-    "apply" | "undo" | "start"
+    "apply" | "undo" | "start" | "refresh"
   >();
   const saving = pendingAction !== undefined;
   const [saveError, setSaveError] = useState<string>();
@@ -363,6 +365,7 @@ export function DailyPlanSheet({
   const selectedItems = selectedIds
     .map((id) => itemById.get(id))
     .filter((item): item is DailyPlanItem => Boolean(item));
+  const missingTitleCount = suggestion.items.filter(item => !hasTaskTitle(item.task.title)).length;
   const selectedSet = new Set(selectedIds);
   const clearTaskIds = suggestion.items
     .filter((item) => item.isRetained && !selectedSet.has(item.task.id))
@@ -379,7 +382,7 @@ export function DailyPlanSheet({
   const allCandidates = suggestion.items.filter((item) => {
     if (selectedSet.has(item.task.id)) return false;
     if (!normalizedQuery) return true;
-    return `${item.task.title} ${item.task.projectId ?? ""} ${item.task.tags.join(" ")}`
+    return `${taskTitleForDisplay(item.task)} ${item.task.projectId ?? ""} ${item.task.tags.join(" ")}`
       .toLocaleLowerCase()
       .includes(normalizedQuery);
   });
@@ -459,34 +462,38 @@ export function DailyPlanSheet({
   };
 
   const applyPlan = async () => {
-    if (!canApply || saving) return;
+    if (!canApply || savingRef.current) return;
+    savingRef.current = true;
     setPendingAction("apply");
     setSaveError(undefined);
-    const request: ApplyTodayPlanRequest = {
-      date,
-      items: selectedItems.map((item) => ({
-        id: item.task.id,
-        estimatedMinutes:
-          durationOverrides[item.task.id] ??
-          (typeof item.task.estimatedMinutes === "number" &&
-          Number.isInteger(item.task.estimatedMinutes) &&
-          item.task.estimatedMinutes >= 5 &&
-          item.task.estimatedMinutes <= 720
-            ? item.task.estimatedMinutes
-            : undefined),
-      })),
-      clearTaskIds,
-      baselines: [...new Set([...selectedIds, ...clearTaskIds])].map((id) => {
-        const task = itemById.get(id)!.task;
-        return {
-          id,
-          plannedDate: task.plannedDate,
-          privateOrder: task.privateOrder,
-          estimatedMinutes: task.estimatedMinutes,
-        };
-      }),
-    };
     try {
+      const request: ApplyTodayPlanRequest = {
+        date,
+        items: selectedItems.map((item) => ({
+          id: item.task.id,
+          estimatedMinutes:
+            durationOverrides[item.task.id] ??
+            (typeof item.task.estimatedMinutes === "number" &&
+            Number.isInteger(item.task.estimatedMinutes) &&
+            item.task.estimatedMinutes >= 5 &&
+            item.task.estimatedMinutes <= 720
+              ? item.task.estimatedMinutes
+              : undefined),
+        })),
+        clearTaskIds,
+        baselines: [...new Set([
+          ...selectedItems.map(item => item.task.id),
+          ...clearTaskIds,
+        ])].map((id) => {
+          const task = itemById.get(id)!.task;
+          return {
+            id,
+            plannedDate: task.plannedDate,
+            privateOrder: task.privateOrder,
+            estimatedMinutes: task.estimatedMinutes,
+          };
+        }),
+      };
       const operationId = await onApply(request);
       setApplied({
         operationId,
@@ -496,15 +503,27 @@ export function DailyPlanSheet({
       });
     } catch (reason) {
       setSaveError(
-        reason instanceof Error ? reason.message : `暂时无法应用${targetNoun}计划`,
+        taskOperationErrorMessage(reason, `暂时无法确认这次${targetNoun}安排，当前选择已保留。请刷新任务后重试。`),
       );
     } finally {
+      savingRef.current = false;
       setPendingAction(undefined);
     }
   };
 
+  const refreshPlan = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setPendingAction('refresh');
+    setSaveError(undefined);
+    try { await onRetry(); }
+    catch (reason) { setSaveError(taskOperationErrorMessage(reason, '暂时无法刷新任务，请稍后重试。')); }
+    finally { savingRef.current = false; setPendingAction(undefined); }
+  };
+
   const undoAppliedPlan = async () => {
-    if (!applied?.operationId || saving) return;
+    if (!applied?.operationId || savingRef.current) return;
+    savingRef.current = true;
     setPendingAction("undo");
     setSaveError(undefined);
     try {
@@ -512,24 +531,27 @@ export function DailyPlanSheet({
       setApplied(undefined);
     } catch (reason) {
       setSaveError(
-        reason instanceof Error ? reason.message : `暂时无法撤销${targetNoun}计划`,
+        taskOperationErrorMessage(reason, `暂时无法撤销${targetNoun}计划，请刷新后重试。`),
       );
     } finally {
+      savingRef.current = false;
       setPendingAction(undefined);
     }
   };
 
   const startFirstTask = async (task: Task) => {
-    if (saving) return;
+    if (savingRef.current) return;
+    savingRef.current = true;
     setPendingAction("start");
     setSaveError(undefined);
     try {
       await onStartFirst(task);
     } catch (reason) {
       setSaveError(
-        reason instanceof Error ? reason.message : "暂时无法开始这项任务",
+        taskOperationErrorMessage(reason, "暂时无法开始这项任务，请刷新后重试。"),
       );
     } finally {
+      savingRef.current = false;
       setPendingAction(undefined);
     }
   };
@@ -542,7 +564,7 @@ export function DailyPlanSheet({
     const first = applied.tasks[0];
     const taskNames = applied.tasks
       .slice(0, 8)
-      .map((task, index) => `${index + 1}. ${task.title}`)
+      .map((task, index) => `${index + 1}. ${taskTitleForDisplay(task)}`)
       .join("\n");
     return (
       <div className="modal-backdrop daily-plan-backdrop" onMouseDown={closeFromBackdrop}>
@@ -587,7 +609,7 @@ export function DailyPlanSheet({
           {first && (
             <div className="daily-plan-first-task">
               <span>下一步</span>
-              <strong>{first.title}</strong>
+              <strong>{taskTitleForDisplay(first)}</strong>
               <small>{sourceLabel(first)}</small>
             </div>
           )}
@@ -702,8 +724,8 @@ export function DailyPlanSheet({
           <div className="daily-plan-state is-error" role="alert">
             <AlertTriangle size={26} />
             <strong>暂时无法生成建议</strong>
-            <p>{error}</p>
-            <button type="button" className="soft-button" onClick={() => void onRetry()}>
+            <p>{saveError ?? taskOperationErrorMessage(error, '暂时无法读取任务，请稍后重试。')}</p>
+            <button type="button" className="soft-button" disabled={saving} onClick={() => void refreshPlan()}>
               <RefreshCw size={15} />
               重试
             </button>
@@ -841,7 +863,7 @@ export function DailyPlanSheet({
                         <span className="daily-plan-schedule-time">
                           {formatClock(slot.startMinutes)}–{formatClock(slot.endMinutes)}
                         </span>
-                        <strong>{slot.taskTitle}</strong>
+                        <strong>{taskTitleForDisplay(itemById.get(slot.taskId)?.task ?? { title: slot.taskTitle })}</strong>
                         <small>
                           {slot.source === "existing-block" ? "已有时间块" : "建议安排"}
                           {slot.conflict === "outside-window" ? " · 超出可用时段" : ""}
@@ -883,7 +905,7 @@ export function DailyPlanSheet({
                             {day.slots.map((slot) => (
                               <span key={slot.taskId} className="daily-plan-multi-day-task">
                                 <b>{formatClock(slot.startMinutes)}–{formatClock(slot.endMinutes)}</b>
-                                {slot.taskTitle}
+                                {taskTitleForDisplay(itemById.get(slot.taskId)?.task ?? { title: slot.taskTitle })}
                               </span>
                             ))}
                           </div>
@@ -894,7 +916,7 @@ export function DailyPlanSheet({
                     <p className="daily-plan-schedule-warning" role="status">
                       {multiDayPreview.unscheduled.length} 项仍没有可行时段：{multiDayPreview.unscheduled
                         .slice(0, 3)
-                        .map((item) => `${item.taskTitle}（${multiDayReasonLabel(item.reason)}）`)
+                        .map((item) => `${taskTitleForDisplay(itemById.get(item.taskId)?.task ?? { title: item.taskTitle })}（${multiDayReasonLabel(item.reason)}）`)
                         .join("、")}
                       {multiDayPreview.unscheduled.length > 3 ? "等" : ""}。它们仍会保留在{targetName}的顺序中，请手动调整时长、时段或优先级。
                     </p>
@@ -903,6 +925,12 @@ export function DailyPlanSheet({
               )}
 
               <div className="daily-plan-body">
+              {missingTitleCount > 0 && (
+                <div className="daily-plan-data-warning" role="note">
+                  <AlertTriangle size={15} aria-hidden="true" />
+                  <span>有 {missingTitleCount} 项任务暂缺标题，仍可安排私人计划。不会自动改名或写入飞书；同步会优先恢复已有标题，没有缓存时请在任务详情补全。</span>
+                </div>
+              )}
               <section className="daily-plan-section" aria-labelledby="selected-plan-title">
                 <div className="daily-plan-section-heading">
                   <div>
@@ -928,7 +956,7 @@ export function DailyPlanSheet({
                       >
                         <span className="daily-plan-order">{index + 1}</span>
                         <div className="daily-plan-task-copy">
-                          <strong>{item.task.title}</strong>
+                          <strong>{taskTitleForDisplay(item.task)}</strong>
                           <span>
                             {item.primaryReason}
                             {item.blocked ? "，仍有前置任务未完成" : ""}
@@ -940,7 +968,7 @@ export function DailyPlanSheet({
                           <span>{assumed ? "暂估" : "预计"}</span>
                           <select
                             value={estimate}
-                            aria-label={`${item.task.title}的预计时长`}
+                            aria-label={`${taskTitleForDisplay(item.task)}的预计时长`}
                             onChange={(event) =>
                               setDurationOverrides((current) => ({
                                 ...current,
@@ -958,7 +986,7 @@ export function DailyPlanSheet({
                         <div className="daily-plan-row-actions">
                           <button
                             type="button"
-                            aria-label={`上移${item.task.title}`}
+                            aria-label={`上移${taskTitleForDisplay(item.task)}`}
                             disabled={index === 0}
                             onClick={() => moveItem(item.task.id, -1)}
                           >
@@ -966,7 +994,7 @@ export function DailyPlanSheet({
                           </button>
                           <button
                             type="button"
-                            aria-label={`下移${item.task.title}`}
+                            aria-label={`下移${taskTitleForDisplay(item.task)}`}
                             disabled={index === selectedItems.length - 1}
                             onClick={() => moveItem(item.task.id, 1)}
                           >
@@ -979,7 +1007,7 @@ export function DailyPlanSheet({
                           ) : (
                             <button
                               type="button"
-                              aria-label={`移出${item.task.title}`}
+                              aria-label={`移出${taskTitleForDisplay(item.task)}`}
                               onClick={() => removeItem(item)}
                             >
                               <X size={15} />
@@ -1026,13 +1054,13 @@ export function DailyPlanSheet({
                         <button
                           type="button"
                           className="daily-plan-add"
-                          aria-label={`加入${item.task.title}`}
+                          aria-label={`加入${taskTitleForDisplay(item.task)}`}
                           onClick={() => addItem(item)}
                         >
                           <Plus size={16} />
                         </button>
                         <div className="daily-plan-task-copy">
-                          <strong>{item.task.title}</strong>
+                          <strong>{taskTitleForDisplay(item.task)}</strong>
                           <span>
                             {item.primaryReason}
                             {item.blocked ? "，仍有前置任务未完成" : ""}
@@ -1067,10 +1095,13 @@ export function DailyPlanSheet({
             </div>
 
             {saveError && (
-              <p className="daily-plan-inline-error" role="alert">
-                <AlertTriangle size={15} />
-                {saveError}
-              </p>
+              <div className="daily-plan-inline-error" role="alert">
+                <AlertTriangle size={15} aria-hidden="true" />
+                <span>{saveError}</span>
+                <button type="button" className="ghost-button" disabled={saving} onClick={() => void refreshPlan()}>
+                  <RefreshCw size={14} aria-hidden="true" /> 刷新并重新预览
+                </button>
+              </div>
             )}
             <footer className="daily-plan-actions">
               <span>
@@ -1087,7 +1118,7 @@ export function DailyPlanSheet({
                 onClick={() => void applyPlan()}
               >
                 <CalendarCheck2 size={16} />
-                {saving
+                {pendingAction === 'refresh' ? '正在刷新…' : saving
                   ? "正在安排"
                   : !canApply
                     ? "计划已是最新"

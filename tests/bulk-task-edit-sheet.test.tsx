@@ -69,4 +69,22 @@ describe("BulkTaskEditSheet", () => {
       tags: { mode: "replace", values: [] },
     });
   });
+
+  it("starts in the first field and keeps Tab inside the sheet", () => {
+    render(
+      <BulkTaskEditSheet count={1} onClose={vi.fn()} onConfirm={vi.fn()} />,
+    );
+    const firstField = screen.getByLabelText("批量优先级");
+    const close = screen.getByRole("button", { name: "关闭批量编辑" });
+    const lastAction = screen.getByRole("button", { name: "预览批量修改" });
+
+    expect(firstField).toHaveFocus();
+    lastAction.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(close).toHaveFocus();
+
+    close.focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(lastAction).toHaveFocus();
+  });
 });

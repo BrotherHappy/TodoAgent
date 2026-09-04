@@ -161,7 +161,9 @@ export interface PetBehaviorSettings {
   seasonalEvents: boolean;
 }
 
+/** Single connection source for Agent, pet chat, briefs, file/screen Q&A and LLM APIs. */
 export interface AiProviderSettings {
+  protocol?: 'openai-compatible' | 'ollama';
   enabled: boolean;
   endpoint: string;
   model: string;
@@ -185,6 +187,7 @@ export interface AiProviderSettings {
 }
 
 export interface AiFallbackProviderSettings {
+  protocol?: 'openai-compatible' | 'ollama';
   enabled: boolean;
   endpoint: string;
   model: string;

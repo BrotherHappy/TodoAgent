@@ -1,2 +1,4 @@
 allowBuilds:
   esbuild: set this to true or false
+overrides:
+  pixi-live2d-display>gh-pages: 6.3.0

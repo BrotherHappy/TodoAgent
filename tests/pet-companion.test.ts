@@ -120,6 +120,33 @@ describe("pet companion proactive behavior", () => {
     expect(suggestion.message).toContain("回复客户");
   });
 
+  it("does not treat a UTC deadline near local midnight as yesterday", () => {
+    const suggestion = buildPetProactiveSuggestion({
+      now: new Date("2026-08-21T09:00:00+08:00"),
+      tasks: [
+        makeTask("midnight", "凌晨截止的任务", {
+          dueAt: "2026-08-20T16:30:00.000Z",
+        }),
+      ],
+      petName: "小序",
+    });
+
+    expect(suggestion.nextTask).toMatchObject({
+      taskId: "midnight",
+      reason: "今天截止，适合先处理",
+    });
+    expect(suggestion.message).not.toContain("过了计划时间");
+  });
+
+  it("counts proactive messages by local day rather than the UTC date prefix", () => {
+    expect(
+      proactiveMessagesForDate(
+        [{ shownAt: "2026-08-20T16:30:00.000Z" }],
+        new Date("2026-08-21T09:00:00+08:00"),
+      ),
+    ).toBe(1);
+  });
+
   it("does not recommend deleted or completed tasks", () => {
     const tasks = [
       makeTask("done", "已完成", { status: "completed", priority: "urgent" }),

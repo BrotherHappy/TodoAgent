@@ -73,4 +73,27 @@ describe("AgentResearchCardSheet", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("只支持不带账号密码");
     expect(onConfirm).not.toHaveBeenCalled();
   });
+
+  it("focuses the title, traps Tab, and closes with Escape", () => {
+    const onClose = vi.fn();
+    render(
+      <AgentResearchCardSheet
+        taskTitle="整理竞品"
+        sourceText="研究回复"
+        draft={draft}
+        onClose={onClose}
+        onConfirm={vi.fn(async () => undefined)}
+      />,
+    );
+
+    const title = screen.getByLabelText("标题");
+    const close = screen.getByRole("button", { name: "关闭研究卡预览" });
+    const save = screen.getByRole("button", { name: "保存私人研究卡" });
+    expect(title).toHaveFocus();
+    save.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

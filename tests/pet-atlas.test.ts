@@ -27,10 +27,10 @@ describe("Todo Pet generated action atlas", () => {
 
   it("keeps runtime grid metadata aligned with the PNG dimensions", () => {
     const motionPages = Array.from({ length: TODO_PET_MOTION_PAGE_COUNT }, (_, page) =>
-      pngSize(`todo-pet-motion-atlas-v24-${String(page).padStart(2, "0")}.png`),
+      pngSize(`todo-pet-motion-atlas-v25-${String(page).padStart(2, "0")}.png`),
     );
     const interactionPages = Array.from({ length: TODO_PET_INTERACTION_PAGE_COUNT }, (_, page) =>
-      pngSize(`todo-pet-interaction-atlas-v22-${String(page).padStart(2, "0")}.png`),
+      pngSize(`todo-pet-interaction-atlas-v23-${String(page).padStart(2, "0")}.png`),
     );
     for (const page of motionPages) {
       expect(page.width).toBe(TODO_PET_MOTION_COLUMNS * 128);
@@ -81,26 +81,26 @@ describe("Todo Pet generated action atlas", () => {
 
   it("provides high-frame loops for the main companion states", () => {
     const expectedAnimations = [
-      ["idle", "motion", 577],
-      ["wave", "motion", 577],
-      ["focus", "motion", 577],
-      ["celebrate", "motion", 321],
-      ["pet", "interaction", 385],
-      ["jump-rope", "interaction", 321],
-      ["task-carry", "interaction", 769],
-      ["nap", "interaction", 321],
+      ["idle", "motion", 577, 2],
+      ["wave", "motion", 577, 2],
+      ["focus", "motion", 577, 2],
+      ["celebrate", "motion", 65, 8],
+      ["pet", "interaction", 385, 2],
+      ["jump-rope", "interaction", 257, 2],
+      ["task-carry", "interaction", 769, 2],
+      ["nap", "interaction", 321, 34],
     ] as const;
-    for (const [action, sheet, frameCount] of expectedAnimations) {
+    for (const [action, sheet, frameCount, frameDurationMs] of expectedAnimations) {
       const animation = petAtlasAnimationForAction(action);
       expect(animation.sheet).toBe(sheet);
       expect(animation.frames).toHaveLength(frameCount);
       expect(animation.columns).toBe(TODO_PET_ATLAS_PAGE_COLUMNS);
       expect(animation.rows).toBe(TODO_PET_ATLAS_PAGE_ROWS);
       expect(animation.loop).toBe(true);
-      // Fast loops author an 8ms dense timeline. The renderer quantises
-      // presentation to the display cadence so a 60Hz panel shows each
-      // neighbouring cell for a complete refresh instead of skipping cells.
-      expect(animation.frameDurationMs).toBeGreaterThanOrEqual(8);
+      // Fast loops use a calibrated 2ms dense timeline. The renderer consumes
+      // the measured display interval (several dense cells per refresh) while
+      // still presenting one complete cell at a time.
+      expect(animation.frameDurationMs).toBe(frameDurationMs);
     }
   });
 

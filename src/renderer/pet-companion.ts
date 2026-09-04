@@ -1,6 +1,7 @@
 import type { Task } from "../shared/models";
 import { defaultSettings, type AppSettings, type TaskUrgencyWeights } from "../shared/settings";
 import type { ProactiveMessageRecord, WeatherSnapshot } from "../shared/pet-types";
+import { localDateKey, localDateKeyFromInstant } from "./timeline-utils";
 
 export interface PetCompanionContext {
   settings: AppSettings;
@@ -67,7 +68,9 @@ const defaultUrgencyWeights: TaskUrgencyWeights = defaultSettings.planning.urgen
 
 function taskDatePart(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  return /^\d{4}-\d{2}-\d{2}$/u.test(value) ? value : value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/u.test(value)
+    ? value
+    : localDateKeyFromInstant(value);
 }
 
 function daysBetween(from: string, to: string): number {
@@ -217,12 +220,13 @@ export function buildPetProactiveSuggestion(input: {
     (task) => task.status === "open" && !task.deletedAt,
   );
   const date = localDate(input.now);
-  const overdue = open.filter(
-    (task) => task.dueAt && task.dueAt.slice(0, 10) < date,
-  );
+  const overdue = open.filter((task) => {
+    const dueDate = taskDatePart(task.dueAt);
+    return Boolean(dueDate && dueDate < date);
+  });
   const dueToday = open.filter(
     (task) =>
-      task.plannedDate === date || task.dueAt?.slice(0, 10) === date,
+      task.plannedDate === date || taskDatePart(task.dueAt) === date,
   );
   const nextTask = input.privacyMode
     ? undefined
@@ -294,10 +298,7 @@ export function buildPetProactiveSuggestion(input: {
 }
 
 export function localDate(now = new Date()): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return localDateKey(now);
 }
 
 /** Counts companion messages shown on the device's local calendar day. */
@@ -306,7 +307,9 @@ export function proactiveMessagesForDate(
   now = new Date(),
 ): number {
   const date = localDate(now);
-  return messages.filter((message) => message.shownAt.slice(0, 10) === date).length;
+  return messages.filter(
+    (message) => localDateKeyFromInstant(message.shownAt) === date,
+  ).length;
 }
 
 /** Renderer-side advisory check; the main process remains authoritative. */

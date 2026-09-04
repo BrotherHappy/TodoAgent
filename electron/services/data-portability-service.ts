@@ -778,7 +778,7 @@ const validateDraft = (value: unknown, path: string): TaskDraft => {
 
 const validateOperation = (value: unknown, path: string): TaskOperation => {
   const operation = expectRecord(value, path);
-  assertOnlyKeys(operation, ['id', 'kind', 'createdAt', 'changes', 'undoneAt'], path);
+  assertOnlyKeys(operation, ['id', 'kind', 'createdAt', 'changes', 'undoneAt', 'undoneSequence', 'redoInvalidatedAt'], path);
   expectId(operation.id, `${path}.id`);
   expectEnum(operation.kind, [
     'create', 'update', 'complete', 'reopen', 'bulk', 'move-to-today', 'focus', 'work-log',
@@ -786,6 +786,10 @@ const validateOperation = (value: unknown, path: string): TaskOperation => {
   ] as const, `${path}.kind`);
   expectIsoDateTime(operation.createdAt, `${path}.createdAt`);
   expectOptional(operation, 'undoneAt', path, expectIsoDateTime);
+  expectOptional(operation, 'undoneSequence', path, (value, valuePath) =>
+    expectNumber(value, valuePath, { integer: true, minimum: 1 }),
+  );
+  expectOptional(operation, 'redoInvalidatedAt', path, expectIsoDateTime);
   if (!Array.isArray(operation.changes)) {
     throw new DataImportValidationError('Expected an array', `${path}.changes`);
   }
@@ -1036,12 +1040,13 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
 
   const ai = expectRecord(settings.ai, `${path}.ai`);
   assertOnlyKeys(ai, [
-    'enabled', 'endpoint', 'model', 'authMode', 'routing', 'fallback',
+    'enabled', 'endpoint', 'model', 'protocol', 'authMode', 'routing', 'fallback',
     'timeoutMs', 'retries', 'dailyTokenLimit', 'dailyCostLimit', 'pricing',
   ], `${path}.ai`);
   expectBoolean(ai.enabled, `${path}.ai.enabled`);
   expectSafeWebUrl(ai.endpoint, `${path}.ai.endpoint`);
   expectString(ai.model, `${path}.ai.model`);
+  if (ai.protocol !== undefined) expectEnum(ai.protocol, ['openai-compatible', 'ollama'] as const, `${path}.ai.protocol`);
   // `authMode` was added after the first portable-data schema. Missing it is
   // a safe legacy import and must preserve the secure Bearer default; any
   // value that is present is still an explicit, closed enum.
@@ -1059,12 +1064,13 @@ const validateSettings = (value: unknown, path: string): AppSettings => {
     const fallback = expectRecord(ai.fallback, `${path}.ai.fallback`);
     assertOnlyKeys(
       fallback,
-      ['enabled', 'endpoint', 'model', 'authMode', 'pricing'],
+      ['enabled', 'endpoint', 'model', 'protocol', 'authMode', 'pricing'],
       `${path}.ai.fallback`,
     );
     expectBoolean(fallback.enabled, `${path}.ai.fallback.enabled`);
     expectSafeWebUrl(fallback.endpoint, `${path}.ai.fallback.endpoint`);
     expectString(fallback.model, `${path}.ai.fallback.model`);
+    if (fallback.protocol !== undefined) expectEnum(fallback.protocol, ['openai-compatible', 'ollama'] as const, `${path}.ai.fallback.protocol`);
     if (fallback.authMode !== undefined) {
       expectEnum(
         fallback.authMode,

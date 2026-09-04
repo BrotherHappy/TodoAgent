@@ -20,6 +20,8 @@ describe("project documentation catalogue", () => {
 
   it("resolves relative Markdown links back into the app catalogue", () => {
     expect(findProjectDocByHref("./PRD.md")?.id).toBe("prd");
+    expect(findProjectDocByHref("./DESKTOPBUDDY_INTEGRATION.md")?.id).toBe("desktopbuddy-integration");
+    expect(findProjectDocByHref("./DAILY_PLAN_INTEGRITY.md")?.id).toBe("daily-plan-integrity");
     expect(findProjectDocByHref("docs/FEISHU_CONNECTION.md#oauth")?.id).toBe(
       "feishu-connection",
     );

@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "rice-live2d",
+  "displayName": "Rice / 植物精灵",
+  "version": "0.1.0",
+  "author": "Live2D sample / Desktop Buddy wrapper",
+  "type": "plant",
+  "renderer": "live2d",
+  "description": "官方 Cubism Web Samples 中带自然与稻苗意象的预设，用来验证植物/自然生命主题的作息和注意力表现。",
+  "source": {
+    "type": "official-sample",
+    "url": "https://github.com/Live2D/CubismWebSamples/tree/develop/Samples/Resources/Rice",
+    "license": "Live2D Sample Data Terms"
+  },
+  "layout": {
+    "defaultSize": 96,
+    "minSize": 26,
+    "maxSize": 165,
+    "anchor": "bottomCenter",
+    "preferredDock": "bottomRight"
+  },
+  "model": {
+    "core": "assets/live2d-presets/rice/live2dcubismcore.min.js",
+    "model3": "assets/live2d-presets/rice/Rice.model3.json",
+    "preview": "assets/live2d-presets/rice/Rice.model3.json"
+  },
+  "colors": {
+    "swatches": ["#8ccf6f", "#315c31", "#fff4bd"],
+    "cssClass": "pet-rice-live2d"
+  },
+  "capabilities": {
+    "idleMotion": true,
+    "attention": true,
+    "touchReaction": true,
+    "dragReaction": true,
+    "lifeRoutine": true,
+    "ambientMood": true,
+    "optionalCare": ["sunlight", "rest"],
+    "aiExpression": false,
+    "lookAtCursor": true,
+    "audioFeedback": false
+  },
+  "motions": {
+    "idleMotion": { "default": "Idle", "sleepy": "Idle" },
+    "attention": { "cursorNear": "Idle", "cursorLeave": "Idle", "called": "TapBody" },
+    "touchReaction": { "default": "TapBody", "head": "TapBody" },
+    "dragReaction": { "start": "TapBody", "holding": "Idle" },
+    "dropReaction": { "default": "TapBody" },
+    "lifeRoutine": {
+      "morning": "TapBody",
+      "focusTime": "Idle",
+      "idleLong": "Idle",
+      "night": "Idle",
+      "sleep": "Idle",
+      "rest": "Idle",
+      "wake": "TapBody",
+      "sunlight": "TapBody"
+    },
+    "optionalCare": { "sunlight": "TapBody", "rest": "Idle" },
+    "aiThinking": { "default": "Idle" },
+    "aiSpeaking": { "default": "TapBody" },
+    "aiNeedConfirm": { "default": "Idle" },
+    "aiSuccess": { "default": "TapBody" },
+    "aiError": { "default": "Idle", "cancelled": "Idle" },
+    "aiExpression": { "thinking": "Idle", "speaking": "TapBody", "success": "TapBody", "error": "Idle" }
+  },
+  "interactions": [
+    { "id": "touch", "label": "轻触叶片", "behavior": "touchReaction.default", "cooldownMs": 800 },
+    { "id": "sunlight", "label": "晒太阳", "behavior": "optionalCare.sunlight", "cooldownMs": 6000 },
+    { "id": "rest", "label": "静静生长", "behavior": "lifeRoutine.rest", "cooldownMs": 5000 }
+  ],
+  "routine": {
+    "timezoneMode": "system",
+    "segments": [
+      { "id": "morning", "from": "06:30", "to": "09:30", "behavior": "lifeRoutine.morning", "cooldownMs": 1800000, "weight": 1.5, "message": "它像被晨光唤醒一样轻轻活动。", "mood": "happy" },
+      { "id": "focusTime", "when": "userActiveLong", "behavior": "lifeRoutine.focusTime", "minQuietMs": 600000, "cooldownMs": 1500000, "weight": 1, "message": "它进入缓慢生长的陪伴节奏。", "mood": "neutral" },
+      { "id": "idleLong", "when": "noInteraction", "behavior": "lifeRoutine.idleLong", "afterMs": 360000, "cooldownMs": 900000, "weight": 1.2, "message": "它安静地舒展枝叶。", "mood": "thinking" },
+      { "id": "night", "from": "21:30", "to": "06:30", "behavior": "lifeRoutine.night", "cooldownMs": 1800000, "weight": 1.8, "message": "它收起精神，进入夜间休息。", "mood": "sleepy" }
+    ]
+  },
+  "fallback": {
+    "renderer": "live2d",
+    "motion": {
+      "attention.cursorNear": "idleMotion.default",
+      "attention.cursorLeave": "idleMotion.default",
+      "lifeRoutine.sleep": "idleMotion.sleepy",
+      "lifeRoutine.night": "lifeRoutine.sleep",
+      "aiThinking": "idleMotion.default",
+      "aiSpeaking": "touchReaction.default",
+      "aiNeedConfirm": "idleMotion.default",
+      "aiSuccess": "touchReaction.default",
+      "aiError": "idleMotion.default"
+    }
+  }
+}

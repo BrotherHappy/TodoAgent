@@ -300,6 +300,29 @@ describe("TaskService views and task data", () => {
     ).toEqual([match.task.id]);
   });
 
+  it("keeps the Inbox view limited to genuinely unscheduled open tasks", async () => {
+    const { service } = await createFixture();
+    const inbox = await service.createTask({ title: "纯暂存任务" });
+    await service.createTask({
+      title: "已安排日期",
+      plannedDate: "2026-08-31",
+    });
+    await service.createTask({
+      title: "已安排开始时间",
+      startAt: "2026-08-31T09:00:00.000Z",
+    });
+    await service.createTask({
+      title: "已安排截止时间",
+      dueAt: "2026-08-31T17:00:00.000Z",
+    });
+    await service.createTask({ title: "已归入项目", projectId: "project-1" });
+    await service.createTask({ title: "已归入清单", listId: "list-1" });
+
+    expect((await service.listTasks({ view: "inbox" })).map((task) => task.id)).toEqual([
+      inbox.task.id,
+    ]);
+  });
+
   it("supports a private attention marker without queueing a Feishu write", async () => {
     const { service } = await createFixture();
     const local = await service.createTask({ title: "本地重点任务", flagged: true });
@@ -620,6 +643,82 @@ describe("TaskService mutations, recovery, and recurrence", () => {
     expect(JSON.stringify(history)).not.toContain("不要把正文放进历史响应");
     await expect(service.getTaskHistory(created.task.id, 0)).rejects.toBeInstanceOf(
       TaskValidationError,
+    );
+  });
+
+  it("returns the latest undoable operation without exposing snapshots", async () => {
+    const { service } = await createFixture();
+    const first = await service.createTask({ title: "先创建" });
+    const second = await service.createTask({ title: "后创建" });
+
+    expect(await service.getLatestUndoableOperation()).toEqual({
+      id: second.operationId,
+      kind: "create",
+      createdAt: expect.any(String),
+    });
+    expect(
+      JSON.stringify(await service.getLatestUndoableOperation()),
+    ).not.toContain("changes");
+
+    await service.undo(second.operationId);
+    expect(await service.getLatestUndoableOperation()).toEqual({
+      id: first.operationId,
+      kind: "create",
+      createdAt: expect.any(String),
+    });
+
+    await service.undo(first.operationId);
+    expect(await service.getLatestUndoableOperation()).toBeUndefined();
+  });
+
+  it("redoes undone operations in undo order and returns them to the undo stack", async () => {
+    const { service } = await createFixture();
+    const first = await service.createTask({ title: "先重做" });
+    const second = await service.createTask({ title: "后重做" });
+
+    await service.undo(second.operationId);
+    await service.undo(first.operationId);
+
+    expect(await service.getLatestRedoableOperation()).toEqual({
+      id: first.operationId,
+      kind: "create",
+      createdAt: expect.any(String),
+    });
+
+    const redoneFirst = await service.redo();
+    expect(redoneFirst).toMatchObject({
+      operationId: first.operationId,
+      removedTaskIds: [],
+    });
+    expect(redoneFirst.restoredTasks[0]?.title).toBe("先重做");
+    expect((await service.getTask(first.task.id))?.title).toBe("先重做");
+    expect(await service.getLatestUndoableOperation()).toEqual({
+      id: first.operationId,
+      kind: "create",
+      createdAt: expect.any(String),
+    });
+    expect(await service.getLatestRedoableOperation()).toEqual({
+      id: second.operationId,
+      kind: "create",
+      createdAt: expect.any(String),
+    });
+
+    const redoneSecond = await service.redo(second.operationId);
+    expect(redoneSecond.restoredTasks[0]?.title).toBe("后重做");
+    expect((await service.getTask(second.task.id))?.title).toBe("后重做");
+    expect(await service.getLatestRedoableOperation()).toBeUndefined();
+  });
+
+  it("invalidates the redo branch after a new task mutation", async () => {
+    const { service } = await createFixture();
+    const undone = await service.createTask({ title: "被撤销的创建" });
+    await service.undo(undone.operationId);
+
+    await service.createTask({ title: "新的历史分支" });
+
+    expect(await service.getLatestRedoableOperation()).toBeUndefined();
+    await expect(service.redo(undone.operationId)).rejects.toThrow(
+      "newer operation exists",
     );
   });
 

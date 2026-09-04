@@ -110,6 +110,23 @@ describe("GlobalSearchSheet", () => {
     expect(screen.getByRole("button", { name: "打开快捷搜索：今天要做" })).toBeVisible();
   });
 
+  it("browses saved and recent searches from the keyboard start screen", () => {
+    saveGlobalSearchPreset("今天要做", "今天", "todo-agent:global-search-presets:v1");
+    rememberGlobalSearch("发布");
+    render(<GlobalSearchSheet {...props()} />);
+
+    const input = screen.getByRole("combobox", { name: "全局搜索" });
+    const saved = screen.getByRole("button", { name: "打开快捷搜索：今天要做" });
+    const recent = screen.getByRole("button", { name: "发布" });
+    expect(saved).toHaveClass("is-keyboard-active");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(recent).toHaveClass("is-keyboard-active");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toHaveValue("发布");
+    expect(screen.getByRole("option", { name: /整理发布清单/ })).toBeVisible();
+  });
+
   it("opens a local calendar result from the 日历 filter", () => {
     const onSelect = vi.fn();
     const event = {
@@ -129,5 +146,20 @@ describe("GlobalSearchSheet", () => {
       kind: "calendar",
       calendarEvent: event,
     }));
+  });
+
+  it("keeps Tab navigation inside the global search dialog", () => {
+    render(<GlobalSearchSheet {...props()} />);
+    const input = screen.getByRole("combobox", { name: "全局搜索" });
+    fireEvent.change(input, { target: { value: "发布" } });
+    const result = screen.getByRole("option", { name: /整理发布清单/ });
+    const close = screen.getByRole("button", { name: "关闭全局查找" });
+
+    result.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(close).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(result).toHaveFocus();
   });
 });

@@ -18,6 +18,7 @@ import type {
 import { FeishuNetworkError } from '../electron/feishu/feishu-client';
 import {
   FeishuSyncEngine,
+  FeishuTaskDataError,
   buildFeishuCreatePayload,
   buildFeishuPatchPayload,
   remoteTaskToFeishuSnapshot,
@@ -77,6 +78,18 @@ function remoteTask(overrides: Partial<FeishuTaskV2> = {}): FeishuTaskV2 {
     ...overrides,
   };
 }
+
+describe('Feishu title integrity boundary', () => {
+  it.each([undefined, null, '', '  ', '\u200b', 42])('does not turn missing or invalid provider summaries into local empty titles: %j', summary => {
+    expect(() => remoteTaskToFeishuSnapshot(remoteTask({ summary: summary as string }))).toThrow(FeishuTaskDataError);
+  });
+  it('does not send legacy empty titles through creates or title patches', () => {
+    expect(() => buildFeishuCreatePayload(makeTask({ title: '' }))).toThrow(FeishuTaskDataError);
+    expect(() => buildFeishuPatchPayload(snapshot({ title: '' }), ['title'])).toThrow(FeishuTaskDataError);
+    // An unrelated public field must not implicitly add a title mutation.
+    expect(buildFeishuPatchPayload(snapshot({ title: '' }), ['notes'])).toEqual({ task: { description: 'Base notes' }, update_fields: ['description'] });
+  });
+});
 
 class MemoryQueueStore implements FeishuSyncQueueStore {
   items: FeishuSyncQueueItem[] = [];

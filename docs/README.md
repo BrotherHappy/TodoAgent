@@ -18,9 +18,10 @@
 
 ## Todo Pet
 
+- [DesktopBuddy 伙伴、动画与本地 AI（当前实现）](./DESKTOPBUDDY_INTEGRATION.md)
 - [Todo Pet 产品与体验设计文档](./TODO_PET_PRODUCT_DESIGN.md)
 - [Todo Pet 动作与互动设计规范](./TODO_PET_ACTION_INTERACTION_SPEC.md)
-- [Todo Pet 动作图集与 Clawd 风格实现](./TODO_PET_ATLAS_DESIGN.md)
+- [Todo Pet 历史动作图集与 Clawd 风格实现](./TODO_PET_ATLAS_DESIGN.md)
 - [Todo Pet 实现规范与验收标准](./TODO_PET_IMPLEMENTATION_SPEC.md)
 - [Todo Pet AI 实现交接说明](./TODO_PET_AI_HANDOFF.md)
 
@@ -28,6 +29,7 @@
 
 - [技术架构与测试门禁](./TECHNICAL_ARCHITECTURE.md)
 - [飞书零服务器连接方案与真实账号门禁](./FEISHU_CONNECTION.md)
+- [今日规划与同步数据完整性](./DAILY_PLAN_INTEGRITY.md)
 - [Todo Pet × clawd-on-desk 能力融合](./CLAWD_INTEGRATION.md)
 
 ## 状态与验收

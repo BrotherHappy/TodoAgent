@@ -98,4 +98,21 @@ describe("TaskTemplateSaveSheet", () => {
     await vi.waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
     expect(onConfirm.mock.calls[0]![0].steps).toHaveLength(1);
   });
+
+  it("focuses the template name, traps Tab, and closes with Escape", () => {
+    const onClose = vi.fn();
+    render(
+      <TaskTemplateSaveSheet task={task} onClose={onClose} onConfirm={vi.fn(async () => undefined)} />,
+    );
+
+    const name = screen.getByLabelText("模板名称");
+    const close = screen.getByRole("button", { name: "关闭模板保存" });
+    const save = screen.getByRole("button", { name: "保存本地模板" });
+    expect(name).toHaveFocus();
+    save.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

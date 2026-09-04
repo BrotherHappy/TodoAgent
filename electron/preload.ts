@@ -10,6 +10,8 @@ import type {
   PetInputActivityEvent,
 } from "../src/shared/desktop-api";
 import type { PetEvent } from "../src/shared/pet-types";
+import { BUDDY_CHANNELS } from '../src/shared/desktopbuddy-contract';
+import { AGENT_CONTEXT_CHANNELS } from '../src/shared/agent-context';
 
 function subscribe<Payload>(
   channel: string,
@@ -54,6 +56,26 @@ function subscribeNavigation(listener: (route: string) => void): () => void {
 }
 
 const desktopApi: DesktopApi = {
+  agentContext: {
+    chooseFile: () => ipcRenderer.invoke(AGENT_CONTEXT_CHANNELS.chooseFile),
+    selectScreenRegion: () => ipcRenderer.invoke(AGENT_CONTEXT_CHANNELS.selectScreen),
+    finishScreenRegion: region => ipcRenderer.invoke(AGENT_CONTEXT_CHANNELS.finishScreen, region),
+    discard: token => ipcRenderer.invoke(AGENT_CONTEXT_CHANNELS.discard, token),
+  },
+  buddy: {
+    snapshot: () => ipcRenderer.invoke(BUDDY_CHANNELS.snapshot),
+    assets: (id) => ipcRenderer.invoke(BUDDY_CHANNELS.assets, id),
+    setPreferences: (patch) => ipcRenderer.invoke(BUDDY_CHANNELS.preferences, patch),
+    importTheme: () => ipcRenderer.invoke(BUDDY_CHANNELS.import),
+    chooseImage: () => ipcRenderer.invoke(BUDDY_CHANNELS.image),
+    generateTheme: (input) => ipcRenderer.invoke(BUDDY_CHANNELS.generate, input),
+    setEnabled: (themeId, enabled) => ipcRenderer.invoke(BUDDY_CHANNELS.enabled, { themeId, enabled }),
+    removeTheme: (id) => ipcRenderer.invoke(BUDDY_CHANNELS.remove, id),
+    interact: (id) => ipcRenderer.invoke(BUDDY_CHANNELS.interaction, id),
+    onChange: (listener) => subscribe(BUDDY_CHANNELS.changed, listener),
+    onInteraction: (listener) => subscribe(BUDDY_CHANNELS.performed, listener),
+    onCursor: (listener) => subscribe(BUDDY_CHANNELS.cursor, listener),
+  },
   tasks: {
     create: (input) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskCreate, input),
     get: (id, includeDeleted) =>
@@ -88,8 +110,14 @@ const desktopApi: DesktopApi = {
     purge: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.taskPurge, id),
     history: (id, limit) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskHistory, { id, limit }),
+    getLatestUndoableOperation: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskLatestUndoableOperation),
+    getLatestRedoableOperation: () =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskLatestRedoableOperation),
     undo: (operationId) =>
       ipcRenderer.invoke(DESKTOP_CHANNELS.taskUndo, operationId),
+    redo: (operationId) =>
+      ipcRenderer.invoke(DESKTOP_CHANNELS.taskRedo, operationId),
     saveDraft: (input) => ipcRenderer.invoke(DESKTOP_CHANNELS.draftSave, input),
     getDraft: (id) => ipcRenderer.invoke(DESKTOP_CHANNELS.draftGet, id),
     listDrafts: () => ipcRenderer.invoke(DESKTOP_CHANNELS.draftList),

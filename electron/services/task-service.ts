@@ -21,11 +21,13 @@ import type {
   TaskListColor,
   TaskMutationResult,
   TaskOperation,
+  TaskOperationSummary,
   TaskOperationKind,
   TaskProject,
   TaskProjectColor,
   TaskPriority,
   RecordWorkLogInput,
+  RedoResult,
   TaskResearchCard,
   TaskSnapshotChange,
   TaskSort,
@@ -52,6 +54,9 @@ import {
   type TaskAutomationApplyRequest,
 } from "../../src/shared/task-automations";
 import { actualMinutesForTask } from "../../src/shared/task-time-accounting";
+import { hasTaskTitle } from "../../src/shared/task-title";
+import { todayPlanRequestSchema } from "../../src/shared/today-plan-contract";
+import { isInboxTask } from "../../src/shared/task-view-predicates";
 
 export interface TaskServiceOptions {
   clock?: () => Date;
@@ -90,6 +95,15 @@ export class UndoConflictError extends Error {
   }
 }
 
+export class RedoConflictError extends Error {
+  constructor(operationId: string, taskId: string) {
+    super(
+      `Operation ${operationId} cannot be redone because task ${taskId} changed afterwards.`,
+    );
+    this.name = "RedoConflictError";
+  }
+}
+
 const PRIORITY_RANK: Record<TaskPriority, number> = {
   none: 0,
   low: 1,
@@ -117,6 +131,7 @@ const TODAY_PLAN_PRIVATE_FIELDS = [
   "privateOrder",
   "estimatedMinutes",
 ] as const satisfies readonly (keyof Task)[];
+const PRIVATE_PLANNING_FIELDS: ReadonlySet<string> = new Set(TODAY_PLAN_PRIVATE_FIELDS);
 const REQUIRED_FIELDS = new Set([
   "source",
   "title",
@@ -527,10 +542,10 @@ const validateResearchCards = (
 };
 
 const validateTask = (task: Task): Task => {
-  task.title = task.title.trim();
-  if (task.title.length === 0) {
+  if (!hasTaskTitle(task.title)) {
     throw new TaskValidationError("Task title cannot be empty.");
   }
+  task.title = task.title.trim();
   if (task.flagged !== undefined && typeof task.flagged !== "boolean") {
     throw new TaskValidationError("Task flagged value must be boolean.");
   }
@@ -741,15 +756,7 @@ const matchesView = (
     );
   }
   if (view === "inbox") {
-    return (
-      task.status === "open" &&
-      task.projectId === undefined &&
-      task.listId === undefined &&
-      task.plannedDate === undefined &&
-      task.deferUntil === undefined &&
-      task.startAt === undefined &&
-      task.dueAt === undefined
-    );
+    return isInboxTask(task);
   }
   return task.status === "open";
 };
@@ -1737,6 +1744,11 @@ export class TaskService {
    * also means the entire planning session can be undone in one click.
   */
   async applyTodayPlan(request: ApplyTodayPlanRequest): Promise<TaskOperation> {
+    const parsed = todayPlanRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      throw new TaskValidationError("计划参数不完整或已失效，请刷新任务后重新预览。预计时长需为 5–720 分钟的整数。一次最多安排 500 项任务。");
+    }
+    request = parsed.data;
     if (request.date !== undefined) assertLocalDate(request.date, "date");
     const selectedIds = request.items.map((item) => item.id);
     if (new Set(selectedIds).size !== selectedIds.length) {
@@ -2153,6 +2165,7 @@ export class TaskService {
           return deepClone(restored);
         });
         operation.undoneAt = now;
+        operation.undoneSequence = state.revision + 1;
         return {
           operationId: operation.id,
           restoredTasks,
@@ -2204,6 +2217,102 @@ export class TaskService {
         }
       });
       operation.undoneAt = now;
+      operation.undoneSequence = state.revision + 1;
+      return { operationId: operation.id, restoredTasks, removedTaskIds };
+    });
+  }
+
+  async redo(operationId?: string): Promise<RedoResult> {
+    return this.store.transact((state) => {
+      const operation =
+        operationId === undefined
+          ? [...state.operations]
+              .reverse()
+              .filter(
+                (candidate) =>
+                  candidate.undoneAt !== undefined &&
+                  candidate.redoInvalidatedAt === undefined,
+              )
+              .sort((left, right) => {
+                const leftUndoneAt = left.undoneAt ?? "";
+                const rightUndoneAt = right.undoneAt ?? "";
+                const timestampDifference = rightUndoneAt.localeCompare(leftUndoneAt);
+                if (timestampDifference !== 0) return timestampDifference;
+                return (
+                  (right.undoneSequence ?? -1) -
+                  (left.undoneSequence ?? -1)
+                );
+              })[0]
+          : state.operations.find((candidate) => candidate.id === operationId);
+      if (operation === undefined)
+        throw new TaskStateError("There is no operation to redo.");
+      if (operation.undoneAt === undefined)
+        throw new TaskStateError(`Operation is not undone: ${operation.id}`);
+      if (operation.redoInvalidatedAt !== undefined) {
+        throw new TaskStateError(
+          `Operation cannot be redone because a newer operation exists: ${operation.id}`,
+        );
+      }
+      if (
+        new Set(operation.changes.map((change) => change.taskId)).size !==
+        operation.changes.length
+      ) {
+        throw new TaskStateError(
+          `Operation contains duplicate task changes: ${operation.id}`,
+        );
+      }
+
+      operation.changes.forEach((change) => {
+        const current = state.tasks[change.taskId];
+        if (!this.matchesRedoBaseline(current, change.before, change.after)) {
+          throw new RedoConflictError(operation.id, change.taskId);
+        }
+      });
+
+      const now = this.now();
+      const restoredTasks: Task[] = [];
+      const removedTaskIds: TaskId[] = [];
+      operation.changes.forEach((change) => {
+        if (change.after === null) {
+          delete state.tasks[change.taskId];
+          removedTaskIds.push(change.taskId);
+          return;
+        }
+
+        const current = state.tasks[change.taskId];
+        let redone: Task;
+        if (operation.kind === "plan-today") {
+          if (!current || !change.before) {
+            throw new RedoConflictError(operation.id, change.taskId);
+          }
+          redone = deepClone(current);
+          const redoneRecord = redone as unknown as Record<string, unknown>;
+          const beforeRecord = change.before as unknown as Record<string, unknown>;
+          const afterRecord = change.after as unknown as Record<string, unknown>;
+          TODAY_PLAN_PRIVATE_FIELDS.forEach((field) => {
+            if (deepEqual(beforeRecord[field], afterRecord[field])) return;
+            if (afterRecord[field] === undefined) {
+              delete redoneRecord[field];
+            } else {
+              redoneRecord[field] = deepClone(afterRecord[field]);
+            }
+          });
+          redone.updatedAt = now;
+        } else {
+          redone = deepClone(change.after);
+          redone.updatedAt = now;
+          if (this.undoRequiresFeishuSync(change.before, change.after)) {
+            this.markSync(redone, true);
+          }
+        }
+        state.tasks[change.taskId] = redone;
+        change.after = deepClone(redone);
+        restoredTasks.push(deepClone(redone));
+      });
+
+      delete operation.undoneAt;
+      delete operation.undoneSequence;
+      delete operation.redoInvalidatedAt;
       return { operationId: operation.id, restoredTasks, removedTaskIds };
     });
   }
@@ -2213,6 +2322,45 @@ export class TaskService {
     return deepClone(
       operations.slice(Math.max(0, operations.length - limit)).reverse(),
     );
+  }
+
+  async getLatestUndoableOperation(): Promise<TaskOperationSummary | undefined> {
+    const operations = (await this.store.load()).operations;
+    const operation = [...operations]
+      .reverse()
+      .find((candidate) => candidate.undoneAt === undefined);
+    if (!operation) return undefined;
+    return {
+      id: operation.id,
+      kind: operation.kind,
+      createdAt: operation.createdAt,
+    };
+  }
+
+  async getLatestRedoableOperation(): Promise<TaskOperationSummary | undefined> {
+    const operations = (await this.store.load()).operations;
+    const operation = [...operations]
+      .reverse()
+      .filter(
+        (candidate) =>
+          candidate.undoneAt !== undefined &&
+          candidate.redoInvalidatedAt === undefined,
+      )
+      .sort((left, right) => {
+        const leftUndoneAt = left.undoneAt ?? "";
+        const rightUndoneAt = right.undoneAt ?? "";
+        const timestampDifference = rightUndoneAt.localeCompare(leftUndoneAt);
+        if (timestampDifference !== 0) return timestampDifference;
+        return (
+          (right.undoneSequence ?? -1) - (left.undoneSequence ?? -1)
+        );
+      })[0];
+    if (!operation) return undefined;
+    return {
+      id: operation.id,
+      kind: operation.kind,
+      createdAt: operation.createdAt,
+    };
   }
 
   /**
@@ -2411,6 +2559,25 @@ export class TaskService {
       else delete target[field];
     });
 
+    const changedEntries = Object.entries(patch).filter(([, value]) => value !== undefined);
+    if (changedEntries.length > 0 && changedEntries.every(([field]) => PRIVATE_PLANNING_FIELDS.has(field))) {
+      // A local plan must not revalidate, trim or normalize provider-owned
+      // content. Older sync versions could persist incomplete public fields;
+      // that does not authorize renaming them or blocking private scheduling.
+      // Validate only the reviewed write set, leaving the rest byte-for-byte.
+      for (const [field, value] of changedEntries) {
+        if (value === null) continue; // Required fields were checked above.
+        if (field === 'plannedDate') {
+          if (typeof value !== 'string') throw new TaskValidationError('plannedDate must be a local date.');
+          assertLocalDate(value, 'plannedDate');
+        } else if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+          throw new TaskValidationError(`${field} must be a non-negative number.`);
+        }
+      }
+      task.updatedAt = now;
+      return task;
+    }
+
     // Unless the caller deliberately supplies the companion flag (the
     // desktop's visible 全天 switch and the Feishu adapter both do), editing or
     // clearing a timestamp converts that slot to a timed task. This prevents a
@@ -2484,8 +2651,46 @@ export class TaskService {
         !deepEqual(
           (before as unknown as Record<string, unknown>)[field],
           (after as unknown as Record<string, unknown>)[field],
-        ),
+      ),
     );
+  }
+
+  private matchesRedoBaseline(
+    current: Task | undefined,
+    before: Task | null,
+    after: Task | null,
+  ): boolean {
+    if (before === null) {
+      if (current === undefined) return true;
+      // Undoing a Feishu create leaves a recoverable tombstone so the remote
+      // delete can finish. Treat that tombstone as the expected pre-redo
+      // state, but still compare every meaningful task field.
+      return (
+        after?.source.type === "feishu" &&
+        current.deletedAt !== undefined &&
+        this.equalTaskExcept(current, after, ["deletedAt", "updatedAt", "sync"])
+      );
+    }
+    if (current === undefined) return false;
+    const ignoredFields = ["updatedAt"];
+    if (this.undoRequiresFeishuSync(before, after)) {
+      ignoredFields.push("sync");
+    }
+    return this.equalTaskExcept(current, before, ignoredFields);
+  }
+
+  private equalTaskExcept(
+    left: Task,
+    right: Task,
+    ignoredFields: readonly string[],
+  ): boolean {
+    const leftRecord = deepClone(left) as unknown as Record<string, unknown>;
+    const rightRecord = deepClone(right) as unknown as Record<string, unknown>;
+    ignoredFields.forEach((field) => {
+      delete leftRecord[field];
+      delete rightRecord[field];
+    });
+    return deepEqual(leftRecord, rightRecord);
   }
 
   private finishFocusPatch(task: Task, endedAt: string): UpdateTaskInput {
@@ -2690,6 +2895,16 @@ export class TaskService {
     if (state.operations.some((operation) => operation.id === id)) {
       throw new TaskStateError(`Generated duplicate operation id: ${id}`);
     }
+    // A new mutation starts a new history branch. Keep undo history intact,
+    // but prevent an older undone branch from being replayed over newer work.
+    state.operations.forEach((operation) => {
+      if (
+        operation.undoneAt !== undefined &&
+        operation.redoInvalidatedAt === undefined
+      ) {
+        operation.redoInvalidatedAt = createdAt;
+      }
+    });
     const operation: TaskOperation = {
       id,
       kind,

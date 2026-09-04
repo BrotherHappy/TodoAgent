@@ -25,6 +25,7 @@ import {
   parseReminderActionInput,
 } from "./services/reminder-action-input";
 import { rendererUrlIsTrusted } from "./trusted-renderer";
+import { todayPlanRequestSchema } from "../src/shared/today-plan-contract";
 
 const idSchema = z.string().trim().min(1).max(512);
 const routeSchema = z.string().trim().min(1).max(80).optional();
@@ -208,6 +209,7 @@ const settingsSchema = z
       .strict(),
     ai: z
       .object({
+        protocol: z.enum(['openai-compatible', 'ollama']).optional(),
         enabled: z.boolean(),
         endpoint: z.string().trim().url().max(2_048),
         model: z.string().trim().max(240),
@@ -217,6 +219,7 @@ const settingsSchema = z
         routing: z.enum(["primary-only", "fallback-on-error", "local-only"]).default("primary-only"),
         fallback: z
           .object({
+            protocol: z.enum(['openai-compatible', 'ollama']).optional(),
             enabled: z.boolean(),
             endpoint: z.string().trim().url().max(2_048),
             model: z.string().trim().max(240),
@@ -530,45 +533,7 @@ export function registerDesktopIpc(
     ),
   );
   handle(DESKTOP_CHANNELS.taskApplyTodayPlan, (_event, input) => {
-    const request = z
-      .object({
-        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
-        items: z
-          .array(
-            z
-              .object({
-                id: idSchema,
-                estimatedMinutes: z.number().int().min(5).max(720).optional(),
-              })
-              .strict(),
-          )
-          .max(500),
-        clearTaskIds: z.array(idSchema).max(500),
-        baselines: z
-          .array(
-            z
-              .object({
-                id: idSchema,
-                plannedDate: z
-                  .string()
-                  .regex(/^\d{4}-\d{2}-\d{2}$/u)
-                  .optional(),
-                privateOrder: z.number().finite(),
-                estimatedMinutes: z.number().finite().nonnegative().optional(),
-              })
-              .strict(),
-          )
-          .max(500),
-      })
-      .strict()
-      .refine(
-        (value) => value.items.length + value.clearTaskIds.length <= 500,
-        {
-          message: "Today plan cannot change more than 500 tasks at once.",
-          path: ["items"],
-        },
-      )
-      .parse(input);
+    const request = todayPlanRequestSchema.parse(input);
     return changed(() => dependencies.tasks.applyTodayPlan(request));
   });
   handle(DESKTOP_CHANNELS.taskApplyBulkAction, (_event, input) => {
@@ -686,9 +651,22 @@ export function registerDesktopIpc(
       .parse(input);
     return dependencies.tasks.getTaskHistory(request.id, request.limit);
   });
+  handle(DESKTOP_CHANNELS.taskLatestUndoableOperation, () =>
+    dependencies.tasks.getLatestUndoableOperation(),
+  );
+  handle(DESKTOP_CHANNELS.taskLatestRedoableOperation, () =>
+    dependencies.tasks.getLatestRedoableOperation(),
+  );
   handle(DESKTOP_CHANNELS.taskUndo, (_event, input) =>
     changed(() =>
       dependencies.tasks.undo(
+        input === undefined ? undefined : idSchema.parse(input),
+      ),
+    ),
+  );
+  handle(DESKTOP_CHANNELS.taskRedo, (_event, input) =>
+    changed(() =>
+      dependencies.tasks.redo(
         input === undefined ? undefined : idSchema.parse(input),
       ),
     ),
@@ -925,11 +903,12 @@ export function registerDesktopIpc(
         runId: z.string().uuid().optional(),
         conversationId: z.string().uuid().optional(),
         message: z.string().trim().min(1).max(50_000),
-        history: z.array(agentMessageSchema).max(50).optional(),
+        history: z.array(agentMessageSchema).max(100).optional(),
+        contextTokens: z.array(z.string().uuid()).max(3).optional(),
       })
       .strict()
       .parse(input);
-    return dependencies.agent.send(request);
+    return dependencies.agent.send(request.contextTokens?.length ? { ...request, contextOwnerId: _event.sender.id } : request);
   });
   handle(DESKTOP_CHANNELS.agentMorningBrief, (_event, input) => {
     const request = z

@@ -1,28 +1,28 @@
 import type { PetAction } from "./pet-behavior";
 import atlasUrl from "../assets/todo-pet-action-atlas-v2.png";
-import motionAtlasPage00 from "../assets/todo-pet-motion-atlas-v24-00.png";
-import motionAtlasPage01 from "../assets/todo-pet-motion-atlas-v24-01.png";
-import motionAtlasPage02 from "../assets/todo-pet-motion-atlas-v24-02.png";
-import motionAtlasPage03 from "../assets/todo-pet-motion-atlas-v24-03.png";
-import motionAtlasPage04 from "../assets/todo-pet-motion-atlas-v24-04.png";
-import motionAtlasPage05 from "../assets/todo-pet-motion-atlas-v24-05.png";
-import motionAtlasPage06 from "../assets/todo-pet-motion-atlas-v24-06.png";
-import motionAtlasPage07 from "../assets/todo-pet-motion-atlas-v24-07.png";
-import motionAtlasPage08 from "../assets/todo-pet-motion-atlas-v24-08.png";
-import motionAtlasPage09 from "../assets/todo-pet-motion-atlas-v24-09.png";
-import interactionAtlasPage00 from "../assets/todo-pet-interaction-atlas-v22-00.png";
-import interactionAtlasPage01 from "../assets/todo-pet-interaction-atlas-v22-01.png";
-import interactionAtlasPage02 from "../assets/todo-pet-interaction-atlas-v22-02.png";
-import interactionAtlasPage03 from "../assets/todo-pet-interaction-atlas-v22-03.png";
-import interactionAtlasPage04 from "../assets/todo-pet-interaction-atlas-v22-04.png";
-import interactionAtlasPage05 from "../assets/todo-pet-interaction-atlas-v22-05.png";
-import interactionAtlasPage06 from "../assets/todo-pet-interaction-atlas-v22-06.png";
-import interactionAtlasPage07 from "../assets/todo-pet-interaction-atlas-v22-07.png";
-import interactionAtlasPage08 from "../assets/todo-pet-interaction-atlas-v22-08.png";
-import interactionAtlasPage09 from "../assets/todo-pet-interaction-atlas-v22-09.png";
-import interactionAtlasPage10 from "../assets/todo-pet-interaction-atlas-v22-10.png";
-import interactionAtlasPage11 from "../assets/todo-pet-interaction-atlas-v22-11.png";
-import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v22-12.png";
+import motionAtlasPage00 from "../assets/todo-pet-motion-atlas-v25-00.png";
+import motionAtlasPage01 from "../assets/todo-pet-motion-atlas-v25-01.png";
+import motionAtlasPage02 from "../assets/todo-pet-motion-atlas-v25-02.png";
+import motionAtlasPage03 from "../assets/todo-pet-motion-atlas-v25-03.png";
+import motionAtlasPage04 from "../assets/todo-pet-motion-atlas-v25-04.png";
+import motionAtlasPage05 from "../assets/todo-pet-motion-atlas-v25-05.png";
+import motionAtlasPage06 from "../assets/todo-pet-motion-atlas-v25-06.png";
+import motionAtlasPage07 from "../assets/todo-pet-motion-atlas-v25-07.png";
+import motionAtlasPage08 from "../assets/todo-pet-motion-atlas-v25-08.png";
+import motionAtlasPage09 from "../assets/todo-pet-motion-atlas-v25-09.png";
+import interactionAtlasPage00 from "../assets/todo-pet-interaction-atlas-v23-00.png";
+import interactionAtlasPage01 from "../assets/todo-pet-interaction-atlas-v23-01.png";
+import interactionAtlasPage02 from "../assets/todo-pet-interaction-atlas-v23-02.png";
+import interactionAtlasPage03 from "../assets/todo-pet-interaction-atlas-v23-03.png";
+import interactionAtlasPage04 from "../assets/todo-pet-interaction-atlas-v23-04.png";
+import interactionAtlasPage05 from "../assets/todo-pet-interaction-atlas-v23-05.png";
+import interactionAtlasPage06 from "../assets/todo-pet-interaction-atlas-v23-06.png";
+import interactionAtlasPage07 from "../assets/todo-pet-interaction-atlas-v23-07.png";
+import interactionAtlasPage08 from "../assets/todo-pet-interaction-atlas-v23-08.png";
+import interactionAtlasPage09 from "../assets/todo-pet-interaction-atlas-v23-09.png";
+import interactionAtlasPage10 from "../assets/todo-pet-interaction-atlas-v23-10.png";
+import interactionAtlasPage11 from "../assets/todo-pet-interaction-atlas-v23-11.png";
+import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v23-12.png";
 
 /**
  * The generated atlases are deterministic visual layers. The legacy sheet
@@ -31,13 +31,14 @@ import interactionAtlasPage12 from "../assets/todo-pet-interaction-atlas-v22-12.
  * square 16×16-cell GPU pages. The previous v21/v19 files were only 2,048px
  * wide; their 18,944/25,088px height still exceeded WebKit's common
  * 16,384px texture limit and could make the compositor tear while sampling a
- * new cell. Every v24/v22 page is 2,048×2,048px (the final page is padded
+ * new cell. Every v25/v23 page is 2,048×2,048px (the final page is padded
  * transparent), so no hidden driver tiling is needed. Cells are authored at
- * 128px and retain the authored high-density timing from the v24/v22 source
- * strips. Runtime pages use crisp, anchor-stabilised in-betweens for compact
- * body poses and coherent single-source prop hand-offs. Each dense cell
- * contains one complete pet, never a coloured edge or double silhouette from
- * a raster cross-fade.
+ * 128px and retain the authored high-density timing from the v25/v23 source
+ * strips. Runtime pages use anchor-stabilised signed-distance in-betweens only
+ * for the checked compact-pose rows; large pose changes and detached props
+ * use one complete source pose along an anchor path. Each dense cell contains
+ * one complete pet, never a coloured edge or double silhouette from a raster
+ * cross-fade.
  */
 export const TODO_PET_ATLAS_URL = atlasUrl;
 export const TODO_PET_MOTION_ATLAS_URLS = [
@@ -203,7 +204,7 @@ const singleFrameAnimation = (
 });
 
 /**
- * The v24/v22 sheets are packed from the high-frame source strips and include
+ * The v25/v23 sheets are packed from the high-frame source strips and include
  * offline in-between cells. Keeping the mapping in data (rather than CSS
  * selectors) means every PetCharacter gets the same timing and a state change
  * always restarts at the entrance frame.
@@ -337,22 +338,28 @@ const sequence = (
   name,
 });
 
-// The source strips contain complete, authored frames rather than separated
-// limbs. Fast loops use an 8ms target so a 120Hz panel can present one clean
-// cell on every refresh (60Hz still caps at one cell per refresh); the
-// renderer always chooses a complete cell and never blends two moving pets.
-// This is intentionally faster than the old 16ms cadence, which made a
-// high-refresh display repeat every other frame and read as low-FPS motion.
-const fastFrameMs = 8;
+// The generated strips contain 63 dense in-betweens between each authored
+// pose. Their duration must be calibrated to the *whole action*, not treated
+// as if each cell were an authored keyframe. An 8ms cell made a wave/bounce
+// last several seconds and looked like a low-FPS flipbook even though the
+// sheet was dense. A 2ms cell keeps a normal 2–2.5s idle/wave cycle; the
+// renderer advances the fractional playhead according to the display refresh
+// and still presents one complete cell per commit.
+const fastFrameMs = 2;
 const idleLoop = motion("idle-breathe-blink", 0, fastFrameMs);
 const waveLoop = motion("wave", 1, fastFrameMs);
 const workLoop = motion("focus-work", 2, fastFrameMs);
 // The fourth motion row includes a floating beat (3→5), a celebration beat
 // (6→7), and a seated rest pose. Keep those as separate coherent loops.
 const floatLoop = sequence("motion", "float", motionRange(3, 3, 5), fastFrameMs);
-// A celebration is a complete beat (crouch → hop → arms-up → landing), not
-// just the two star-pose cells that used to make it look like a teleport.
-const celebrateLoop = sequence("motion", "celebrate", motionRange(3, 3, 8), fastFrameMs);
+// The old 3→8 slice crossed sleep, sit and landing poses in one loop. That
+// made celebration look like a hard-cut flipbook even with a dense atlas.
+// The 6→7 slice is the authored arms-up → sparkle beat and keeps celebration
+// semantically continuous; v25 also morphs the row contour instead of
+// switching the complete body at the midpoint.
+// Celebration is a short one-beat flourish, so keep its authored ~1s pace
+// instead of using the longer idle/wave cadence.
+const celebrateLoop = sequence("motion", "celebrate", motionRange(3, 6, 7), 8);
 const restLoop = sequence("motion", "sit", motionRange(3, 8, 9), 34);
 // Head-pat uses the approach → contact transition; ping-pong supplies the
 // natural hand-away return without replaying unrelated idle key poses.
@@ -370,7 +377,12 @@ const ropeReadyLoop = sequence(
   fastFrameMs,
   false,
 );
-const ropeLoop = sequence("interaction", "jump-rope", interactionRange(1, 3, 8), fastFrameMs);
+// The crouched source pose is the explicit “ready” state. Starting the live
+// loop at the airborne pose removes a 256ms hold on the crouch that read as a
+// frozen frame after the first click; the ready state still shows that pose
+// before the game begins. The live loop then covers the coherent airborne
+// beats and completes in roughly one second.
+const ropeLoop = sequence("interaction", "jump-rope", interactionRange(1, 4, 8), fastFrameMs);
 const carryLoop = interaction("task-carry", 2, fastFrameMs);
 const sleepLoop = sequence(
   "interaction",

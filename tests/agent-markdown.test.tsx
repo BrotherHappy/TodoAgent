@@ -114,7 +114,10 @@ describe("AgentMarkdown", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "从 Agent 回复提取行动项" }));
-    expect(onExtractActionItems).toHaveBeenCalledWith("## 行动项\n\n- 验证来源");
+    expect(onExtractActionItems).toHaveBeenCalledWith(
+      "## 行动项\n\n- 验证来源",
+      expect.any(HTMLElement),
+    );
   });
 
   it("only asks the parent to open a confirmed research-card draft", () => {
@@ -127,7 +130,10 @@ describe("AgentMarkdown", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "保存到当前任务研究卡" }));
-    expect(onSaveResearchCard).toHaveBeenCalledWith("## 研究结论\n\n- 保留来源");
+    expect(onSaveResearchCard).toHaveBeenCalledWith(
+      "## 研究结论\n\n- 保留来源",
+      expect.any(HTMLElement),
+    );
   });
 
   it("does not save or speak a partial streaming reply", () => {

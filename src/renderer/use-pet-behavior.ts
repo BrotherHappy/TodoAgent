@@ -26,6 +26,8 @@ interface TransientPetBehavior {
 
 export interface PetBehaviorController {
   action: PetAction;
+  /** Repeated touches restart the gesture without remounting the pet model. */
+  actionKey: string;
   emotion: PetEmotion;
   actionLabel: string;
   message?: string;
@@ -256,6 +258,7 @@ export function usePetBehavior(
     : emotionForPetAction(action);
   return {
     action,
+    actionKey: transientWins && transient ? `${action}:${transient.token}` : `${action}:system`,
     emotion,
     actionLabel: petActionLabels[action],
     message: transient?.action === action ? transient.message : undefined,

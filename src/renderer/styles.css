@@ -325,6 +325,25 @@ select {
   background: var(--app-brand-soft);
 }
 
+.titlebar-shortcuts {
+  min-width: 38px;
+  min-height: 38px;
+  gap: 3px;
+  padding: 7px 6px;
+  color: var(--app-text-soft);
+}
+.titlebar-shortcuts > span {
+  color: var(--app-brand-strong);
+  font-family: var(--app-font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1;
+}
+.titlebar-shortcuts:hover,
+.titlebar-shortcuts:focus-visible {
+  color: var(--app-brand-strong);
+}
+
 .icon-button,
 .soft-button,
 .primary-button,
@@ -416,6 +435,13 @@ select {
   grid-template-columns: 194px minmax(360px, 1fr) 328px;
 }
 
+/* Wide desktop can temporarily give the task list the inspector's space. The
+ * selected task stays in memory, so reopening the panel returns to the same
+ * editing context without changing navigation or losing a draft. */
+.shell-grid[data-inspector-collapsed="true"] {
+  grid-template-columns: 194px minmax(360px, 1fr);
+}
+
 .route-workspace {
   min-width: 0;
   min-height: 0;
@@ -430,6 +456,16 @@ select {
 
 .route-workspace > * {
   width: 100%;
+}
+
+.route-loading {
+  min-width: 0;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  color: var(--app-text-soft);
+  background: color-mix(in srgb, var(--app-glass-strong) 36%, transparent);
 }
 
 .sidebar {
@@ -966,6 +1002,125 @@ select {
   color: var(--app-text-faint);
   font-size: 11px;
 }
+
+.task-keyboard-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: -7px 0 12px;
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.task-keyboard-hint svg {
+  color: var(--app-brand-strong);
+}
+.task-keyboard-hint kbd {
+  min-width: 16px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 5px;
+  padding: 1px 4px;
+  color: var(--app-text-soft);
+  background: var(--app-surface);
+  font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+}
+
+.inline-task-composer {
+  display: none;
+  align-items: center;
+  gap: 9px;
+  margin: -4px 0 16px;
+  border: 1px dashed color-mix(in srgb, var(--app-brand) 32%, var(--app-line));
+  border-radius: 15px;
+  padding: 7px 9px;
+  background: color-mix(in srgb, var(--app-brand-soft) 28%, var(--app-glass-soft));
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.inline-task-composer:focus-within {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--app-brand) 56%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 42%, var(--app-glass-soft));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--app-brand) 10%, transparent);
+}
+
+.inline-task-composer-after {
+  margin: 2px 10px 8px 47px;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--app-brand) 42%, var(--app-line));
+  background: color-mix(in srgb, var(--app-brand-soft) 36%, var(--app-glass-soft));
+}
+
+.inline-task-composer-cancel {
+  min-width: 31px;
+  min-height: 31px;
+  padding: 5px;
+  color: var(--app-text-faint);
+}
+
+.inline-task-composer-cancel:hover,
+.inline-task-composer-cancel:focus-visible {
+  color: var(--app-brand-strong);
+}
+
+.inline-task-composer-icon {
+  display: grid;
+  flex: 0 0 28px;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+
+.inline-task-composer-field {
+  min-width: 0;
+  flex: 1;
+}
+
+.inline-task-composer-field input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  color: var(--app-text);
+  background: transparent;
+  font: inherit;
+}
+
+.inline-task-composer-field input::placeholder {
+  color: var(--app-text-faint);
+}
+
+.inline-task-composer-field input:disabled {
+  opacity: 0.7;
+}
+
+.inline-task-composer-hint {
+  display: block;
+  overflow: hidden;
+  color: var(--app-text-faint);
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-task-composer-submit {
+  flex: 0 0 auto;
+  min-height: 31px;
+  padding: 5px 10px;
+}
+
+@media (min-width: 761px) {
+  .inline-task-composer {
+    display: flex;
+  }
+}
+
 .smart-view-save {
   display: grid;
   gap: 6px;
@@ -1962,6 +2117,25 @@ select {
 .bulk-preview small {
   color: var(--app-text-soft);
   font-size: 12px;
+}
+.bulk-toolbar-keyboard-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--app-text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.bulk-toolbar-keyboard-hint kbd {
+  min-width: 16px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 5px;
+  padding: 1px 4px;
+  color: var(--app-text-soft);
+  background: var(--app-surface);
+  font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
 }
 .bulk-action-buttons {
   padding-top: 1px;
@@ -4091,8 +4265,75 @@ select {
   gap: 8px;
   margin-bottom: 18px;
 }
-.inspector-header .icon-button {
+.inspector-header-actions {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.inspector-header-actions .icon-button {
+  margin-left: 0;
+}
+.inspector-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: max-content;
+  color: var(--app-text-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.inspector-save-state.is-saving {
+  color: var(--app-brand-strong);
+}
+.inspector-save-state.is-dirty {
+  color: var(--app-warning, #b7791f);
+}
+.inspector-save-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.inspector-save-state.is-saving .inspector-save-dot {
+  animation: inspector-save-pulse 1.2s ease-in-out infinite;
+}
+@keyframes inspector-save-pulse {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.inspector-reopen-tab {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  right: 0;
+  width: 36px;
+  min-height: 76px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--app-line-strong);
+  border-right: 0;
+  border-radius: 14px 0 0 14px;
+  color: var(--app-brand-strong);
+  background: var(--app-glass-strong);
+  box-shadow: var(--app-shadow-soft);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+.inspector-reopen-tab:hover {
+  background: var(--app-brand-soft);
+}
+.inspector-reopen-tab:active {
+  transform: translateY(-50%) translateX(1px);
 }
 .inspector-menu {
   position: absolute;
@@ -6444,26 +6685,21 @@ button.dependency-graph-node:focus-visible {
 .pet-atlas-buffer-stack > .pet-atlas-canvas {
   position: absolute;
   inset: 0;
-  opacity: 0;
-  transition: none !important;
-  /* Both buffers are small, stable compositor layers. Explicitly promoting
-     opacity (instead of an unused transform layer) keeps the buffer flip on
-     one vsync commit and avoids a half-painted canvas under load. */
-  will-change: opacity;
-}
-.pet-atlas-buffer-stack[data-active-buffer="0"] > .pet-atlas-buffer-0,
-.pet-atlas-buffer-stack[data-active-buffer="1"] > .pet-atlas-buffer-1 {
   opacity: 1;
+  transition: none !important;
+  /* A single canvas is intentionally kept on one compositor surface. The
+     frame is replaced with `copy` inside rAF; there is no pair of opacity
+     layers that can commit on different vsyncs and expose a torn silhouette. */
+  will-change: auto;
 }
 .pet-atlas-motion {
   display: block;
   width: 100%;
   height: 100%;
   transform-origin: center bottom;
-  /* The atlas is a complete-pose surface. It is swapped through opacity,
-     never moved with a CSS transform; advertising a transform layer here
-     makes Chromium promote each buffer twice and can let the two layers land
-     on different compositor commits. */
+  /* The atlas is a complete-pose surface. It is never moved with a CSS
+     transform; keeping the element on the normal compositor path avoids a
+     second transform timeline competing with the Canvas frame clock. */
   will-change: auto;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
@@ -6475,10 +6711,9 @@ button.dependency-graph-node:focus-visible {
   user-select: none;
   pointer-events: none;
   image-rendering: auto;
-  /* Keep the promotion aligned with the buffer flip above. A transform hint
-     on this element is unused and was a source of one-vsync stale frames on
-     transparent always-on-top windows. */
-  will-change: opacity;
+  /* Do not promote a second opacity layer: the canvas is the sole visible
+     surface and each draw is committed as one complete frame. */
+  will-change: auto;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   contain: paint;
@@ -11825,6 +12060,173 @@ button.dependency-graph-node:focus-visible {
   gap: 3px;
 }
 
+.keyboard-shortcuts-backdrop {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 7vh, 72px) 20px 20px;
+  background: color-mix(in srgb, var(--app-canvas) 44%, transparent);
+  backdrop-filter: blur(12px) saturate(1.05);
+  z-index: 44;
+}
+.keyboard-shortcuts-sheet {
+  width: min(700px, 100%);
+  max-height: min(760px, calc(100vh - 38px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--app-brand) 30%, var(--app-line-strong));
+  border-radius: 26px;
+  background: var(--app-glass-strong);
+  box-shadow: 0 26px 80px color-mix(in srgb, #1d1a4d 28%, transparent), var(--app-shadow);
+  animation: daily-plan-arrive 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.keyboard-shortcuts-header {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 18px;
+  border-bottom: 1px solid var(--app-line);
+}
+.keyboard-shortcuts-header .feature-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 15px;
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+  box-shadow: none;
+}
+.keyboard-shortcuts-header h2 {
+  margin: 2px 0 0;
+  font-size: 17px;
+}
+.keyboard-shortcuts-header p {
+  margin-top: 5px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.keyboard-shortcuts-search {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 14px 18px 8px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 14px;
+  padding: 0 11px;
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 36%, var(--app-surface-raised));
+}
+.keyboard-shortcuts-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--app-text);
+  background: transparent;
+  font: inherit;
+}
+.keyboard-shortcuts-search input::placeholder {
+  color: var(--app-text-faint);
+}
+.keyboard-shortcuts-search kbd,
+.keyboard-shortcuts-row kbd {
+  border: 1px solid var(--app-line);
+  border-radius: 7px;
+  padding: 4px 8px;
+  color: var(--app-text-soft);
+  background: var(--app-glass-soft);
+  font-family: var(--app-font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.keyboard-shortcuts-summary {
+  padding: 0 19px 9px;
+  color: var(--app-text-faint);
+  font-size: 11px;
+}
+.keyboard-shortcuts-groups {
+  display: grid;
+  gap: 18px;
+  overflow: auto;
+  padding: 0 18px 18px;
+}
+.keyboard-shortcuts-group {
+  display: grid;
+  gap: 7px;
+}
+.keyboard-shortcuts-group h3 {
+  padding: 0 2px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.keyboard-shortcuts-list {
+  display: grid;
+  gap: 6px;
+}
+.keyboard-shortcuts-row {
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+  padding: 8px 11px 8px 12px;
+  background: color-mix(in srgb, var(--app-surface-raised) 58%, transparent);
+}
+.keyboard-shortcuts-row > div {
+  min-width: 0;
+}
+.keyboard-shortcuts-row strong,
+.keyboard-shortcuts-row small {
+  display: block;
+}
+.keyboard-shortcuts-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.keyboard-shortcuts-row small {
+  margin-top: 3px;
+  color: var(--app-text-soft);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.keyboard-shortcuts-row kbd {
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 58%, var(--app-glass-soft));
+}
+.keyboard-shortcuts-empty {
+  min-height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--app-text-soft);
+  font-size: 12px;
+}
+.keyboard-shortcuts-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--app-line);
+  color: var(--app-text-faint);
+  font-size: 10px;
+}
+.keyboard-shortcuts-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .global-search-backdrop {
   position: absolute;
   inset: 0;
@@ -12180,6 +12582,13 @@ button.dependency-graph-node:focus-visible {
   border-color: color-mix(in srgb, var(--app-brand) 40%, var(--app-line));
   background: var(--app-brand-soft);
 }
+.global-search-saved-open.is-keyboard-active,
+.global-search-recent-chip.is-keyboard-active {
+  border-color: color-mix(in srgb, var(--app-brand) 42%, var(--app-line));
+  color: var(--app-brand-strong);
+  background: color-mix(in srgb, var(--app-brand-soft) 82%, var(--app-surface-raised));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-brand) 10%, transparent);
+}
 .global-search-saved-open > span {
   min-width: 0;
   display: grid;
@@ -12491,6 +12900,7 @@ button.dependency-graph-node:focus-visible {
 }
 
 .daily-plan-header {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 46px minmax(0, 1fr) auto;
   align-items: start;
@@ -12555,6 +12965,13 @@ button.dependency-graph-node:focus-visible {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.daily-plan-editor > * {
+  flex-shrink: 0;
 }
 
 .daily-plan-editor[inert] {
@@ -12850,9 +13267,9 @@ button.dependency-graph-node:focus-visible {
 }
 
 .daily-plan-body {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   padding: 0 20px 4px;
 }
 
@@ -13132,14 +13549,48 @@ button.dependency-graph-node:focus-visible {
 }
 
 .daily-plan-inline-error {
+  flex: 0 0 auto;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 7px;
   margin: 0 20px 10px;
   border-radius: 12px;
   padding: 9px 11px;
   color: var(--app-danger);
   background: var(--app-danger-soft);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.daily-plan-inline-error > svg,
+.daily-plan-data-warning > svg {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
+.daily-plan-inline-error > span {
+  flex: 1 1 230px;
+  min-width: 0;
+}
+
+.daily-plan-inline-error > button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.daily-plan-data-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: var(--app-warning);
+  background: var(--app-warning-soft);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .daily-plan-state {
@@ -14341,6 +14792,9 @@ button.dependency-graph-node:focus-visible {
     overflow: visible;
     padding: 18px 14px;
   }
+  .task-keyboard-hint {
+    display: none;
+  }
   .project-page {
     padding: 18px 14px 26px;
   }
@@ -14536,7 +14990,17 @@ button.dependency-graph-node:focus-visible {
   .app-titlebar {
     padding: 8px 10px;
   }
-  .app-brand span {
+  .app-brand > span:not(.brand-mark) {
+    display: none;
+  }
+  .app-brand .brand-mark {
+    display: inline-grid;
+  }
+  .title-search {
+    width: min(190px, 38vw);
+    min-width: 112px;
+  }
+  .app-titlebar > .status-pill.success {
     display: none;
   }
   .titlebar-spacer + .status-pill {
@@ -15435,6 +15899,10 @@ button.dependency-graph-node:focus-visible {
     box-shadow: var(--app-shadow-soft);
     background: var(--app-glass-strong);
   }
+  .inspector-reopen-tab,
+  .inspector-collapse {
+    display: none;
+  }
 .inspector-empty {
     display: none;
   }
@@ -15445,40 +15913,76 @@ button.dependency-graph-node:focus-visible {
 
 @media (max-width: 760px) {
   .shell-grid {
-    display: grid;
-    overflow: hidden;
-    grid-template-columns: 132px minmax(0, 1fr);
-  }
-  .sidebar {
     display: block;
     overflow: auto;
-    padding: 10px 7px;
-    border-right: 1px solid var(--app-line);
-    border-bottom: 0;
+  }
+  .sidebar {
+    display: flex;
+    gap: 5px;
+    overflow: auto hidden;
+    padding: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--app-line);
+    scrollbar-width: none;
+  }
+  .sidebar::-webkit-scrollbar {
+    display: none;
   }
   .sidebar-footer {
-    display: block;
+    display: contents;
   }
   .nav-section-label,
   .sidebar-footer::before {
-    display: block;
+    display: none;
   }
   .nav-button {
-    width: 100%;
-    min-width: 0;
+    width: auto;
+    min-width: max-content;
     padding-inline: 8px;
   }
   .nav-button .nav-count {
-    display: inline;
+    display: none;
   }
   .content-column {
-    overflow: auto;
+    overflow: visible;
     padding: 18px 14px;
   }
+  .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .page-actions {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
   .inspector {
-    width: min(340px, calc(100% - 150px));
+    width: min(340px, calc(100% - 28px));
     overflow: auto;
     padding: 17px 14px;
+  }
+}
+
+/* A true phone viewport has no room for a persistent split view. Promote the
+ * compact inspector to a full-width sheet only below the phone breakpoint. */
+@media (max-width: 520px) {
+  .inspector {
+    position: fixed;
+    z-index: 12;
+    top: 54px;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    overflow: auto;
+    padding: 17px 14px 28px;
+    border: 0;
+    border-top: 1px solid var(--app-line-strong);
+    border-radius: 20px 20px 0 0;
+    box-shadow: var(--app-shadow-soft);
+    background: var(--app-glass-strong);
   }
 }
 
@@ -16141,6 +16645,9 @@ button.dependency-graph-node:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .inspector-save-state.is-saving .inspector-save-dot {
+    animation: none;
+  }
   .docs-catalog-item,
   .docs-search,
   .docs-article {
@@ -16158,5 +16665,46 @@ button.dependency-graph-node:focus-visible {
     transform-origin: center bottom;
     animation: none !important;
     transform: none !important;
+  }
+}
+
+/* Desktop focus layout: Things-style sidebar collapse gives long task lists
+ * and the inspector the full working width without changing the mobile
+ * navigation strip. The state is persisted locally and remains reversible
+ * from the title bar or command palette. */
+.titlebar-sidebar-toggle[aria-pressed="true"] {
+  color: var(--app-brand-strong);
+  background: var(--app-brand-soft);
+}
+
+@media (min-width: 981px) {
+  .shell-grid[data-sidebar-collapsed="true"] {
+    grid-template-columns: 0 minmax(360px, 1fr) 328px;
+  }
+
+  .shell-grid[data-sidebar-collapsed="true"][data-inspector-collapsed="true"] {
+    grid-template-columns: 0 minmax(360px, 1fr);
+  }
+}
+
+@media (min-width: 761px) and (max-width: 980px) {
+  .shell-grid[data-sidebar-collapsed="true"] {
+    grid-template-columns: 0 minmax(340px, 1fr);
+  }
+}
+
+@media (min-width: 761px) {
+  .shell-grid[data-sidebar-collapsed="true"] > .sidebar {
+    visibility: hidden;
+    pointer-events: none;
+    overflow: hidden;
+    padding-inline: 0;
+    border-right-color: transparent;
+  }
+}
+
+@media (max-width: 760px) {
+  .titlebar-sidebar-toggle {
+    display: none;
   }
 }

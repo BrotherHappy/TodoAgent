@@ -1,5 +1,5 @@
 import { Check, Pencil, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type {
   BulkTaskEditPatch,
   BulkTaskTagEditMode,
@@ -7,6 +7,7 @@ import type {
   TaskPriority,
   TaskProject,
 } from "../shared/models";
+import { useDialogFocus } from "./dialog-focus";
 
 export interface BulkTaskEditSheetProps {
   count: number;
@@ -46,6 +47,8 @@ export function BulkTaskEditSheet({
   onClose,
   onConfirm,
 }: BulkTaskEditSheetProps) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const firstFieldRef = useRef<HTMLSelectElement>(null);
   const [priority, setPriority] = useState<"unchanged" | TaskPriority>("unchanged");
   const [flagged, setFlagged] = useState<"unchanged" | "on" | "off">("unchanged");
   const [project, setProject] = useState("unchanged");
@@ -54,6 +57,8 @@ export function BulkTaskEditSheet({
   const [tagText, setTagText] = useState("");
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+
+  useDialogFocus(dialogRef, firstFieldRef);
 
   const confirm = async (): Promise<void> => {
     if (saving) return;
@@ -97,11 +102,13 @@ export function BulkTaskEditSheet({
       }}
     >
       <section
+        ref={dialogRef}
         className="modal-sheet bulk-task-edit-sheet"
         role="dialog"
         aria-modal="true"
         aria-label="批量编辑任务"
         aria-busy={saving}
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon"><Pencil size={18} /></span>
@@ -123,6 +130,7 @@ export function BulkTaskEditSheet({
           <label>
             优先级
             <select
+              ref={firstFieldRef}
               className="field-input"
               aria-label="批量优先级"
               value={priority}

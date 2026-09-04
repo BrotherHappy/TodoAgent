@@ -73,6 +73,63 @@ describe("InboxTriageSheet", () => {
     expect(props.onUpdate).not.toHaveBeenCalled();
   });
 
+  it("only queues genuinely unscheduled tasks", () => {
+    renderSheet([
+      makeTask("有截止时间", { dueAt: "2026-08-31T17:00:00.000Z" }),
+      makeTask("有开始时间", { startAt: "2026-08-31T09:00:00.000Z" }),
+      makeTask("可以整理"),
+    ]);
+
+    expect(screen.getByRole("heading", { name: "可以整理" })).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "暂存整理进度" })).toHaveAttribute(
+      "aria-valuemax",
+      "1",
+    );
+    expect(screen.queryByRole("heading", { name: "有截止时间" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "有开始时间" })).toBeNull();
+  });
+
+  it("starts on the next decision and keeps keyboard focus inside the sheet", async () => {
+    renderSheet([makeTask("准备演示"), makeTask("回复消息")]);
+
+    const today = screen.getByRole("button", { name: /今天/u });
+    await waitFor(() => expect(today).toHaveFocus());
+
+    const close = screen.getByRole("button", { name: "关闭暂存整理" });
+    const postpone = screen.getByRole("button", { name: "稍后整理" });
+    postpone.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(close).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(postpone).toHaveFocus();
+  });
+
+  it("keeps focus on the dialog while an action is being saved", async () => {
+    let resolveUpdate!: (value: string) => void;
+    const onUpdate = vi.fn(
+      () => new Promise<string>((resolve) => {
+        resolveUpdate = resolve;
+      }),
+    );
+    render(
+      <InboxTriageSheet
+        tasks={[makeTask("保存中的任务")]}
+        onUpdate={onUpdate}
+        onComplete={vi.fn(async () => "operation-complete")}
+        onOpenTask={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const today = screen.getByRole("button", { name: /今天/u });
+    await userEvent.setup().click(today);
+    await waitFor(() => expect(today).toBeDisabled());
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    resolveUpdate("operation-plan");
+  });
+
   it("completes the current task and exposes a gentle close path", async () => {
     const user = userEvent.setup();
     const props = renderSheet([makeTask("清理桌面")]);

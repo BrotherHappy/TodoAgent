@@ -444,7 +444,14 @@ const blend = (
           + Math.abs(sampleA[1] - sampleB[1])
           + Math.abs(sampleA[2] - sampleB[2]);
         const bothVisible = alphaA > 0.02 && alphaB > 0.02;
-        const stableColour = bothVisible && colourDelta < 42;
+        // Only blend colour in the thin contour band where the two aligned
+        // silhouettes actually describe the same edge. Deep interior pixels
+        // include eyes, whiskers and belly marks; blending those features
+        // creates a second dark eyelid/stripe even when the outer contour is
+        // single. Interior details therefore choose one complete source
+        // sample, while the contour retains a soft antialiased hand-off.
+        const contourBand = Math.max(Math.abs(sdfA), Math.abs(sdfB)) < 2.25;
+        const stableColour = bothVisible && colourDelta < 42 && contourBand;
         // Pick the source whose aligned contour is deepest at this pixel. A
         // spatial winner is a single coherent silhouette; unlike an ordered
         // dither it never sprinkles one-pixel holes across the face.

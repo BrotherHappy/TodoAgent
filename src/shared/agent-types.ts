@@ -146,7 +146,8 @@ export interface ModelToolCall {
 }
 
 export type ModelMessage =
-  | { role: 'system' | 'developer' | 'user'; content: string }
+  | { role: 'system' | 'developer'; content: string }
+  | { role: 'user'; content: string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }> }
   | {
       role: 'assistant';
       content: string | null;

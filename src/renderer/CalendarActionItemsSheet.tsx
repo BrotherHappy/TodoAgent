@@ -1,7 +1,8 @@
 import { CalendarClock, Check, ListChecks, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CalendarEvent } from "../shared/calendar-events";
 import type { CalendarActionItemDraft } from "../shared/calendar-action-items";
+import { useDialogFocus } from "./dialog-focus";
 
 interface ActionItemRow extends CalendarActionItemDraft {
   selected: boolean;
@@ -32,6 +33,8 @@ export function CalendarActionItemsSheet({
   onClose,
   onConfirm,
 }: CalendarActionItemsSheetProps) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<ActionItemRow[]>(() =>
     drafts.map((draft) => ({ ...draft, selected: true })),
   );
@@ -41,6 +44,10 @@ export function CalendarActionItemsSheet({
     () => rows.filter((row) => row.selected && row.title.trim()).length,
     [rows],
   );
+
+  useDialogFocus(dialogRef, firstInputRef, () => {
+    if (!saving) onClose();
+  });
 
   useEffect(() => {
     setRows(drafts.map((draft) => ({ ...draft, selected: true })));
@@ -75,11 +82,13 @@ export function CalendarActionItemsSheet({
       }}
     >
       <section
+        ref={dialogRef}
         className="modal-sheet calendar-action-items-sheet"
         role="dialog"
         aria-modal="true"
         aria-label="会议行动项预览"
         aria-busy={saving}
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -127,6 +136,7 @@ export function CalendarActionItemsSheet({
                   <div className="calendar-action-item-content">
                     <label htmlFor={`calendar-action-item-${row.id}`}>行动项 {index + 1}</label>
                     <input
+                      ref={index === 0 ? firstInputRef : undefined}
                       id={`calendar-action-item-${row.id}`}
                       className="field-input"
                       value={row.title}

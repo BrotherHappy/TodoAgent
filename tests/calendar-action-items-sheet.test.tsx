@@ -71,4 +71,26 @@ describe("CalendarActionItemsSheet", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("本地存储不可用"));
     expect(within(screen.getByRole("dialog")).getByText("创建 2 项本地任务")).toBeVisible();
   });
+
+  it("focuses the first draft and closes from Escape without leaking focus", () => {
+    const onClose = vi.fn();
+    render(
+      <CalendarActionItemsSheet
+        event={event}
+        drafts={drafts}
+        onClose={onClose}
+        onConfirm={vi.fn(async () => undefined)}
+      />,
+    );
+
+    const firstInput = screen.getByLabelText("行动项 1");
+    const close = screen.getByRole("button", { name: "关闭会议行动项预览" });
+    const lastAction = screen.getByRole("button", { name: "创建 2 项本地任务" });
+    expect(firstInput).toHaveFocus();
+    lastAction.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

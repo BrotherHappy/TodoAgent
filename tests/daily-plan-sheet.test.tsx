@@ -446,6 +446,52 @@ describe("DailyPlanSheet", () => {
     ).toBeVisible();
   });
 
+  it('shows readable placeholders for incomplete imported titles without changing the reviewed task payload', async () => {
+    const user = userEvent.setup();
+    const task = makeTask('remote-empty', { title: '', source: { type: 'feishu' }, dueAt: '2026-08-19T12:00:00Z' });
+    const props = makeProps({ tasks: [task] });
+    render(<DailyPlanSheet {...props} />);
+    expect(await screen.findByRole('note')).toHaveTextContent('有 1 项任务暂缺标题');
+    expect(screen.getAllByText('待补全标题的飞书任务').length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: '安排 1 项到今天' }));
+    expect(props.onApply).toHaveBeenCalledWith(expect.objectContaining({ items: [{ id: task.id, estimatedMinutes: undefined }] }));
+    expect(task.title).toBe('');
+    expect(await screen.findByRole('heading', { name: '今天先守住这 1 件事' })).toBeVisible();
+  });
+
+  it('keeps the edited plan after rejection, explains the error in Chinese and offers a safe refresh', async () => {
+    const user = userEvent.setup();
+    const props = makeProps({ onApply: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'tasks:apply-today-plan': TaskValidationError: Task title cannot be empty.")) });
+    render(<DailyPlanSheet {...props} />);
+    await user.selectOptions(screen.getByLabelText(`${highCandidate.title}的预计时长`), '60');
+    await user.click(screen.getByRole('button', { name: '安排 4 项到今天' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('任务暂缺标题');
+    expect(alert).not.toHaveTextContent('Error invoking');
+    expect(alert).not.toHaveTextContent('tasks:apply-today-plan');
+    expect(screen.getByLabelText(`${highCandidate.title}的预计时长`)).toHaveValue('60');
+    expect(screen.getByRole('button', { name: '安排 4 项到今天' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '刷新并重新预览' }));
+    expect(props.onRetry).toHaveBeenCalledTimes(1);
+    expect(props.onApply).toHaveBeenCalledTimes(1);
+  });
+
+  it('submits once for same-tick double clicks and recovers from a failed refresh without an unhandled rejection', async () => {
+    let resolveApply!: (value: string) => void;
+    const props = makeProps({ onApply: vi.fn(() => new Promise<string>(resolve => { resolveApply = resolve; })) });
+    render(<DailyPlanSheet {...props} />);
+    const apply = await screen.findByRole('button', { name: '安排 4 项到今天' });
+    act(() => { apply.click(); apply.click(); });
+    expect(props.onApply).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveApply('once'); });
+    expect(await screen.findByRole('heading', { name: '今天先守住这 4 件事' })).toBeVisible();
+    cleanup();
+    render(<DailyPlanSheet {...makeProps({ error: '读取失败', onRetry: vi.fn().mockRejectedValue(new Error('ENOSPC')) })} />);
+    await userEvent.click(screen.getByRole('button', { name: '重试' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('磁盘空间不足');
+    expect(await screen.findByRole('button', { name: '重试' })).toBeEnabled();
+  });
+
   it("locks the editor while an atomic apply is pending", async () => {
     const user = userEvent.setup();
     let resolveApply: ((operationId: string) => void) | undefined;

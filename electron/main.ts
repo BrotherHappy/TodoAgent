@@ -46,6 +46,7 @@ import { TrayManager, type TrayStatus } from "./tray-manager";
 import { buildTrayTodaySummary } from "./tray-task-preview";
 import { WindowManager } from "./window-manager";
 import { AgentDesktopService } from "./agent/agent-desktop-service";
+import { AgentContextService } from './agent/agent-context-service';
 import { AgentActivityBridge } from "./agent/agent-activity-bridge";
 import { AuditLog } from "./agent/audit-log";
 import { createBuiltinTools } from "./agent/builtin-tools";
@@ -76,6 +77,9 @@ import { PetDataDesktopController } from "./services/pet-data-desktop-controller
 import { DesktopDataRepository } from "./services/desktop-data-repository";
 import { NodeDataDesktopFilePort } from "./services/node-data-desktop-file-port";
 import { PetService } from "./services/pet-service";
+import { DesktopBuddyService } from './services/desktopbuddy-service';
+import { registerBuddyAssetScheme, registerBuddyIpc } from './desktopbuddy-ipc';
+import { BUDDY_CHANNELS } from '../src/shared/desktopbuddy-contract';
 import { WeatherService } from "./services/weather-service";
 import { TaskAttachmentService } from "./services/task-attachment-service";
 import {
@@ -84,6 +88,7 @@ import {
   shouldEmitPetInputActivity,
 } from "./pet-input-activity";
 
+registerBuddyAssetScheme();
 const hasInstanceLock = app.requestSingleInstanceLock();
 if (!hasInstanceLock) app.quit();
 
@@ -91,6 +96,10 @@ let quitting = false;
 let windows: WindowManager | undefined;
 let tray: TrayManager | undefined;
 let unregisterIpc: (() => void) | undefined;
+let unregisterBuddyIpc: (() => void) | undefined;
+let buddyService: DesktopBuddyService | undefined;
+let agentContextService: AgentContextService | undefined;
+let unregisterAgentContext: (() => void) | undefined;
 let settingsService: SettingsService | undefined;
 let agentService: AgentDesktopService | undefined;
 let agentActivityBridge: AgentActivityBridge | undefined;
@@ -336,7 +345,9 @@ const captureSelectionBeforeQuickCapture = async (): Promise<void> => {
 };
 
 const showQuickCaptureWithSelection = (): void => {
-  void captureSelectionBeforeQuickCapture().finally(() => windows?.showQuick());
+  void captureSelectionBeforeQuickCapture()
+    .catch(() => undefined)
+    .finally(() => windows?.showQuick());
 };
 
 function minuteOfDay(value: string): number | undefined {
@@ -604,6 +615,12 @@ async function startApplication(): Promise<void> {
         };
   settingsService = new SettingsService(userDataPath, settingsEncryption);
   await settingsService.load();
+  buddyService = new DesktopBuddyService({
+    appPath: app.getAppPath(), userDataPath,
+    onChange: state => windows?.broadcast(BUDDY_CHANNELS.changed, state),
+    onInteraction: event => windows?.broadcast(BUDDY_CHANNELS.performed, event),
+  });
+  await buddyService.load();
   // Keep one settled task snapshot for deterministic local automation edges.
   // Rules are evaluated only after the settings file is loaded, so a malformed
   // older settings file cannot execute anything during startup.
@@ -674,7 +691,11 @@ async function startApplication(): Promise<void> {
   const preloadPath = path.join(__dirname, "preload.cjs");
   const rendererPath = path.join(app.getAppPath(), "dist", "index.html");
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  agentContextService = new AgentContextService({ rendererPath, preloadPath, devServerUrl, capabilities: () => settingsService!.get().agentCapabilities });
+  unregisterAgentContext = agentContextService.register();
+  unregisterBuddyIpc = registerBuddyIpc({ service: buddyService, rendererPath, devServerUrl, floating: () => windows?.floating });
   windows = new WindowManager({
+    buddy: () => buddyService!.preferences(),
     preloadPath,
     rendererPath,
     devServerUrl,
@@ -1008,6 +1029,8 @@ async function startApplication(): Promise<void> {
     auditLog,
     usageBudget: modelUsageBudget,
     getPetPersonality: () => petService?.snapshot().profile.personality,
+    getBuddyPreferences: () => buddyService!.preferences(),
+    consumeContexts: (tokens, owner) => agentContextService!.consume(tokens, owner),
     listMorningTasks: () => tasks.listTasks({ view: "today" }),
     getTaskForSyncReceipt: (id) => tasks.getTask(id, true),
     createToolRegistry: ({ sourcePolicy }) => {
@@ -1093,7 +1116,13 @@ async function startApplication(): Promise<void> {
           ...current,
           floating: { ...current.floating, enabled: visible },
         })
-        .then(broadcastSettings);
+        .then(broadcastSettings)
+        .catch((error: unknown) => {
+          console.error(
+            "Failed to update floating visibility from tray",
+            error instanceof Error ? error.message : error,
+          );
+        });
     },
     toggleMousePassthrough: (enabled) => {
       if (!settingsService) return;
@@ -1103,13 +1132,25 @@ async function startApplication(): Promise<void> {
           ...current,
           floating: { ...current.floating, mousePassthrough: enabled },
         })
-        .then(broadcastSettings);
+        .then(broadcastSettings)
+        .catch((error: unknown) => {
+          console.error(
+            "Failed to update mouse passthrough from tray",
+            error instanceof Error ? error.message : error,
+          );
+        });
     },
     toggleBossMode: (enabled) => {
       if (!settingsService) return;
       void settingsService
         .replace(withBossMode(settingsService.get(), enabled))
-        .then(broadcastSettings);
+        .then(broadcastSettings)
+        .catch((error: unknown) => {
+          console.error(
+            "Failed to update Boss Mode from tray",
+            error instanceof Error ? error.message : error,
+          );
+        });
     },
     setLaunchAtLogin: (enabled) => {
       if (!settingsService) return;
@@ -1117,7 +1158,13 @@ async function startApplication(): Promise<void> {
       applyLoginItemSetting(enabled);
       void settingsService
         .replace({ ...current, launchAtLogin: enabled })
-        .then(broadcastSettings);
+        .then(broadcastSettings)
+        .catch((error: unknown) => {
+          console.error(
+            "Failed to update launch-at-login from tray",
+            error instanceof Error ? error.message : error,
+          );
+        });
     },
     stopAgent: () => {
       agentService?.stop();
@@ -1856,11 +1903,13 @@ app.on("will-quit", () => {
   if (petInputActivityTimer) clearInterval(petInputActivityTimer);
   if (weatherRefreshTimer) clearInterval(weatherRefreshTimer);
   feishuMutationSync?.dispose();
-  void agentActivityBridge?.stop();
+  void agentActivityBridge?.stop().catch(() => undefined);
   feishuController?.stopPolling();
   void feishuController?.cancelOAuth().catch(() => undefined);
-  void notificationRuntime?.stop();
+  void notificationRuntime?.stop().catch(() => undefined);
   unregisterIpc?.();
+  unregisterBuddyIpc?.();
+  unregisterAgentContext?.();
   tray?.destroy();
 });
 app.on("activate", openTodoAgentHome);

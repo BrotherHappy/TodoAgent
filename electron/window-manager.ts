@@ -1,6 +1,8 @@
 import { BrowserWindow, screen, shell, type Rectangle } from "electron";
 import path from "node:path";
 import type { AppSettings } from "../src/shared/settings";
+import type { BuddyPreferences } from '../src/shared/desktopbuddy-contract';
+import { stepBuddyPhysics, stepBuddySpring, type BuddyPhysicsState } from './buddy-physics';
 
 export type WindowKind = "main" | "quick" | "floating";
 export type FloatingEdge = "left" | "right";
@@ -10,6 +12,7 @@ interface WindowManagerOptions {
   rendererPath: string;
   devServerUrl?: string;
   settings: () => AppSettings;
+  buddy?: () => BuddyPreferences;
   onFloatingPosition: (
     displayId: string,
     position: { x: number; y: number },
@@ -158,8 +161,12 @@ export class WindowManager {
     startedAt: number;
     lastMovementAt: number;
     hasMoved: boolean;
+    velocityX: number;
+    velocityY: number;
   };
   #floatingPointerDragTimer?: ReturnType<typeof setInterval>;
+  #floatingMotionTimer?: ReturnType<typeof setTimeout>;
+  #focusActive = false;
   #floatingEdgeDocked = false;
   #floatingEdgePeeked = false;
   #floatingEdge?: FloatingEdge;
@@ -364,7 +371,11 @@ export class WindowManager {
       if (this.#options.settings().floating.locked || !this.#floating) return;
       const bounds = this.#floating.getBounds();
       const displayForWindow = screen.getDisplayMatching(bounds);
-      const snapped = snapToWorkArea(bounds, displayForWindow.workArea);
+      // Buddy release owns spring docking. Snapping every native move would
+      // jump to the edge before the spring can interpolate its first frame.
+      const snapped = this.#options.buddy
+        ? clampWindowToWorkArea(bounds, displayForWindow.workArea)
+        : snapToWorkArea(bounds, displayForWindow.workArea);
       if (snapped.x !== bounds.x || snapped.y !== bounds.y)
         this.#floating.setBounds(snapped, false);
       // `will-move` fires only once at the start of a native drag. Debounce
@@ -374,6 +385,7 @@ export class WindowManager {
     });
     this.#floating.on("close", () => this.#flushFloatingPositionSave());
     this.#floating.on("closed", () => {
+      this.#cancelFloatingMotion();
       if (this.#floatingPositionSaveTimer) {
         clearTimeout(this.#floatingPositionSaveTimer);
         this.#floatingPositionSaveTimer = undefined;
@@ -399,6 +411,7 @@ export class WindowManager {
   syncFloatingSettings(): void {
     const settings = this.#options.settings().floating;
     if (!settings.enabled) {
+      this.#cancelFloatingMotion();
       this.#floating?.hide();
       return;
     }
@@ -415,6 +428,7 @@ export class WindowManager {
   }
 
   setFloatingExpanded(expanded: boolean): void {
+    this.#cancelFloatingMotion();
     this.#floatingExpanded = expanded;
     if (expanded) this.#floatingPetOnly = false;
     if (expanded && this.#floatingEdgeDocked) {
@@ -454,6 +468,7 @@ export class WindowManager {
   }
 
   setFloatingPetOnly(petOnly: boolean): void {
+    this.#cancelFloatingMotion();
     if (!petOnly && this.#floatingEdgeDocked) {
       this.setFloatingEdgeDocked(false, { preserveEdge: this.#floatingEdgePeeked });
     }
@@ -492,6 +507,7 @@ export class WindowManager {
     docked: boolean,
     options: { preserveEdge?: boolean } = {},
   ): boolean {
+    this.#cancelFloatingMotion();
     const window = this.createFloating();
     if (!docked && !this.#floatingEdgeDocked) return true;
     // Position locking protects the user's manual drag gesture.  It should
@@ -583,7 +599,8 @@ export class WindowManager {
       this.setFloatingEdgeDocked(false, { preserveEdge: this.#floatingEdgePeeked });
     }
     const window = this.createFloating();
-    this.endFloatingDrag();
+    this.#cancelFloatingMotion();
+    this.endFloatingDrag(false);
     const pointer =
       process.env.TODO_AGENT_E2E === "1"
         ? { x: screenX, y: screenY }
@@ -598,6 +615,8 @@ export class WindowManager {
       startedAt: now,
       lastMovementAt: now,
       hasMoved: false,
+      velocityX: 0,
+      velocityY: 0,
     };
     // Real transparent macOS windows can lose renderer pointer capture as
     // soon as the BrowserWindow begins moving. Poll the OS cursor in
@@ -648,6 +667,9 @@ export class WindowManager {
     });
     const next = clampWindowToWorkArea(candidate, display.workArea);
     if (screenX !== drag.lastScreenX || screenY !== drag.lastScreenY) {
+      const delta = Math.max(8, Date.now() - drag.lastMovementAt) / 1000;
+      drag.velocityX = .45 * drag.velocityX + .55 * Math.max(-1800, Math.min(1800, (screenX - drag.lastScreenX) / delta));
+      drag.velocityY = .45 * drag.velocityY + .55 * Math.max(-1800, Math.min(1800, (screenY - drag.lastScreenY) / delta));
       drag.lastScreenX = screenX;
       drag.lastScreenY = screenY;
       drag.lastMovementAt = Date.now();
@@ -657,17 +679,62 @@ export class WindowManager {
     return true;
   }
 
-  endFloatingDrag(): void {
+  endFloatingDrag(allowMotion = true): void {
     if (this.#floatingPointerDragTimer) {
       clearInterval(this.#floatingPointerDragTimer);
       this.#floatingPointerDragTimer = undefined;
     }
     if (!this.#floatingPointerDrag) return;
+    const drag = this.#floatingPointerDrag;
     this.#floatingPointerDrag = undefined;
+    const preferences = this.#options.buddy?.();
+    if (allowMotion && drag.hasMoved && preferences && this.#canAnimateFloating()) {
+      const fresh = Date.now() - drag.lastMovementAt < 130;
+      this.#animateFloatingRelease(preferences.inertia && fresh ? drag.velocityX : 0, preferences.inertia && fresh ? drag.velocityY : 0);
+    }
     this.#scheduleFloatingPositionSave();
   }
 
-  setFocusActive(_active: boolean): void {
+  #cancelFloatingMotion(): void {
+    if (this.#floatingMotionTimer) clearTimeout(this.#floatingMotionTimer);
+    this.#floatingMotionTimer = undefined;
+  }
+
+  #canAnimateFloating(): boolean {
+    const prefs = this.#options.buddy?.();
+    const settings = this.#options.settings();
+    const muted = settings.notifications.mutedUntil && Date.parse(settings.notifications.mutedUntil) > Date.now();
+    return !!prefs && !prefs.reducedMotion && !this.#floatingExpanded && !this.#floatingEdgeDocked && !this.#focusActive && !settings.floating.locked && !settings.pet.meetingMode && !muted;
+  }
+
+  #animateFloatingRelease(vx: number, vy: number): void {
+    this.#cancelFloatingMotion();
+    const window = this.#floating;
+    const prefs = this.#options.buddy?.();
+    if (!window || window.isDestroyed() || !prefs) return;
+    const bounds = window.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const snap = prefs.edgeSnap ? snapToWorkArea(bounds, area, 24) : bounds;
+    const spring = snap.x !== bounds.x || snap.y !== bounds.y;
+    if (!spring && !prefs.gravity && Math.abs(vx) + Math.abs(vy) < 2) return;
+    let state: BuddyPhysicsState = { x: bounds.x, y: bounds.y, vx, vy };
+    let previous = performance.now();
+    const began = previous;
+    const tick = () => {
+      if (window.isDestroyed() || !this.#canAnimateFloating() || this.#floatingPointerDrag || (!window.isVisible() && !e2eBackgroundWindows)) { this.#cancelFloatingMotion(); return; }
+      const now = performance.now(), dt = (now - previous) / 1000; previous = now;
+      state = spring ? stepBuddySpring(state, snap, dt) : stepBuddyPhysics(state, area, bounds, dt, prefs);
+      const next = clampWindowToWorkArea({ ...bounds, x: Math.round(state.x), y: Math.round(state.y) }, area);
+      window.setPosition(next.x, next.y, false);
+      if (state.settled || now - began > 8000) { this.#cancelFloatingMotion(); this.#scheduleFloatingPositionSave(); return; }
+      this.#floatingMotionTimer = setTimeout(tick, 16);
+    };
+    this.#floatingMotionTimer = setTimeout(tick, 16);
+  }
+
+  setFocusActive(active: boolean): void {
+    this.#focusActive = active;
+    if (active) this.#cancelFloatingMotion();
     if (this.#floating) this.#keepFloatingOnTop(this.#floating);
   }
 
@@ -728,7 +795,7 @@ export class WindowManager {
       try {
         const parsed = new URL(url);
         if (SAFE_EXTERNAL_PROTOCOLS.has(parsed.protocol))
-          void shell.openExternal(parsed.toString());
+          void shell.openExternal(parsed.toString()).catch(() => undefined);
       } catch {
         // Invalid URLs are ignored.
       }
@@ -746,12 +813,14 @@ export class WindowManager {
     if (this.#options.devServerUrl) {
       const url = new URL(this.#options.devServerUrl);
       url.searchParams.set("window", kind);
-      void window.loadURL(url.toString());
+      void window.loadURL(url.toString()).catch(() => undefined);
       return;
     }
-    void window.loadFile(this.#options.rendererPath, {
-      query: { window: kind },
-    });
+    void window
+      .loadFile(this.#options.rendererPath, {
+        query: { window: kind },
+      })
+      .catch(() => undefined);
   }
 
   #sendWhenReady(

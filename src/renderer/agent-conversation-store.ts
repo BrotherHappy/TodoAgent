@@ -3,7 +3,7 @@ import type { AgentFeishuSyncReceipt } from "../shared/desktop-api";
 const DEFAULT_STORAGE_KEY = "todo-agent:agent-conversation:v1";
 const DEFAULT_SESSIONS_STORAGE_KEY = "todo-agent:agent-conversations:v1";
 const SCHEMA_VERSION = 1;
-const MAX_MESSAGES = 50;
+const MAX_MESSAGES = 100;
 const MAX_MESSAGE_LENGTH = 30_000;
 const MAX_TOTAL_LENGTH = 240_000;
 const MAX_SESSIONS = 8;

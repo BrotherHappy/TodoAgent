@@ -4,6 +4,8 @@ import {
   addLocalDays,
   formatClock,
   localIsoAt,
+  localDateKey,
+  localDateKeyFromInstant,
   scheduledTimelineTasks,
   tasksForWeekDay,
   taskTimelinePlacement,
@@ -39,6 +41,15 @@ const task = (id: string, overrides: Partial<Task> = {}): Task => ({
 });
 
 describe("timeline-utils", () => {
+  it("projects persisted instants into the local calendar day", () => {
+    const localMorning = new Date("2026-08-21T00:30:00+08:00");
+    expect(localDateKey(localMorning)).toBe("2026-08-21");
+    expect(localDateKeyFromInstant("2026-08-20T16:30:00.000Z")).toBe(
+      "2026-08-21",
+    );
+    expect(localDateKeyFromInstant("not-a-date")).toBeUndefined();
+  });
+
   it("creates half-hour slots and moves across local calendar days", () => {
     expect(formatClock(8 * 60)).toBe("08:00");
     expect(timelineSlots("2026-08-19")).toHaveLength(28);

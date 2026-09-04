@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { FeishuTasklistBinding, Task } from '../../src/shared/models';
+import { hasTaskTitle } from '../../src/shared/task-title';
 import type {
   FeishuFieldConflict,
   FeishuSyncOperationKind,
@@ -23,6 +24,7 @@ import {
   chunkFeishuTaskMembers,
   FEISHU_TASK_MEMBER_ADD_BATCH_SIZE,
   FEISHU_TASK_MEMBER_REMOVE_BATCH_SIZE,
+  FeishuTaskDataError,
   hasKnownFeishuTaskMembers,
   localTaskToFeishuSnapshot,
   remoteTaskToFeishuSnapshot,
@@ -172,6 +174,8 @@ export interface FeishuSyncRunReport {
   cursor?: string;
   /** Present when the run retained work or could not reach Feishu. */
   issue?: FeishuSyncIssue;
+  /** Incomplete items are isolated; retain the cursor so a later pull retries them. */
+  skippedInvalidTasks?: number;
 }
 
 export type FeishuConflictDecision =
@@ -367,6 +371,9 @@ function isNetworkUnavailableError(error: unknown): boolean {
  * error can never be represented as an "offline" retry.
  */
 export function classifyFeishuSyncIssue(error: unknown): FeishuSyncIssue {
+  if (error instanceof FeishuTaskDataError) {
+    return { code: 'SYNC_FAILED', retryable: false, message: error.message };
+  }
   if (error instanceof FeishuTasklistPermissionError) {
     return {
       code: 'PERMISSION_DENIED',
@@ -418,6 +425,7 @@ function recordSyncIssue(
 }
 
 function isTerminalItemError(error: unknown): boolean {
+  if (error instanceof FeishuTaskDataError) return true;
   if (error instanceof FeishuPermissionError) return true;
   if (error instanceof FeishuAuthenticationError) return false;
   if (error instanceof FeishuNotFoundError) return false;
@@ -573,8 +581,15 @@ export class FeishuSyncService {
         state.localIdByGuid[guid] === task.id &&
         state.mappingsByLocalId[task.id]
       ) {
+        const base = state.mappingsByLocalId[task.id].base;
+        if (!hasTaskTitle(task.title) && hasTaskTitle(base.title)) {
+          await this.adapter.restoreMissingTitle(task.id, guid, base.title);
+        }
         continue;
       }
+      // Never manufacture a corrupt merge baseline from a legacy record.
+      // A current provider read must supply the missing title first.
+      if (!hasTaskTitle(task.title)) continue;
       this.setMapping({
         localId: task.id,
         guid,
@@ -763,6 +778,22 @@ export class FeishuSyncService {
     }
   }
 
+  private async completeRemoteTitle(remote: FeishuTaskV2): Promise<FeishuTaskV2> {
+    if (hasTaskTitle(remote.summary)) return remote;
+    // A compact list/action response is not a request to erase the title.
+    // Retry only the read, never the successful write that produced it.
+    const complete = await this.withBackoff(() => this.remote.getTask(remote.guid));
+    if (complete.guid !== remote.guid || !hasTaskTitle(complete.summary)) {
+      throw new FeishuTaskDataError();
+    }
+    return {
+      ...complete,
+      ...(complete.tasklists === undefined && remote.tasklists !== undefined
+        ? { tasklists: remote.tasklists }
+        : {}),
+    };
+  }
+
   /**
    * Task list membership is not guaranteed on an ordinary Task response.
    * Read it through the dedicated endpoint when available. For pull-only
@@ -919,7 +950,13 @@ export class FeishuSyncService {
     // still remains pending. Feishu's client_token idempotency window is only
     // temporary; after a restart or a later retry, a durable mapping makes us
     // PATCH this exact task instead of accidentally POSTing a second one.
-    const createConfirmationSnapshot = remoteTaskToFeishuSnapshot(remote);
+    // A compact POST response can contain only the new GUID. Checkpoint the
+    // submitted values as pending intent in that case, then GET the exact
+    // task before marking it synced. Persisting the GUID before that read
+    // also prevents a duplicate POST after a network failure or restart.
+    const createConfirmationSnapshot = hasTaskTitle(remote.summary)
+      ? remoteTaskToFeishuSnapshot(remote)
+      : { ...expectedLocalSnapshot, status: 'open' as const, tasklist: undefined };
     const createdSnapshot = clone(createConfirmationSnapshot);
     // A Task v2 create request has no tasklist membership field. When this
     // create intends to add an explicit binding, the just-created remote task
@@ -962,6 +999,8 @@ export class FeishuSyncService {
       return { outcome: 'pushed', followUpKind: 'delete' };
     }
 
+    remote = await this.completeRemoteTitle(remote);
+
     // Subsequent confirmation must compare against the local state produced
     // by the durable create checkpoint, not the pre-create object. The
     // checkpoint may have filled provider-owned metadata (for example the
@@ -986,6 +1025,7 @@ export class FeishuSyncService {
       undefined,
       expectedLocalSnapshot.tasklist,
     );
+    remote = await this.completeRemoteTitle(remote);
     const confirmed = retainKnownMemberSnapshot(
       remoteTaskToFeishuSnapshot(remote),
       createdSnapshot,
@@ -1169,6 +1209,7 @@ export class FeishuSyncService {
       remote = await this.enrichTasklists(remote);
     }
 
+    remote = await this.completeRemoteTitle(remote);
     const confirmed = retainKnownMemberSnapshot(
       remoteTaskToFeishuSnapshot(remote),
       memberChanges ? merge.merged : remoteSnapshot,
@@ -1360,7 +1401,20 @@ export class FeishuSyncService {
     incomingRemote: FeishuTaskV2,
     report: FeishuSyncRunReport,
   ): Promise<void> {
-    const remote = await this.enrichTasklists(incomingRemote, report);
+    let completeRemote: FeishuTaskV2;
+    try {
+      completeRemote = await this.completeRemoteTitle(incomingRemote);
+    } catch (error) {
+      if (!(error instanceof FeishuTaskDataError) &&
+          !(error instanceof FeishuNotFoundError) &&
+          !(error instanceof FeishuPermissionError)) throw error;
+      report.skippedInvalidTasks = (report.skippedInvalidTasks ?? 0) + 1;
+      recordSyncIssue(report, classifyFeishuSyncIssue(
+        error instanceof FeishuPermissionError ? error : new FeishuTaskDataError(),
+      ));
+      return;
+    }
+    const remote = await this.enrichTasklists(completeRemote, report);
     const state = this.state!;
     let localId = state.localIdByGuid[remote.guid];
 
@@ -1488,8 +1542,9 @@ export class FeishuSyncService {
     // therefore cannot prove remote deletion. Only an explicit incremental
     // deletion event, or a 404 returned while addressing the exact task, may
     // move a local task into recoverable remote-deleted state.
-    this.state!.lastFullSyncAt = new Date(this.now()).toISOString();
-    if (this.remote.getCurrentSyncCursor) {
+    if (report.skippedInvalidTasks) delete this.state!.lastFullSyncAt;
+    else this.state!.lastFullSyncAt = new Date(this.now()).toISOString();
+    if (!report.skippedInvalidTasks && this.remote.getCurrentSyncCursor) {
       this.state!.cursor = await this.withBackoff(() =>
         this.remote.getCurrentSyncCursor!(),
       );
@@ -1523,9 +1578,10 @@ export class FeishuSyncService {
         }
         cursor = page.nextCursor;
         seenCursors.add(cursor);
-        state.cursor = cursor;
+        if (!report.skippedInvalidTasks) state.cursor = cursor;
       }
-      state.lastIncrementalSyncAt = new Date(this.now()).toISOString();
+      if (report.skippedInvalidTasks) delete state.lastFullSyncAt;
+      else state.lastIncrementalSyncAt = new Date(this.now()).toISOString();
       await this.persist();
       if (!page.hasMore) return;
       if (!page.nextCursor) {

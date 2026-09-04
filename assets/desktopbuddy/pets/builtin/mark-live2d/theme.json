@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "mark-live2d",
+  "displayName": "Mark / 特殊生命",
+  "version": "0.1.0",
+  "author": "Live2D sample / Desktop Buddy wrapper",
+  "type": "objectSpirit",
+  "renderer": "live2d",
+  "description": "官方 Cubism Web Samples 中的非典型生命/吉祥物预设，用来验证福瑞、精灵、物灵等特殊主题的统一接入方式。",
+  "source": {
+    "type": "official-sample",
+    "url": "https://github.com/Live2D/CubismWebSamples/tree/develop/Samples/Resources/Mark",
+    "license": "Live2D Sample Data Terms"
+  },
+  "layout": {
+    "defaultSize": 88,
+    "minSize": 24,
+    "maxSize": 155,
+    "anchor": "bottomCenter",
+    "preferredDock": "bottomRight"
+  },
+  "model": {
+    "core": "assets/live2d-presets/mark/live2dcubismcore.min.js",
+    "model3": "assets/live2d-presets/mark/Mark.model3.json",
+    "preview": "assets/live2d-presets/mark/Mark.model3.json"
+  },
+  "colors": {
+    "swatches": ["#71d2ff", "#273c63", "#eff9ff"],
+    "cssClass": "pet-mark-live2d"
+  },
+  "capabilities": {
+    "idleMotion": true,
+    "attention": true,
+    "touchReaction": true,
+    "dragReaction": true,
+    "lifeRoutine": true,
+    "ambientMood": true,
+    "optionalCare": ["spark", "rest"],
+    "aiExpression": false,
+    "lookAtCursor": true,
+    "audioFeedback": false
+  },
+  "motions": {
+    "idleMotion": { "default": "Idle", "sleepy": "Idle" },
+    "attention": { "cursorNear": "Idle", "cursorLeave": "Idle", "called": "Idle" },
+    "touchReaction": { "default": "Idle", "head": "Idle" },
+    "dragReaction": { "start": "Idle", "holding": "Idle" },
+    "dropReaction": { "default": "Idle" },
+    "lifeRoutine": {
+      "morning": "Idle",
+      "focusTime": "Idle",
+      "idleLong": "Idle",
+      "night": "Idle",
+      "sleep": "Idle",
+      "rest": "Idle",
+      "wake": "Idle",
+      "spark": "Idle"
+    },
+    "optionalCare": { "spark": "Idle", "rest": "Idle" },
+    "aiThinking": { "default": "Idle" },
+    "aiSpeaking": { "default": "Idle" },
+    "aiNeedConfirm": { "default": "Idle" },
+    "aiSuccess": { "default": "Idle" },
+    "aiError": { "default": "Idle", "cancelled": "Idle" },
+    "aiExpression": { "thinking": "Idle", "speaking": "Idle", "success": "Idle", "error": "Idle" }
+  },
+  "interactions": [
+    { "id": "touch", "label": "唤醒灵感", "behavior": "touchReaction.default", "cooldownMs": 800 },
+    { "id": "spark", "label": "闪一下", "behavior": "optionalCare.spark", "cooldownMs": 6000 },
+    { "id": "rest", "label": "悬浮待机", "behavior": "lifeRoutine.rest", "cooldownMs": 5000 }
+  ],
+  "routine": {
+    "timezoneMode": "system",
+    "segments": [
+      { "id": "morning", "from": "07:00", "to": "10:30", "behavior": "lifeRoutine.morning", "cooldownMs": 1800000, "weight": 1.1, "message": "它轻轻亮了一下，像在确认新的一天。", "mood": "happy" },
+      { "id": "focusTime", "when": "userActiveLong", "behavior": "lifeRoutine.focusTime", "minQuietMs": 420000, "cooldownMs": 1200000, "weight": 1, "message": "它保持悬浮，陪你进入专注状态。", "mood": "neutral" },
+      { "id": "idleLong", "when": "noInteraction", "behavior": "lifeRoutine.idleLong", "afterMs": 330000, "cooldownMs": 900000, "weight": 1.5, "message": "它开始自己的小小巡游。", "mood": "thinking" },
+      { "id": "night", "from": "23:00", "to": "07:00", "behavior": "lifeRoutine.night", "cooldownMs": 1800000, "weight": 1.5, "message": "它把存在感调暗，进入夜间陪伴。", "mood": "sleepy" }
+    ]
+  },
+  "fallback": {
+    "renderer": "live2d",
+    "motion": {
+      "attention.cursorNear": "idleMotion.default",
+      "attention.cursorLeave": "idleMotion.default",
+      "lifeRoutine.sleep": "idleMotion.sleepy",
+      "lifeRoutine.night": "lifeRoutine.sleep",
+      "aiThinking": "idleMotion.default",
+      "aiSpeaking": "idleMotion.default",
+      "aiNeedConfirm": "idleMotion.default",
+      "aiSuccess": "idleMotion.default",
+      "aiError": "idleMotion.default"
+    }
+  }
+}

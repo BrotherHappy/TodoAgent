@@ -1,3 +1,7 @@
+import { BuddyGallery, BuddyInteractions } from './desktopbuddy/BuddyGallery';
+import { ScreenRegionSelector } from './desktopbuddy/ScreenRegionSelector';
+import { AgentContextControls } from './desktopbuddy/AgentContextControls';
+import { agentProviderFor } from '../shared/agent-model-config';
 import {
   Activity,
   AlarmClock,
@@ -36,6 +40,7 @@ import {
   History,
   Inbox,
   Info,
+  Keyboard,
   Laptop,
   LayoutList,
   ListChecks,
@@ -44,6 +49,10 @@ import {
   MessageCircle,
   MoreHorizontal,
   PanelTop,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Pause,
   Pencil,
   Play,
@@ -66,20 +75,25 @@ import {
   Tag,
   Trash2,
   Undo2,
+  Redo2,
   Upload,
   UserRound,
   WandSparkles,
   X,
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
+  lazy,
   useMemo,
   useRef,
   useState,
+  Suspense,
   type CSSProperties,
   type DragEvent as ReactDragEvent,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -103,6 +117,8 @@ import type {
   TaskSourceType,
   TaskSyncStatus,
   TaskId,
+  TaskOperationSummary,
+  TaskMutationResult,
   TaskView,
   TaskViewSectionId,
 } from "../shared/models";
@@ -187,6 +203,7 @@ import type {
   WeatherSnapshot,
 } from "../shared/pet-types";
 import { AgentMarkdown } from "./AgentMarkdown";
+import { useDialogFocus } from "./dialog-focus";
 import { ResearchCardMarkdown } from "./ResearchCardMarkdown";
 import { summarizeFeishuSyncReport } from "./feishu-sync-summary";
 import {
@@ -197,6 +214,7 @@ import { SpeechOutputButton } from "./SpeechOutputButton";
 import { AgentRunActivity } from "./AgentRunActivity";
 import { PetWeatherForecast } from "./PetWeatherForecast";
 import { actualMinutesForTask } from "../shared/task-time-accounting";
+import { isInboxTask } from "../shared/task-view-predicates";
 import { QuickCaptureHistory } from "./QuickCaptureHistory";
 import { ContextCaptureHistory } from "./ContextCaptureHistory";
 import {
@@ -220,6 +238,10 @@ import {
   readStoredAgentConversationCollection,
 } from "./agent-conversation-store";
 import { GlobalSearchSheet } from "./GlobalSearchSheet";
+import {
+  InlineTaskComposer,
+  type InlineTaskComposerRoute,
+} from "./InlineTaskComposer";
 import type {
   GlobalSearchConversation,
   GlobalSearchResult,
@@ -252,11 +274,11 @@ import {
   CommandPalette,
   type CommandPaletteAction,
 } from "./CommandPalette";
+import { KeyboardShortcutsSheet } from "./KeyboardShortcutsSheet";
 import {
   buildDependencyChain,
   buildDependencyGraph,
 } from "./dependency-chain";
-import { TimelinePage } from "./TimelinePage";
 import { CalendarActionItemsSheet } from "./CalendarActionItemsSheet";
 import { AgentActionItemsSheet } from "./AgentActionItemsSheet";
 import { BulkTaskEditSheet } from "./BulkTaskEditSheet";
@@ -348,6 +370,10 @@ import {
   type PetNextTask,
 } from "./pet-companion";
 import { useTaskController, type TaskController } from "./task-controller";
+import {
+  taskUndoFailureMessage,
+  undoTaskOperationWithFeedback,
+} from "./task-operation-feedback";
 import { useAgentChat } from "./use-agent-chat";
 import { usePetBehavior } from "./use-pet-behavior";
 import {
@@ -411,9 +437,6 @@ import {
 } from "./weekly-checkin";
 import { buildPetReviewSummary } from "./pet-review";
 import { feishuSyncVisualState } from "./feishu-status";
-import { ProjectPage } from "./ProjectPage";
-import { ListPage } from "./ListPage";
-import { DocsPage } from "./DocsPage";
 import { petSeasonalEventForDate } from "./pet-season";
 import { buildPetWeatherChip } from "./pet-weather-chip";
 import { petWeatherEffectFor, type PetWeatherEffect } from "./pet-weather-effect";
@@ -423,6 +446,27 @@ import {
   detectCompanionStrategy,
   type CompanionStrategy,
 } from "./companion-presets";
+
+const TimelinePage = lazy(() =>
+  import("./TimelinePage").then(({ TimelinePage: Page }) => ({ default: Page })),
+);
+const ProjectPage = lazy(() =>
+  import("./ProjectPage").then(({ ProjectPage: Page }) => ({ default: Page })),
+);
+const ListPage = lazy(() =>
+  import("./ListPage").then(({ ListPage: Page }) => ({ default: Page })),
+);
+const DocsPage = lazy(() =>
+  import("./DocsPage").then(({ DocsPage: Page }) => ({ default: Page })),
+);
+
+function DeferredRouteFallback({ label }: { label: string }) {
+  return (
+    <div className="route-loading" role="status">
+      {label}
+    </div>
+  );
+}
 
 type MainRoute =
   | TaskView
@@ -451,6 +495,10 @@ type TaskEditorDirtyField =
   | "dueAt"
   | "dueAtAllDay"
   | "localReminder";
+type PendingTaskPatch = {
+  patch: Parameters<TaskController["update"]>[1];
+  dirtyRevisions: Partial<Record<TaskEditorDirtyField, number>>;
+};
 type CustomFieldType = "text" | "number" | "date" | "url" | "checkbox";
 
 const customFieldTypeLabels: Record<CustomFieldType, string> = {
@@ -494,6 +542,7 @@ const floatingEdgePeekStorageKey = "todoAgentFloatingEdgePeek";
 const floatingSmartViewStorageKey = "todoAgentFloatingSmartView";
 const mainNavigationStateKey = "todoAgentMainNavigation";
 const taskListViewStorageKey = "todoAgentTaskListView";
+const sidebarCollapsedStorageKey = "todoAgentSidebarCollapsed";
 
 function readTaskListViewMode(): TaskTableViewMode {
   try {
@@ -502,6 +551,14 @@ function readTaskListViewMode(): TaskTableViewMode {
       : "list";
   } catch {
     return "list";
+  }
+}
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(sidebarCollapsedStorageKey) === "true";
+  } catch {
+    return false;
   }
 }
 
@@ -1091,6 +1148,47 @@ function canToggleTaskCompletion(task: Task): boolean {
   return !needsFeishuForCosignCompletion(task);
 }
 
+async function toggleTaskCompletionWithFeedback(
+  task: Task,
+  controller: TaskController,
+  notify: (
+    message: string,
+    kind?: ToastKind,
+    action?: ToastState["action"],
+  ) => void,
+): Promise<boolean> {
+  if (!canToggleTaskCompletion(task)) return false;
+  const completionVerb = needsFeishuForCosignCompletion(task)
+    ? "请在飞书完成"
+    : "完成";
+  try {
+    const operationId = await controller.toggleComplete(task);
+    notify(
+      task.status === "completed"
+        ? "任务已恢复"
+        : task.source.type === "feishu"
+          ? `${completionVerb} · 正在同步飞书`
+          : "任务已完成",
+      "success",
+      operationId
+        ? {
+            label: "撤销",
+            run: () => {
+              void undoTaskOperationWithFeedback(controller, operationId, notify);
+            },
+          }
+        : undefined,
+    );
+    return true;
+  } catch (reason) {
+    notify(
+      reason instanceof Error ? reason.message : "暂时无法更新完成状态",
+      "error",
+    );
+    return false;
+  }
+}
+
 function Brand({ onHome }: { onHome?: () => void }) {
   const content = (
     <>
@@ -1119,6 +1217,10 @@ function Titlebar({
   onSearch,
   onNew,
   onOpenCommands,
+  onOpenShortcuts,
+  onToggleSidebar,
+  sidebarCollapsed = false,
+  shortcutsButtonRef,
   onHome,
   onBack,
   syncState = "synced",
@@ -1128,6 +1230,10 @@ function Titlebar({
   onSearch?: (value: string) => void;
   onNew?: () => void;
   onOpenCommands?: () => void;
+  onOpenShortcuts?: () => void;
+  onToggleSidebar?: () => void;
+  sidebarCollapsed?: boolean;
+  shortcutsButtonRef?: { current: HTMLButtonElement | null };
   onHome?: () => void;
   onBack?: () => void;
   syncState?: TaskSyncVisualState;
@@ -1191,6 +1297,37 @@ function Titlebar({
         </label>
       )}
       {children}
+      {onToggleSidebar && (
+        <button
+          type="button"
+          className="icon-button titlebar-sidebar-toggle no-drag"
+          onClick={onToggleSidebar}
+          aria-label={sidebarCollapsed ? "显示侧栏" : "隐藏侧栏"}
+          aria-pressed={sidebarCollapsed}
+          aria-keyshortcuts={`${isMac ? "Meta" : "Control"}+/`}
+          title={sidebarCollapsed ? "显示侧栏（⌘/Ctrl + /）" : "隐藏侧栏（⌘/Ctrl + /）"}
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen size={16} aria-hidden="true" />
+          ) : (
+            <PanelLeftClose size={16} aria-hidden="true" />
+          )}
+        </button>
+      )}
+      {onOpenShortcuts && (
+        <button
+          ref={shortcutsButtonRef}
+          type="button"
+          className="icon-button titlebar-shortcuts no-drag"
+          onClick={onOpenShortcuts}
+          aria-label="打开快捷键说明"
+          aria-keyshortcuts="?"
+          title="快捷键（?）"
+        >
+          <Keyboard size={16} aria-hidden="true" />
+          <span aria-hidden="true">?</span>
+        </button>
+      )}
       <span
         className={`status-pill ${syncState === "synced" ? "success" : syncState === "conflict" ? "warning" : syncState === "error" ? "danger" : "syncing"}`}
       >
@@ -1669,7 +1806,16 @@ function MorningBrief({
                     void controller.moveToToday(suggestion.task.id)
                       .then((operationId) => {
                         notify(`已把“${suggestion.task.title}”安排到今天`, "success", operationId
-                          ? { label: "撤销", run: () => void controller.undo(operationId) }
+                          ? {
+                              label: "撤销",
+                              run: () => {
+                                void undoTaskOperationWithFeedback(
+                                  controller,
+                                  operationId,
+                                  notify,
+                                );
+                              },
+                            }
                           : undefined);
                       })
                       .catch((reason) => {
@@ -1829,7 +1975,7 @@ function TaskRow({
   onDrop?: (event: ReactDragEvent<HTMLDivElement>) => void;
   selectionMode?: boolean;
   selectedForBulk?: boolean;
-  onToggleBulk?: () => void;
+  onToggleBulk?: (event?: ReactMouseEvent<HTMLElement>) => void;
   interactionDisabled?: boolean;
   subtaskProgress?: SubtaskProgress;
   onAskAgent: (prompt: string) => void;
@@ -1840,25 +1986,7 @@ function TaskRow({
     : "完成";
   const toggle = async () => {
     if (!canComplete) return;
-    try {
-      const operationId = await controller.toggleComplete(task);
-      notify(
-        task.status === "completed"
-          ? "任务已恢复"
-          : task.source.type === "feishu"
-            ? `${completionVerb} · 正在同步飞书`
-            : "任务已完成",
-        "success",
-        operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
-          : undefined,
-      );
-    } catch (reason) {
-      notify(
-        reason instanceof Error ? reason.message : "暂时无法更新完成状态",
-        "error",
-      );
-    }
+    await toggleTaskCompletionWithFeedback(task, controller, notify);
   };
   const toggleFlag = async (event: ReactMouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -1913,7 +2041,7 @@ function TaskRow({
           type="checkbox"
           checked={selectedForBulk}
           disabled={interactionDisabled}
-          onChange={onToggleBulk}
+          onChange={() => onToggleBulk()}
           aria-label={`${selectedForBulk ? "取消选择" : "选择"}${task.title}`}
         />
       )}
@@ -1934,11 +2062,20 @@ function TaskRow({
         type="button"
         className="task-body"
         aria-pressed={selectionMode ? selectedForBulk : undefined}
-        onClick={() =>
+        disabled={interactionDisabled}
+        title={
+          onToggleBulk
+            ? selectionMode
+              ? "点击选择；按住 Shift 选择范围，⌘/Ctrl 点选不连续任务"
+              : "按住 Shift 选择范围，⌘/Ctrl 点选任务"
+            : undefined
+        }
+        onClick={(event) =>
           interactionDisabled
             ? undefined
-            : selectionMode && onToggleBulk
-            ? onToggleBulk()
+            : onToggleBulk &&
+                (selectionMode || event.shiftKey || event.metaKey || event.ctrlKey)
+            ? onToggleBulk(event)
             : controller.select(task.id)
         }
       >
@@ -2058,6 +2195,13 @@ function TaskListPage({
   planningTasks,
   search,
   navigationKey,
+  focusTaskId,
+  onTaskFocused,
+  inboxTriageRequest,
+  onInboxTriageRequestHandled,
+  inboxTriageOpen,
+  onInboxTriageOpenChange,
+  wideDesktop,
   sourceFilter,
   notify,
   onNew,
@@ -2076,6 +2220,13 @@ function TaskListPage({
   planningTasks?: Task[];
   search: string;
   navigationKey: string;
+  focusTaskId?: TaskId;
+  onTaskFocused?: (taskId: TaskId) => void;
+  inboxTriageRequest?: number;
+  onInboxTriageRequestHandled?: (request: number) => void;
+  inboxTriageOpen: boolean;
+  onInboxTriageOpenChange: (open: boolean) => void;
+  wideDesktop: boolean;
   sourceFilter?: TaskSourceType;
   notify: (
     message: string,
@@ -2097,7 +2248,7 @@ function TaskListPage({
   const [listViewMode, setListViewMode] = useState<TaskTableViewMode>(() =>
     readTaskListViewMode(),
   );
-  const [inboxTriageOpen, setInboxTriageOpen] = useState(false);
+  const inboxTriageRequestRef = useRef(0);
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<Set<string>>(
     () => new Set(),
@@ -2113,6 +2264,9 @@ function TaskListPage({
   const [draggingTaskId, setDraggingTaskId] = useState<string>();
   const [dropTargetTaskId, setDropTargetTaskId] = useState<string>();
   const [reorderBusy, setReorderBusy] = useState(false);
+  const [inlineInsertAfterTaskId, setInlineInsertAfterTaskId] =
+    useState<TaskId>();
+  const keyboardCompletionBusyRef = useRef(false);
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "all">(
     "all",
   );
@@ -2139,6 +2293,50 @@ function TaskListPage({
   const [manualAutomations, setManualAutomations] = useState<
     readonly TaskAutomationRule[]
   >([]);
+  const filterTriggerRef = useRef<HTMLButtonElement>(null);
+  const filterDialogRef = useRef<HTMLDivElement>(null);
+  const filterQueryRef = useRef<HTMLInputElement>(null);
+  const bulkModeToggleRef = useRef<HTMLButtonElement>(null);
+  const inboxTriageTriggerRef = useRef<HTMLButtonElement>(null);
+  const bulkToolbarRef = useRef<HTMLElement>(null);
+  const bulkAnchorTaskIdRef = useRef<string | undefined>(undefined);
+  const bulkReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const bulkPreviewDialogRef = useRef<HTMLDivElement>(null);
+  const bulkPreviewCancelRef = useRef<HTMLButtonElement>(null);
+  const bulkAutomationPreviewDialogRef = useRef<HTMLDivElement>(null);
+  const bulkAutomationPreviewCancelRef = useRef<HTMLButtonElement>(null);
+  const focusAfterDismiss = (element: HTMLElement | null | undefined) => {
+    if (!element) return;
+    window.requestAnimationFrame(() => {
+      if (!element.isConnected || element.hasAttribute("disabled")) return;
+      element.focus({ preventScroll: true });
+    });
+  };
+  const closeFilter = () => {
+    setFilterOpen(false);
+    focusAfterDismiss(filterTriggerRef.current);
+  };
+  const closeBulkPreviews = () => {
+    setBulkPreview(undefined);
+    setBulkAutomationPreview(undefined);
+    const returnFocus =
+      bulkReturnFocusRef.current ?? bulkModeToggleRef.current;
+    bulkReturnFocusRef.current = undefined;
+    focusAfterDismiss(returnFocus);
+  };
+  useDialogFocus(filterDialogRef, filterQueryRef, closeFilter, filterOpen);
+  useDialogFocus(
+    bulkPreviewDialogRef,
+    bulkPreviewCancelRef,
+    closeBulkPreviews,
+    Boolean(bulkPreview),
+  );
+  useDialogFocus(
+    bulkAutomationPreviewDialogRef,
+    bulkAutomationPreviewCancelRef,
+    closeBulkPreviews,
+    Boolean(bulkAutomationPreview),
+  );
   useEffect(() => {
     if (!window.desktopApi) {
       setManualAutomations([]);
@@ -2174,13 +2372,16 @@ function TaskListPage({
     setActiveSmartViewId(undefined);
     setBulkMode(false);
     setBulkSelection(new Set());
+    bulkAnchorTaskIdRef.current = undefined;
+    bulkReturnFocusRef.current = undefined;
     setBulkPreview(undefined);
     setBulkAutomationPreview(undefined);
     setBulkEditOpen(false);
     setDraggingTaskId(undefined);
     setDropTargetTaskId(undefined);
     setReorderBusy(false);
-    setInboxTriageOpen(false);
+    setInlineInsertAfterTaskId(undefined);
+    onInboxTriageOpenChange(false);
     setSmartViewQuery("");
     setSmartViewQueryResult(undefined);
   }, [navigationKey]);
@@ -2220,7 +2421,18 @@ function TaskListPage({
     setSortFilter(view.sort);
     onSourceChange(view.sourceType);
     setActiveSmartViewId(view.id);
-    setFilterOpen(false);
+    closeFilter();
+  };
+  const clearTaskFilters = () => {
+    setPriorityFilter("all");
+    setFlaggedFilter(false);
+    setProjectFilter("all");
+    setTagFilter("all");
+    setSectionFilter("all");
+    setContextFilter("all");
+    setDateFilter("any");
+    setSortFilter("manual");
+    setActiveSmartViewId(undefined);
   };
   const saveSmartView = () => {
     const created = createSmartView({
@@ -2282,7 +2494,7 @@ function TaskListPage({
     setActiveSmartViewId(undefined);
     setSmartViewQuery("");
     setSmartViewQueryResult(undefined);
-    setFilterOpen(false);
+    closeFilter();
     notify(`已套用筛选：${smartViewQueryResult.value.summary.join(" · ")}`, "success");
   };
   const dateLabel = new Intl.DateTimeFormat("zh-CN", {
@@ -2342,19 +2554,355 @@ function TaskListPage({
     () => visibleSections.flatMap((section) => section.tasks),
     [visibleSections],
   );
+  const inlineComposerRoute: InlineTaskComposerRoute | undefined =
+    route === "today" || route === "inbox" || route === "all"
+      ? route
+      : undefined;
+  const inlineComposerVisible =
+    inlineComposerRoute !== undefined &&
+    !search.trim() &&
+    sourceFilter !== "feishu" &&
+    priorityFilter === "all" &&
+    !flaggedFilter &&
+    projectFilter === "all" &&
+    tagFilter === "all" &&
+    sectionFilter === "all" &&
+    contextFilter === "all" &&
+    dateFilter === "any" &&
+    sortFilter === "manual" &&
+    !bulkMode;
+  const plannedTodayTasks = useMemo(
+    () =>
+      visibleSections
+        .find((section) => section.id === "planned-today")
+        ?.tasks.filter((task) => task.status === "open") ?? [],
+    [visibleSections],
+  );
+  const canInsertAfterSelected =
+    wideDesktop &&
+    route === "today" &&
+    listViewMode === "list" &&
+    inlineComposerVisible &&
+    Boolean(
+      controller.selectedId &&
+        plannedTodayTasks.some((task) => task.id === controller.selectedId),
+    );
+  useEffect(() => {
+    if (
+      inlineInsertAfterTaskId &&
+      (!canInsertAfterSelected ||
+        inlineInsertAfterTaskId !== controller.selectedId)
+    ) {
+      setInlineInsertAfterTaskId(undefined);
+    }
+  }, [
+    canInsertAfterSelected,
+    controller.selectedId,
+    inlineInsertAfterTaskId,
+  ]);
+  const taskListRef = useRef<HTMLElement>(null);
+  const pendingKeyboardFocusRef = useRef<string | undefined>(undefined);
+  const focusTask = useCallback((taskId: string): boolean => {
+    const taskListElement = taskListRef.current;
+    if (!taskListElement) return false;
+    const nextRow = Array.from(
+      taskListElement.querySelectorAll<HTMLElement>("[data-task-id]"),
+    ).find((element) => element.dataset.taskId === taskId);
+    const hiddenContainer = nextRow?.closest<HTMLElement>("[hidden]");
+    if (hiddenContainer) {
+      hiddenContainer
+        .closest<HTMLElement>(".task-section-group")
+        ?.querySelector<HTMLButtonElement>(".task-section-heading")
+        ?.click();
+      return false;
+    }
+    const nextTarget = nextRow?.querySelector<HTMLElement>(
+      ".task-body, .task-table-title",
+    );
+    nextTarget?.focus({ preventScroll: true });
+    nextTarget?.scrollIntoView?.({ block: "nearest" });
+    if (nextRow && nextTarget) {
+      // Chromium's `nearest` alignment can place a focused row behind the
+      // content column's padding when the inspector is open. Reconcile the
+      // final geometry against the actual padded viewport so a search jump
+      // always leaves the whole row readable and actionable.
+      const contentRect = taskListElement.getBoundingClientRect();
+      const styles = window.getComputedStyle(taskListElement);
+      const viewportTop =
+        contentRect.top + (Number.parseFloat(styles.paddingTop) || 0);
+      const viewportBottom =
+        contentRect.bottom - (Number.parseFloat(styles.paddingBottom) || 0);
+      const rowRect = nextRow.getBoundingClientRect();
+      if (rowRect.top < viewportTop) {
+        taskListElement.scrollTop -= viewportTop - rowRect.top;
+      } else if (rowRect.bottom > viewportBottom) {
+        taskListElement.scrollTop += rowRect.bottom - viewportBottom;
+      }
+    }
+    return Boolean(nextTarget && document.activeElement === nextTarget);
+  }, []);
+  useEffect(() => {
+    const taskId = pendingKeyboardFocusRef.current;
+    if (!taskId) return;
+    if (
+      controller.selectedId !== taskId ||
+      !visibleTasks.some((task) => task.id === taskId)
+    ) {
+      pendingKeyboardFocusRef.current = undefined;
+      return;
+    }
+    let attempts = 0;
+    let frame = 0;
+    const retry = () => {
+      if (pendingKeyboardFocusRef.current !== taskId) return;
+      const focused = focusTask(taskId);
+      attempts += 1;
+      if (focused || attempts >= 60) {
+        pendingKeyboardFocusRef.current = undefined;
+        return;
+      }
+      frame = window.requestAnimationFrame(retry);
+    };
+    const retryAfterWindowFocus = () => {
+      if (pendingKeyboardFocusRef.current !== taskId) return;
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(retry);
+    };
+    window.addEventListener("focus", retryAfterWindowFocus);
+    document.addEventListener("visibilitychange", retryAfterWindowFocus);
+    frame = window.requestAnimationFrame(retry);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("focus", retryAfterWindowFocus);
+      document.removeEventListener("visibilitychange", retryAfterWindowFocus);
+    };
+  }, [controller.selectedId, focusTask, visibleTasks]);
+  useEffect(() => {
+    if (!focusTaskId || controller.loading) return undefined;
+    if (
+      controller.error ||
+      !controller.selectedId ||
+      controller.selectedId !== focusTaskId ||
+      !visibleTasks.some((task) => task.id === focusTaskId)
+    ) {
+      if (controller.error) onTaskFocused?.(focusTaskId);
+      return undefined;
+    }
+    let attempts = 0;
+    let stableFrames = 0;
+    let frame = 0;
+    let retryTimer = 0;
+    const retry = () => {
+      frame = 0;
+      retryTimer = 0;
+      const focused = focusTask(focusTaskId);
+      attempts += 1;
+      stableFrames = focused ? stableFrames + 1 : 0;
+      if (stableFrames >= 3) {
+        onTaskFocused?.(focusTaskId);
+        return;
+      }
+      // Chromium can render the destination before the Electron window is
+      // active again. Keep the request alive after the first render window so
+      // a modal-to-list jump can finish when window focus returns.
+      if (attempts < 60) {
+        frame = window.requestAnimationFrame(retry);
+      } else {
+        retryTimer = window.setTimeout(() => {
+          attempts = 0;
+          stableFrames = 0;
+          retry();
+        }, 160);
+      }
+    };
+    const retryAfterWindowFocus = () => {
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+        retryTimer = 0;
+      }
+      if (!frame) frame = window.requestAnimationFrame(retry);
+    };
+    window.addEventListener("focus", retryAfterWindowFocus);
+    document.addEventListener("visibilitychange", retryAfterWindowFocus);
+    frame = window.requestAnimationFrame(retry);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      if (retryTimer) window.clearTimeout(retryTimer);
+      window.removeEventListener("focus", retryAfterWindowFocus);
+      document.removeEventListener("visibilitychange", retryAfterWindowFocus);
+    };
+  }, [
+    controller.error,
+    controller.loading,
+    controller.selectedId,
+    focusTask,
+    focusTaskId,
+    onTaskFocused,
+    visibleTasks,
+  ]);
+  const renderedTaskOrder = (): Task[] => {
+    const taskListElement = taskListRef.current;
+    if (!taskListElement) return visibleTasks;
+    const renderedIds = new Set(
+      Array.from(
+        taskListElement.querySelectorAll<HTMLElement>("[data-task-id]"),
+      )
+        .filter((element) => !element.closest("[hidden]"))
+        .map((element) => element.dataset.taskId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    return visibleTasks.filter((task) => renderedIds.has(task.id));
+  };
+  const handleTaskListKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+      if (bulkBusy || reorderBusy) {
+        event.preventDefault();
+        return;
+      }
+      if (filterOpen) {
+        event.preventDefault();
+        closeFilter();
+        return;
+      }
+      if (bulkEditOpen) {
+        event.preventDefault();
+        setBulkEditOpen(false);
+        focusAfterDismiss(
+          bulkReturnFocusRef.current ?? bulkModeToggleRef.current,
+        );
+        return;
+      }
+      if (bulkPreview || bulkAutomationPreview) {
+        event.preventDefault();
+        closeBulkPreviews();
+        return;
+      }
+      if (bulkMode) {
+        event.preventDefault();
+        setBulkMode(false);
+        setBulkSelection(new Set());
+        bulkAnchorTaskIdRef.current = undefined;
+        bulkReturnFocusRef.current = undefined;
+        focusAfterDismiss(bulkModeToggleRef.current);
+      }
+      return;
+    }
+    if (bulkBusy || reorderBusy || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : undefined;
+    if (target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog'], [role='menu']")) {
+      return;
+    }
+    const taskListElement = event.currentTarget;
+    if (target?.closest(".task-list, .task-table-wrap") === null && event.target !== taskListElement) {
+      return;
+    }
+    const key = event.key.toLocaleLowerCase();
+    const navigableTasks = renderedTaskOrder();
+    const currentIndex = navigableTasks.findIndex(
+      (task) => task.id === controller.selectedId,
+    );
+    if (
+      (event.code === "Space" || event.key === " ") &&
+      !event.nativeEvent.isComposing &&
+      canInsertAfterSelected &&
+      controller.selectedId
+    ) {
+      event.preventDefault();
+      setInlineInsertAfterTaskId(controller.selectedId);
+      return;
+    }
+    if (key === "," && bulkMode) {
+      const firstAction = bulkToolbarRef.current?.querySelector<HTMLElement>(
+        "button:not(:disabled), select:not(:disabled)",
+      );
+      if (!firstAction) return;
+      event.preventDefault();
+      firstAction.focus({ preventScroll: true });
+      return;
+    }
+    if (key === "x") {
+      const selectionTask = navigableTasks[currentIndex >= 0 ? currentIndex : 0];
+      if (!selectionTask) return;
+      event.preventDefault();
+      if (currentIndex < 0) {
+        controller.select(selectionTask.id);
+        focusTask(selectionTask.id);
+      }
+      if (!bulkMode) {
+        setBulkMode(true);
+        setBulkPreview(undefined);
+        setBulkAutomationPreview(undefined);
+        setBulkEditOpen(false);
+      }
+      toggleBulkSelection(selectionTask.id);
+      return;
+    }
+    if (key === "e") {
+      if (bulkMode || keyboardCompletionBusyRef.current) return;
+      const selectedTask = navigableTasks[currentIndex];
+      if (!selectedTask || !canToggleTaskCompletion(selectedTask)) {
+        return;
+      }
+      const nextTask =
+        navigableTasks[currentIndex + 1] ?? navigableTasks[currentIndex - 1];
+      event.preventDefault();
+      keyboardCompletionBusyRef.current = true;
+      void toggleTaskCompletionWithFeedback(selectedTask, controller, notify)
+        .then((changed) => {
+          if (!changed || !nextTask) return;
+          pendingKeyboardFocusRef.current = nextTask.id;
+          controller.select(nextTask.id);
+        })
+        .finally(() => {
+          keyboardCompletionBusyRef.current = false;
+        });
+      return;
+    }
+    const direction = key === "arrowdown" || key === "j"
+      ? 1
+      : key === "arrowup" || key === "k"
+        ? -1
+        : 0;
+    if (direction === 0) return;
+    if (navigableTasks.length === 0) return;
+    const nextIndex = currentIndex < 0
+      ? direction > 0 ? 0 : navigableTasks.length - 1
+      : Math.max(0, Math.min(navigableTasks.length - 1, currentIndex + direction));
+    event.preventDefault();
+    const nextTask = navigableTasks[nextIndex];
+    if (!nextTask) return;
+    controller.select(nextTask.id);
+    focusTask(nextTask.id);
+  };
   const inboxTriageTasks = useMemo(
     () =>
       controller.tasks.filter(
         (task) =>
-          task.status === "open" &&
-          !task.deletedAt &&
-          !task.plannedDate &&
-          !task.deferUntil &&
-          !task.projectId &&
-          !task.listId,
+          isInboxTask(task),
       ),
     [controller.tasks],
   );
+  useEffect(() => {
+    if (
+      !inboxTriageRequest ||
+      inboxTriageRequestRef.current === inboxTriageRequest
+    ) {
+      return;
+    }
+    if (route !== "inbox") return;
+    if (inboxTriageTasks.length === 0) return;
+    inboxTriageRequestRef.current = inboxTriageRequest;
+    onInboxTriageOpenChange(true);
+    onInboxTriageRequestHandled?.(inboxTriageRequest);
+  }, [
+    inboxTriageRequest,
+    inboxTriageTasks.length,
+    onInboxTriageOpenChange,
+    onInboxTriageRequestHandled,
+    route,
+  ]);
   const selectedBulkTasks = useMemo(
     () => visibleTasks.filter((task) => bulkSelection.has(task.id)),
     [bulkSelection, visibleTasks],
@@ -2432,16 +2980,21 @@ function TaskListPage({
     }
     return summary;
   };
-  const requestBulkPreview = (action: BulkTaskAction) => {
+  const requestBulkPreview = (
+    action: BulkTaskAction,
+    trigger?: HTMLElement,
+  ) => {
     if (selectedBulkTasks.length === 0) return;
+    if (trigger) bulkReturnFocusRef.current = trigger;
     setBulkAutomationPreview(undefined);
     setBulkPreview(action);
   };
-  const requestBulkAutomationPreview = () => {
+  const requestBulkAutomationPreview = (trigger?: HTMLElement) => {
     if (!selectedManualAutomation || selectedManualAutomationTasks.length === 0) {
       notify("当前选择没有符合条件且需要变化的任务", "info");
       return;
     }
+    if (trigger) bulkReturnFocusRef.current = trigger;
     setBulkPreview(undefined);
     setBulkAutomationPreview({
       rule: selectedManualAutomation,
@@ -2461,14 +3014,23 @@ function TaskListPage({
         })),
       });
       const label = bulkActionLabel(bulkPreview);
+      const returnFocus = bulkModeToggleRef.current;
       setBulkPreview(undefined);
       setBulkSelection(new Set());
       setBulkMode(false);
+      bulkAnchorTaskIdRef.current = undefined;
+      bulkReturnFocusRef.current = undefined;
+      focusAfterDismiss(returnFocus);
       notify(
         `${selectedBulkTasks.length} 项任务已${label.replace("任务", "")}`,
         "success",
         operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
           : undefined,
       );
     } catch (reason) {
@@ -2494,14 +3056,23 @@ function TaskListPage({
       });
       const count = bulkAutomationPreview.tasks.length;
       const name = bulkAutomationPreview.rule.name;
+      const returnFocus = bulkModeToggleRef.current;
       setBulkAutomationPreview(undefined);
       setBulkSelection(new Set());
       setBulkMode(false);
+      bulkAnchorTaskIdRef.current = undefined;
+      bulkReturnFocusRef.current = undefined;
+      focusAfterDismiss(returnFocus);
       notify(
         `${count} 项任务已应用“${name}”`,
         "success",
         operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
           : undefined,
       );
     } catch (reason) {
@@ -2520,6 +3091,8 @@ function TaskListPage({
         setBulkPreview(undefined);
         setBulkAutomationPreview(undefined);
         setBulkEditOpen(false);
+        bulkAnchorTaskIdRef.current = undefined;
+        bulkReturnFocusRef.current = undefined;
       }
       return !current;
     });
@@ -2527,21 +3100,65 @@ function TaskListPage({
   const selectAllVisible = () => {
     setBulkPreview(undefined);
     setBulkAutomationPreview(undefined);
+    bulkAnchorTaskIdRef.current = controller.selectedId ?? visibleTasks[0]?.id;
     setBulkSelection(new Set(visibleTasks.map((task) => task.id)));
   };
-  const toggleBulkSelection = (taskId: string) => {
+  const toggleBulkSelection = (
+    taskId: string,
+    event?: ReactMouseEvent<HTMLElement>,
+  ) => {
     setBulkPreview(undefined);
     setBulkAutomationPreview(undefined);
     setBulkEditOpen(false);
+    const taskOrder = renderedTaskOrder();
+    const anchorTaskId = bulkAnchorTaskIdRef.current ?? controller.selectedId;
+    const selectedIdBeforeClick = controller.selectedId;
+    const modifierClick = Boolean(
+      event &&
+        !event.shiftKey &&
+        (event.metaKey || event.ctrlKey),
+    );
+    const seedCurrentSelection = Boolean(
+      modifierClick &&
+        !bulkMode &&
+        selectedIdBeforeClick &&
+        selectedIdBeforeClick !== taskId &&
+        taskOrder.some((task) => task.id === selectedIdBeforeClick),
+    );
+    const anchorIndex = anchorTaskId
+      ? taskOrder.findIndex((task) => task.id === anchorTaskId)
+      : -1;
+    const taskIndex = taskOrder.findIndex((task) => task.id === taskId);
+    if (event?.shiftKey && anchorIndex >= 0 && taskIndex >= 0) {
+      const start = Math.min(anchorIndex, taskIndex);
+      const end = Math.max(anchorIndex, taskIndex);
+      bulkAnchorTaskIdRef.current = anchorTaskId;
+      if (!bulkMode) setBulkMode(true);
+      controller.select(taskId);
+      setBulkSelection((current) => {
+        const next = new Set(current);
+        taskOrder.slice(start, end + 1).forEach((task) => next.add(task.id));
+        return next;
+      });
+      return;
+    }
+    if (!bulkMode) setBulkMode(true);
+    if (event) controller.select(taskId);
+    bulkAnchorTaskIdRef.current = taskId;
     setBulkSelection((current) => {
       const next = new Set(current);
+      if (seedCurrentSelection && selectedIdBeforeClick) {
+        next.add(selectedIdBeforeClick);
+      }
       if (next.has(taskId)) next.delete(taskId);
       else next.add(taskId);
       return next;
     });
   };
   useEffect(() => {
+    let active = true;
     const applyOptions = (tasks: readonly Task[]) => {
+      if (!active) return;
       setTaskSnapshot([...tasks]);
       setProjectOptions(
         [...new Set(tasks.map((task) => task.projectId).filter((value): value is string => Boolean(value)))]
@@ -2562,11 +3179,17 @@ function TaskListPage({
     };
     if (!window.desktopApi) {
       applyOptions(controller.tasks);
-      return;
+      return () => {
+        active = false;
+      };
     }
     void window.desktopApi.tasks
       .list({ includeDeleted: false })
-      .then(applyOptions);
+      .then((tasks) => applyOptions(tasks))
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, [controller.tasks]);
   const subtaskProgress = useMemo(
     () => buildSubtaskProgress(taskSnapshot),
@@ -2580,6 +3203,64 @@ function TaskListPage({
         .map((task) => task.id),
     [visibleSections],
   );
+  const handleInlineTaskCreated = async (
+    result: TaskMutationResult,
+  ): Promise<boolean> => {
+    const anchorId = inlineInsertAfterTaskId;
+    if (
+      !anchorId ||
+      !canInsertAfterSelected ||
+      route !== "today"
+    ) {
+      return false;
+    }
+    const anchorIndex = orderedTodayIds.indexOf(anchorId);
+    if (anchorIndex < 0 || orderedTodayIds.includes(result.task.id)) {
+      return false;
+    }
+
+    const nextOrder = [...orderedTodayIds];
+    nextOrder.splice(anchorIndex + 1, 0, result.task.id);
+    setReorderBusy(true);
+    try {
+      const reorderOperationId = await controller.reorderToday(nextOrder);
+      setInlineInsertAfterTaskId(undefined);
+      pendingKeyboardFocusRef.current = result.task.id;
+      controller.select(result.task.id);
+      const undoInsert =
+        reorderOperationId && result.operationId
+          ? {
+              label: "撤销",
+              run: () => {
+                void (async () => {
+                  try {
+                    await controller.undo(reorderOperationId);
+                    await controller.undo(result.operationId);
+                    notify("已撤销新增任务", "success");
+                  } catch (reason) {
+                    notify(
+                      taskUndoFailureMessage(reason, "新增任务暂时无法撤销"),
+                      "error",
+                    );
+                  }
+                })();
+              },
+            }
+          : undefined;
+      notify("已添加到当前任务后", "success", undoInsert);
+    } catch (reason) {
+      setInlineInsertAfterTaskId(undefined);
+      pendingKeyboardFocusRef.current = result.task.id;
+      controller.select(result.task.id);
+      notify(
+        "任务已创建，但暂时无法放到当前任务后",
+        "info",
+      );
+    } finally {
+      setReorderBusy(false);
+    }
+    return true;
+  };
   const moveTodayTask = async (taskId: string, targetTaskId: string) => {
     const index = orderedTodayIds.indexOf(taskId);
     const target = orderedTodayIds.indexOf(targetTaskId);
@@ -2592,7 +3273,12 @@ function TaskListPage({
         "Today 顺序已更新",
         "success",
         operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
           : undefined,
       );
     } catch (reason) {
@@ -2656,7 +3342,12 @@ function TaskListPage({
         "Today 顺序已更新",
         "success",
         operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
           : undefined,
       );
     } catch (reason) {
@@ -2675,7 +3366,13 @@ function TaskListPage({
       `请分析我当前“${routeTitles[route]}”中的 ${controller.tasks.filter((task) => task.status === "open").length} 项未完成任务，结合优先级和截止时间给出可执行的重新规划；先展示方案，未经我确认不要批量修改。`,
     );
   return (
-    <main className="content-column">
+    <main
+      ref={taskListRef}
+      className="content-column"
+      tabIndex={-1}
+      aria-keyshortcuts="E X Space Escape , ArrowDown ArrowUp J K ? Meta+Z Control+Z Meta+Shift+Z Control+Shift+Z"
+      onKeyDown={handleTaskListKeyDown}
+    >
       <div className="page-heading">
         <div>
           <h1>
@@ -2718,6 +3415,8 @@ function TaskListPage({
             type="button"
             className={`soft-button bulk-mode-toggle ${bulkMode ? "active" : ""}`}
             aria-pressed={bulkMode}
+            ref={bulkModeToggleRef}
+            title={bulkMode ? "退出选择（Esc）" : "批量选择"}
             onClick={toggleBulkMode}
           >
             <ListChecks size={16} />
@@ -2727,7 +3426,8 @@ function TaskListPage({
             <button
               type="button"
               className="soft-button"
-              onClick={() => setInboxTriageOpen(true)}
+              ref={inboxTriageTriggerRef}
+              onClick={() => onInboxTriageOpenChange(true)}
             >
               <Inbox size={16} />
               整理暂存
@@ -2747,19 +3447,28 @@ function TaskListPage({
           </button>
           <div className="filter-anchor">
             <button
-            type="button"
+              type="button"
+              ref={filterTriggerRef}
               className={`icon-button ${priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual" ? "active" : ""}`}
               aria-label="筛选"
               aria-expanded={filterOpen}
-              onClick={() => setFilterOpen((value) => !value)}
+              aria-controls="task-filter-popover"
+              title={filterOpen ? "关闭筛选（Esc）" : "打开筛选"}
+              onClick={() => {
+                if (filterOpen) closeFilter();
+                else setFilterOpen(true);
+              }}
             >
               <Filter size={17} />
             </button>
             {filterOpen && (
               <div
+                id="task-filter-popover"
+                ref={filterDialogRef}
                 className="filter-popover"
                 role="dialog"
                 aria-label="任务筛选"
+                tabIndex={-1}
               >
                 <strong>按优先级筛选</strong>
                 <div className="filter-assist">
@@ -2767,6 +3476,7 @@ function TaskListPage({
                   <div className="filter-assist-row">
                     <input
                       id="smart-view-query"
+                      ref={filterQueryRef}
                       className="settings-input"
                       value={smartViewQuery}
                       onChange={(event) => {
@@ -2992,23 +3702,14 @@ function TaskListPage({
                   <button
                     type="button"
                     className="ghost-button"
-                    onClick={() => {
-                      setPriorityFilter("all");
-                      setProjectFilter("all");
-                      setTagFilter("all");
-                      setSectionFilter("all");
-                      setContextFilter("all");
-                      setDateFilter("any");
-                      setSortFilter("manual");
-                      setActiveSmartViewId(undefined);
-                    }}
+                    onClick={clearTaskFilters}
                   >
                     清除
                   </button>
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={() => setFilterOpen(false)}
+                    onClick={closeFilter}
                   >
                     完成
                   </button>
@@ -3018,6 +3719,22 @@ function TaskListPage({
           </div>
         </div>
       </div>
+      {visibleTasks.length > 0 && !bulkMode && (
+        <p className="task-keyboard-hint" role="note">
+          <Command size={12} aria-hidden="true" />
+          <span>点击任务后，使用 ↑ ↓ 或 J K 浏览</span>
+          <kbd>E</kbd>
+          <span>完成/恢复</span>
+          <kbd>X</kbd>
+          <span>选择/取消，回车打开详情</span>
+          {canInsertAfterSelected && (
+            <>
+              <kbd>Space</kbd>
+              <span>在当前任务后新增</span>
+            </>
+          )}
+        </p>
+      )}
       {smartViews.length > 0 && (
         <div className="saved-view-strip" aria-label="已保存视图">
           <span>已保存</span>
@@ -3050,8 +3767,19 @@ function TaskListPage({
           onOpenAll={onOpenAll}
         />
       )}
+      {inlineComposerVisible && inlineComposerRoute && (
+        <InlineTaskComposer
+          route={inlineComposerRoute}
+          controller={controller}
+          notify={notify}
+        />
+      )}
       {bulkMode && (
-        <section className="bulk-toolbar" aria-label="批量操作">
+        <section
+          ref={bulkToolbarRef}
+          className="bulk-toolbar"
+          aria-label="批量操作"
+        >
           <div className="bulk-toolbar-heading">
             <div>
               <strong>批量处理</strong>
@@ -3061,6 +3789,11 @@ function TaskListPage({
                   : "选择任务后预览一次性操作"}
               </span>
             </div>
+            <small className="bulk-toolbar-keyboard-hint">
+              <kbd>↑↓</kbd> / <kbd>J K</kbd> 浏览，<kbd>X</kbd> 选择
+              <kbd>Shift</kbd> + 点击连续范围，<kbd>Esc</kbd> 退出当前层
+              <kbd>,</kbd> 聚焦操作
+            </small>
             <div className="bulk-toolbar-selection-actions">
               <button
                 type="button"
@@ -3075,6 +3808,7 @@ function TaskListPage({
                 className="ghost-button"
                 onClick={() => {
                   setBulkSelection(new Set());
+                  bulkAnchorTaskIdRef.current = controller.selectedId;
                   setBulkPreview(undefined);
                   setBulkAutomationPreview(undefined);
                 }}
@@ -3102,7 +3836,8 @@ function TaskListPage({
                 type="button"
                 className="soft-button"
                 disabled={bulkBusy}
-                onClick={() => {
+                onClick={(event) => {
+                  bulkReturnFocusRef.current = event.currentTarget;
                   setBulkPreview(undefined);
                   setBulkAutomationPreview(undefined);
                   setBulkEditOpen(true);
@@ -3116,7 +3851,9 @@ function TaskListPage({
                 type="button"
                 className="primary-button"
                 disabled={bulkBusy}
-                onClick={() => requestBulkPreview({ kind: "complete" })}
+                onClick={(event) =>
+                  requestBulkPreview({ kind: "complete" }, event.currentTarget)
+                }
               >
                 <Check size={15} /> 完成
               </button>
@@ -3126,7 +3863,9 @@ function TaskListPage({
                 type="button"
                 className="soft-button"
                 disabled={bulkBusy}
-                onClick={() => requestBulkPreview({ kind: "reopen" })}
+                onClick={(event) =>
+                  requestBulkPreview({ kind: "reopen" }, event.currentTarget)
+                }
               >
                 <RotateCcw size={15} /> 恢复
               </button>
@@ -3136,8 +3875,11 @@ function TaskListPage({
                 type="button"
                 className="soft-button"
                 disabled={bulkBusy}
-                onClick={() =>
-                  requestBulkPreview({ kind: "move-to-today", date: dateKey() })
+                onClick={(event) =>
+                  requestBulkPreview(
+                    { kind: "move-to-today", date: dateKey() },
+                    event.currentTarget,
+                  )
                 }
               >
                 <CalendarDays size={15} /> 安排到今天
@@ -3148,7 +3890,9 @@ function TaskListPage({
                 type="button"
                 className="ghost-button danger-button"
                 disabled={bulkBusy}
-                onClick={() => requestBulkPreview({ kind: "trash" })}
+                onClick={(event) =>
+                  requestBulkPreview({ kind: "trash" }, event.currentTarget)
+                }
               >
                 <Trash2 size={15} /> 移入回收站
               </button>
@@ -3158,7 +3902,9 @@ function TaskListPage({
                 type="button"
                 className="soft-button"
                 disabled={bulkBusy}
-                onClick={() => requestBulkPreview({ kind: "restore" })}
+                onClick={(event) =>
+                  requestBulkPreview({ kind: "restore" }, event.currentTarget)
+                }
               >
                 <RotateCcw size={15} /> 恢复任务
               </button>
@@ -3192,7 +3938,9 @@ function TaskListPage({
                   type="button"
                   className="soft-button"
                   disabled={bulkBusy || selectedManualAutomationTasks.length === 0}
-                  onClick={requestBulkAutomationPreview}
+                  onClick={(event) =>
+                    requestBulkAutomationPreview(event.currentTarget)
+                  }
                   title="只会应用到满足条件且仍有变化的任务"
                 >
                   <WandSparkles size={15} /> 预览自动化
@@ -3201,7 +3949,13 @@ function TaskListPage({
             )}
           </div>
           {bulkPreview && (
-            <div className="bulk-preview" role="dialog" aria-label="批量操作预览">
+            <div
+              ref={bulkPreviewDialogRef}
+              className="bulk-preview"
+              role="dialog"
+              aria-label="批量操作预览"
+              tabIndex={-1}
+            >
               <div>
                 <strong>
                   将对 {selectedBulkTasks.length} 项任务执行“{bulkActionLabel(bulkPreview)}”
@@ -3232,7 +3986,8 @@ function TaskListPage({
                   type="button"
                   className="ghost-button"
                   disabled={bulkBusy}
-                  onClick={() => setBulkPreview(undefined)}
+                  ref={bulkPreviewCancelRef}
+                  onClick={closeBulkPreviews}
                 >
                   取消
                 </button>
@@ -3248,7 +4003,13 @@ function TaskListPage({
             </div>
           )}
           {bulkAutomationPreview && (
-            <div className="bulk-preview" role="dialog" aria-label="批量自动化预览">
+            <div
+              ref={bulkAutomationPreviewDialogRef}
+              className="bulk-preview"
+              role="dialog"
+              aria-label="批量自动化预览"
+              tabIndex={-1}
+            >
               <div>
                 <strong>
                   将对 {bulkAutomationPreview.tasks.length} 项任务应用“{bulkAutomationPreview.rule.name}”
@@ -3268,7 +4029,8 @@ function TaskListPage({
                   type="button"
                   className="ghost-button"
                   disabled={bulkBusy}
-                  onClick={() => setBulkAutomationPreview(undefined)}
+                  ref={bulkAutomationPreviewCancelRef}
+                  onClick={closeBulkPreviews}
                 >
                   取消
                 </button>
@@ -3300,7 +4062,12 @@ function TaskListPage({
           count={selectedBulkTasks.length}
           projects={projects}
           lists={lists}
-          onClose={() => setBulkEditOpen(false)}
+          onClose={() => {
+            setBulkEditOpen(false);
+            focusAfterDismiss(
+              bulkReturnFocusRef.current ?? bulkModeToggleRef.current,
+            );
+          }}
           onConfirm={(patch: BulkTaskEditPatch) => {
             setBulkEditOpen(false);
             setBulkPreview({ kind: "edit", patch });
@@ -3363,14 +4130,7 @@ function TaskListPage({
                 className="soft-button"
                 onClick={() => {
                   onClearSearch();
-                  setPriorityFilter("all");
-                  setFlaggedFilter(false);
-                  setProjectFilter("all");
-                  setTagFilter("all");
-                  setSectionFilter("all");
-                  setContextFilter("all");
-                  setDateFilter("any");
-                  setActiveSmartViewId(undefined);
+                  clearTaskFilters();
                 }}
               >
                 {search && (priorityFilter !== "all" || flaggedFilter || projectFilter !== "all" || tagFilter !== "all" || sectionFilter !== "all" || contextFilter !== "all" || dateFilter !== "any" || sortFilter !== "manual")
@@ -3469,44 +4229,65 @@ function TaskListPage({
                           (candidate) => candidate.id === task.id,
                         );
                         return (
-                          <TaskRow
-                            key={task.id}
-                            task={task}
-                            selected={controller.selectedId === task.id}
-                            controller={controller}
-                            notify={notify}
-                            selectionMode={bulkMode}
-                            selectedForBulk={bulkSelection.has(task.id)}
-                            onToggleBulk={() => toggleBulkSelection(task.id)}
-                            interactionDisabled={bulkBusy || reorderBusy}
-                            subtaskProgress={subtaskProgress.get(task.id)}
-                            onAskAgent={onAskAgent}
-                            reorderable={canReorder && !bulkMode && task.status === "open"}
-                            dragging={draggingTaskId === task.id}
-                            dropTarget={dropTargetTaskId === task.id}
-                            onDragStart={(event) => beginTodayDrag(task.id, event)}
-                            onDragEnd={endTodayDrag}
-                            onDragOver={(event) => dragOverTodayTask(task.id, event)}
-                            onDrop={(event) => void dropTodayTask(task.id, event)}
-                            moveUp={
-                              canReorder && sectionIndex > 0
-                                ? () =>
-                                    void moveTodayTask(
-                                      task.id,
-                                      section.tasks[sectionIndex - 1].id,
-                                    )
-                                : undefined
-                            }
-                            moveDown={
-                              canReorder && sectionIndex < section.tasks.length - 1
-                                ? () =>
-                                    void moveTodayTask(
-                                      task.id,
-                                      section.tasks[sectionIndex + 1].id,
-                                    )
-                                : undefined
-                            }
-                          />
+                          <Fragment key={task.id}>
+                            <TaskRow
+                              task={task}
+                              selected={controller.selectedId === task.id}
+                              controller={controller}
+                              notify={notify}
+                              selectionMode={bulkMode}
+                              selectedForBulk={bulkSelection.has(task.id)}
+                              onToggleBulk={(event) => toggleBulkSelection(task.id, event)}
+                              interactionDisabled={bulkBusy || reorderBusy}
+                              subtaskProgress={subtaskProgress.get(task.id)}
+                              onAskAgent={onAskAgent}
+                              reorderable={canReorder && !bulkMode && task.status === "open"}
+                              dragging={draggingTaskId === task.id}
+                              dropTarget={dropTargetTaskId === task.id}
+                              onDragStart={(event) => beginTodayDrag(task.id, event)}
+                              onDragEnd={endTodayDrag}
+                              onDragOver={(event) => dragOverTodayTask(task.id, event)}
+                              onDrop={(event) => void dropTodayTask(task.id, event)}
+                              moveUp={
+                                canReorder && sectionIndex > 0
+                                  ? () =>
+                                      void moveTodayTask(
+                                        task.id,
+                                        section.tasks[sectionIndex - 1].id,
+                                      )
+                                  : undefined
+                              }
+                              moveDown={
+                                canReorder && sectionIndex < section.tasks.length - 1
+                                  ? () =>
+                                      void moveTodayTask(
+                                        task.id,
+                                        section.tasks[sectionIndex + 1].id,
+                                      )
+                                  : undefined
+                              }
+                            />
+                            {section.id === "planned-today" &&
+                              inlineComposerRoute === "today" &&
+                              canInsertAfterSelected &&
+                              inlineInsertAfterTaskId === task.id && (
+                                <InlineTaskComposer
+                                  route="today"
+                                  controller={controller}
+                                  notify={notify}
+                                  placement="after"
+                                  afterTaskTitle={task.title}
+                                  autoFocus
+                                  onCancel={() => {
+                                    setInlineInsertAfterTaskId(undefined);
+                                    window.requestAnimationFrame(() => {
+                                      focusTask(task.id);
+                                    });
+                                  }}
+                                  onCreated={handleInlineTaskCreated}
+                                />
+                              )}
+                          </Fragment>
                         );
                       })}
                     </div>
@@ -3523,7 +4304,10 @@ function TaskListPage({
           onUpdate={controller.update}
           onComplete={controller.toggleComplete}
           onOpenTask={(taskId) => controller.select(taskId)}
-          onClose={() => setInboxTriageOpen(false)}
+          onClose={() => {
+            onInboxTriageOpenChange(false);
+            focusAfterDismiss(inboxTriageTriggerRef.current);
+          }}
         />
       )}
     </main>
@@ -3538,6 +4322,7 @@ function TaskInspector({
   notify,
   onAskAgent,
   onClose,
+  onToggleCollapse,
 }: {
   task?: Task;
   controller: TaskController;
@@ -3550,6 +4335,7 @@ function TaskInspector({
   ) => void;
   onAskAgent: (prompt: string) => void;
   onClose?: () => void;
+  onToggleCollapse?: () => void;
 }) {
   const [title, setTitle] = useState(task?.title ?? "");
   const [notes, setNotes] = useState(task?.notes ?? "");
@@ -3596,6 +4382,10 @@ function TaskInspector({
   const [customFieldKey, setCustomFieldKey] = useState("");
   const [customFieldValue, setCustomFieldValue] = useState("");
   const [customFieldType, setCustomFieldType] = useState<CustomFieldType>("text");
+  const customFieldsRef = useRef<Record<string, JsonValue>>(
+    task?.customFields ?? {},
+  );
+  const customFieldDraftRevisionRef = useRef(0);
   const [attachmentName, setAttachmentName] = useState("");
   const [attachmentUrl, setAttachmentUrl] = useState("");
   const [attachmentBusy, setAttachmentBusy] = useState(false);
@@ -3609,12 +4399,22 @@ function TaskInspector({
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
   const [showTemplateSave, setShowTemplateSave] = useState(false);
+  const templateSaveReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const recurrenceDialogRef = useRef<HTMLDivElement>(null);
+  const recurrenceCancelRef = useRef<HTMLButtonElement>(null);
+  const pendingPatchReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const attachmentDialogRef = useRef<HTMLElement>(null);
+  const attachmentCloseRef = useRef<HTMLButtonElement>(null);
+  const attachmentPreviewReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
   const [skipRecurringBusy, setSkipRecurringBusy] = useState(false);
   const [manualAutomations, setManualAutomations] = useState<
     readonly TaskAutomationRule[]
   >([]);
   const [automationBusy, setAutomationBusy] = useState<string>();
   const editingTaskIdRef = useRef<string | undefined>(undefined);
+  const editorDraftRecoveryTaskRef = useRef<string | undefined>(undefined);
+  const [, setEditorStateRevision] = useState(0);
+  const [editorSaveCount, setEditorSaveCount] = useState(0);
   // A native input can emit a second blur save before the first IPC reply.
   // Per-field revisions stop the older completion from clearing a newer
   // local draft or letting a refreshed task prop overwrite it.
@@ -3626,6 +4426,7 @@ function TaskInspector({
     dirtyFieldsRef.current.add(field);
     const revision = (dirtyRevisionsRef.current[field] ?? 0) + 1;
     dirtyRevisionsRef.current[field] = revision;
+    setEditorStateRevision((value) => value + 1);
     return revision;
   };
   const currentDirtyRevision = (field: TaskEditorDirtyField): number =>
@@ -3633,16 +4434,19 @@ function TaskInspector({
   const clearDirtyIfCurrent = (
     field: TaskEditorDirtyField,
     revision: number,
-  ): void => {
-    if (dirtyRevisionsRef.current[field] === revision)
+  ): boolean => {
+    if (dirtyRevisionsRef.current[field] === revision) {
       dirtyFieldsRef.current.delete(field);
+      setEditorStateRevision((value) => value + 1);
+      return true;
+    }
+    return false;
   };
   const [showActions, setShowActions] = useState(false);
   const [showDependencyGraph, setShowDependencyGraph] = useState(false);
   const [relatedTasks, setRelatedTasks] = useState<Task[]>([]);
   const [subtaskTitle, setSubtaskTitle] = useState("");
-  const [pendingPatch, setPendingPatch] =
-    useState<Parameters<TaskController["update"]>[1]>();
+  const [pendingPatch, setPendingPatch] = useState<PendingTaskPatch>();
   const [timeBlockStart, setTimeBlockStart] = useState(
     toLocalDateTimeInput(task?.timeBlock?.startAt),
   );
@@ -3704,13 +4508,18 @@ function TaskInspector({
           ),
         );
     }
-    if (!taskChanged || !task || !window.desktopApi)
+    if (!taskChanged || !task)
       return () => {
         active = false;
       };
     editingTaskIdRef.current = task.id;
+    editorDraftRecoveryTaskRef.current = undefined;
     dirtyFieldsRef.current.clear();
     dirtyRevisionsRef.current = {};
+    setEditorSaveCount(0);
+    setEditorStateRevision((value) => value + 1);
+    customFieldsRef.current = { ...task.customFields };
+    customFieldDraftRevisionRef.current += 1;
     setTitle(task.title);
     setNotes(task.notes);
     setProjectId(projectLabel(task.projectId, projects));
@@ -3731,6 +4540,7 @@ function TaskInspector({
     );
     setShowActions(false);
     setPendingPatch(undefined);
+    pendingPatchReturnFocusRef.current = undefined;
     setSubtaskTitle("");
     setLinkUrlInput("");
     setLinkLabelInput("");
@@ -3747,6 +4557,7 @@ function TaskInspector({
     setAttachmentUrl("");
     setAttachmentPreview(undefined);
     setAttachmentPreviewSource(undefined);
+    attachmentPreviewReturnFocusRef.current = undefined;
     setPreviewBusyId(undefined);
     setTaskHistory([]);
     setTaskHistoryLoading(false);
@@ -3764,14 +4575,17 @@ function TaskInspector({
     setFocusBusy(false);
     setSubtaskBusyId(undefined);
     setRestoreBusy(false);
+    if (!window.desktopApi) {
+      return () => {
+        active = false;
+      };
+    }
     void window.desktopApi.tasks
       .getDraft(`task-editor:${task.id}`)
       .then((draft) => {
-        if (
-          !active ||
-          !draft ||
-          new Date(draft.updatedAt) <= new Date(task.updatedAt)
-        )
+        if (!active) return;
+        editorDraftRecoveryTaskRef.current = task.id;
+        if (!draft || new Date(draft.updatedAt) <= new Date(task.updatedAt))
           return;
         markDirty("title");
         setTitle(draft.text || task.title);
@@ -3781,7 +4595,8 @@ function TaskInspector({
           setNotes(data.notes);
         }
         notify("已恢复上次未保存的编辑草稿");
-      });
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -3840,13 +4655,15 @@ function TaskInspector({
     )
       return undefined;
     const timer = window.setTimeout(() => {
-      void window.desktopApi?.tasks.saveDraft({
-        id: `task-editor:${task.id}`,
-        kind: "task-editor",
-        taskId: task.id,
-        text: title,
-        data: { notes },
-      });
+      void window.desktopApi?.tasks
+        .saveDraft({
+          id: `task-editor:${task.id}`,
+          kind: "task-editor",
+          taskId: task.id,
+          text: title,
+          data: { notes },
+        })
+        .catch(() => undefined);
     }, 300);
     return () => window.clearTimeout(timer);
   }, [notes, task, title]);
@@ -3863,6 +4680,9 @@ function TaskInspector({
         .list({ includeDeleted: false })
         .then((items) => {
           if (active) setRelatedTasks(items);
+        })
+        .catch(() => {
+          if (active) setRelatedTasks([]);
         });
     } else {
       setRelatedTasks(controller.tasks);
@@ -3874,6 +4694,44 @@ function TaskInspector({
   useEffect(() => {
     setShowDependencyGraph(false);
   }, [task?.id]);
+  const restoreTaskInspectorFocus = (returnFocus: HTMLElement | undefined): void => {
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (
+        !returnFocus.isConnected ||
+        returnFocus.hasAttribute("disabled") ||
+        returnFocus.getAttribute("aria-disabled") === "true"
+      ) {
+        return;
+      }
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  const closePendingPatch = (): void => {
+    setPendingPatch(undefined);
+    const returnFocus = pendingPatchReturnFocusRef.current;
+    pendingPatchReturnFocusRef.current = undefined;
+    restoreTaskInspectorFocus(returnFocus);
+  };
+  const closeAttachmentPreview = (): void => {
+    setAttachmentPreview(undefined);
+    setAttachmentPreviewSource(undefined);
+    const returnFocus = attachmentPreviewReturnFocusRef.current;
+    attachmentPreviewReturnFocusRef.current = undefined;
+    restoreTaskInspectorFocus(returnFocus);
+  };
+  useDialogFocus(
+    recurrenceDialogRef,
+    recurrenceCancelRef,
+    closePendingPatch,
+    Boolean(pendingPatch),
+  );
+  useDialogFocus(
+    attachmentDialogRef,
+    attachmentCloseRef,
+    closeAttachmentPreview,
+    Boolean(attachmentPreview),
+  );
   if (!task)
     return (
       <aside className="inspector inspector-empty" aria-label="任务详情">
@@ -3901,13 +4759,28 @@ function TaskInspector({
   const completionVerb = needsFeishuForCosignCompletion(task)
     ? "请在飞书完成"
     : "标记完成";
+  const clearEditorDraftIfSettled = (): void => {
+    if (
+      !task ||
+      !window.desktopApi ||
+      editorDraftRecoveryTaskRef.current !== task.id ||
+      dirtyFieldsRef.current.has("title") ||
+      dirtyFieldsRef.current.has("notes")
+    ) {
+      return;
+    }
+    void window.desktopApi.tasks
+      .deleteDraft(`task-editor:${task.id}`)
+      .catch(() => undefined);
+  };
   const applySave = async (
     patch: Parameters<TaskController["update"]>[1],
     recurrenceScope?: RecurrenceEditScope,
   ): Promise<boolean> => {
+    setEditorSaveCount((value) => value + 1);
     try {
       await controller.update(task.id, patch, recurrenceScope);
-      await window.desktopApi?.tasks.deleteDraft(`task-editor:${task.id}`);
+      clearEditorDraftIfSettled();
       notify(
         recurrenceScope && recurrenceScope !== "this"
           ? "循环系列已更新"
@@ -3918,7 +4791,22 @@ function TaskInspector({
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : "保存失败", "error");
       return false;
+    } finally {
+      setEditorSaveCount((value) => Math.max(0, value - 1));
     }
+  };
+  const applyPendingPatch = (scope: RecurrenceEditScope): void => {
+    if (!pendingPatch) return;
+    const { patch, dirtyRevisions } = pendingPatch;
+    closePendingPatch();
+    void applySave(patch, scope).then((saved) => {
+      if (!saved) return;
+      for (const [field, revision] of Object.entries(dirtyRevisions)) {
+        if (revision !== undefined)
+          clearDirtyIfCurrent(field as TaskEditorDirtyField, revision);
+      }
+      clearEditorDraftIfSettled();
+    });
   };
   const saveComments = async (next: TaskComment[]): Promise<boolean> => {
     if (next.length > 100) {
@@ -3995,11 +4883,49 @@ function TaskInspector({
       notify("讨论已移除，可通过撤销恢复", "success");
     }
   };
+  const dirtyRevisionsForPatch = (
+    patch: Parameters<TaskController["update"]>[1],
+  ): Partial<Record<TaskEditorDirtyField, number>> => {
+    const patchFields: Array<[string, TaskEditorDirtyField]> = [
+      ["title", "title"],
+      ["notes", "notes"],
+      ["projectId", "projectId"],
+      ["listId", "listId"],
+      ["sectionId", "sectionId"],
+      ["tags", "tags"],
+      ["contexts", "contexts"],
+      ["plannedDate", "plannedDate"],
+      ["deferUntil", "deferUntil"],
+      ["startAt", "startAt"],
+      ["startAtIsAllDay", "startAtAllDay"],
+      ["dueAt", "dueAt"],
+      ["dueAtIsAllDay", "dueAtAllDay"],
+      ["reminders", "localReminder"],
+    ];
+    const revisions: Partial<Record<TaskEditorDirtyField, number>> = {};
+    for (const [patchField, dirtyField] of patchFields) {
+      if (
+        patchField in patch &&
+        dirtyFieldsRef.current.has(dirtyField)
+      ) {
+        revisions[dirtyField] = currentDirtyRevision(dirtyField);
+      }
+    }
+    return revisions;
+  };
   const save = async (
     patch: Parameters<TaskController["update"]>[1],
   ): Promise<boolean> => {
     if (task.recurrenceSeriesId && task.recurrence) {
-      setPendingPatch(patch);
+      const activeElement = document.activeElement;
+      pendingPatchReturnFocusRef.current =
+        activeElement instanceof HTMLElement && activeElement !== document.body
+          ? activeElement
+          : undefined;
+      setPendingPatch({
+        patch,
+        dirtyRevisions: dirtyRevisionsForPatch(patch),
+      });
       return false;
     }
     return applySave(patch);
@@ -4208,9 +5134,19 @@ function TaskInspector({
       notify(reason instanceof Error ? reason.message : "创建本地副本失败", "error");
     }
   };
+  const closeTemplateSave = (): void => {
+    setShowTemplateSave(false);
+    const returnFocus = templateSaveReturnFocusRef.current;
+    templateSaveReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
   const saveAsTaskTemplate = async (template: TaskTemplate): Promise<void> => {
     installTaskTemplate(template);
-    setShowTemplateSave(false);
+    closeTemplateSave();
     setShowActions(false);
     notify(`已保存模板「${template.name}」`, "success");
   };
@@ -4478,19 +5414,35 @@ function TaskInspector({
     } else {
       value = rawValue;
     }
+    const draftRevision = customFieldDraftRevisionRef.current;
+    const previousFields = customFieldsRef.current;
+    const nextFields = { ...previousFields, [key]: value };
+    // A save can finish after the user has already started the next field.
+    // Keep the latest field map for back-to-back additions, and only clear the
+    // composer if the response still belongs to the draft that was submitted.
+    customFieldsRef.current = nextFields;
     const saved = await save({
-      customFields: { ...task.customFields, [key]: value },
+      customFields: nextFields,
     });
-    if (saved) {
+    if (!saved && customFieldsRef.current === nextFields) {
+      customFieldsRef.current = previousFields;
+    }
+    if (saved && customFieldDraftRevisionRef.current === draftRevision) {
+      customFieldDraftRevisionRef.current += 1;
       setCustomFieldKey("");
       setCustomFieldValue("");
       setCustomFieldType("text");
     }
   };
   const removeCustomField = async (key: string): Promise<void> => {
-    const next = { ...task.customFields };
+    const previousFields = customFieldsRef.current;
+    const next = { ...previousFields };
     delete next[key];
-    await save({ customFields: next });
+    customFieldsRef.current = next;
+    const saved = await save({ customFields: next });
+    if (!saved && customFieldsRef.current === next) {
+      customFieldsRef.current = previousFields;
+    }
   };
   const addTaskAttachment = async (): Promise<void> => {
     const url = attachmentUrl.trim();
@@ -4560,8 +5512,16 @@ function TaskInspector({
       notify(error instanceof Error ? error.message : "无法打开附件", "error");
     }
   };
-  const previewTaskAttachment = async (attachment: TaskAttachment): Promise<void> => {
+  const previewTaskAttachment = async (
+    attachment: TaskAttachment,
+    trigger?: HTMLElement,
+  ): Promise<void> => {
     if (!attachment.localPath || !window.desktopApi?.tasks.previewAttachment) return;
+    const activeElement = trigger ?? document.activeElement;
+    attachmentPreviewReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
     setPreviewBusyId(attachment.id);
     try {
       setAttachmentPreview(await window.desktopApi.tasks.previewAttachment(attachment));
@@ -4689,7 +5649,12 @@ function TaskInspector({
         `已应用“${rule.name}” · ${taskAutomationActionLabel(rule.action)}`,
         "success",
         operationId
-          ? { label: "撤销", run: () => void controller.undo(operationId) }
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoTaskOperationWithFeedback(controller, operationId, notify);
+              },
+            }
           : undefined,
       );
     } catch (reason) {
@@ -4747,9 +5712,15 @@ function TaskInspector({
   const pendingTemporalChange = Boolean(
     pendingPatch &&
       ["plannedDate", "startAt", "dueAt", "timeBlock", "reminders"].some(
-        (field) => field in pendingPatch,
+        (field) => field in pendingPatch.patch,
       ),
   );
+  const editorStatus =
+    editorSaveCount > 0
+      ? "saving"
+      : dirtyFieldsRef.current.size > 0
+        ? "dirty"
+        : "idle";
   return (
     <>
       <aside className="inspector" aria-label="任务详情">
@@ -4774,27 +5745,50 @@ function TaskInspector({
                     ? "已同步"
                     : task.sync.status === "local"
                       ? "本地"
-                      : task.sync.status}
+              : task.sync.status}
           </span>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="更多任务操作"
-            aria-expanded={showActions}
-            onClick={() => setShowActions((value) => !value)}
-          >
-            <MoreHorizontal size={17} />
-          </button>
-          {onClose && (
+          {editorStatus !== "idle" && (
+            <span
+              className={`inspector-save-state ${editorStatus === "saving" ? "is-saving" : "is-dirty"}`}
+              role={editorStatus === "saving" ? "status" : undefined}
+              aria-live="polite"
+            >
+              <span className="inspector-save-dot" aria-hidden="true" />
+              {editorStatus === "saving" ? "正在保存…" : "有未保存编辑"}
+            </span>
+          )}
+          <div className="inspector-header-actions">
+            {onToggleCollapse && (
+              <button
+                type="button"
+                className="icon-button inspector-collapse"
+                aria-label="收起任务详情"
+                title="收起任务详情"
+                onClick={onToggleCollapse}
+              >
+                <PanelRightClose size={17} />
+              </button>
+            )}
             <button
               type="button"
-              className="icon-button inspector-close"
-              aria-label="关闭任务详情"
-              onClick={onClose}
+              className="icon-button"
+              aria-label="更多任务操作"
+              aria-expanded={showActions}
+              onClick={() => setShowActions((value) => !value)}
             >
-              <X size={17} />
+              <MoreHorizontal size={17} />
             </button>
-          )}
+            {onClose && (
+              <button
+                type="button"
+                className="icon-button inspector-close"
+                aria-label="关闭任务详情"
+                onClick={onClose}
+              >
+                <X size={17} />
+              </button>
+            )}
+          </div>
           {showActions && (
             <div className="inspector-menu">
               <button type="button" onClick={() => void duplicateAsLocal()}>
@@ -4802,7 +5796,8 @@ function TaskInspector({
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={(event) => {
+                  templateSaveReturnFocusRef.current = event.currentTarget;
                   setShowTemplateSave(true);
                   setShowActions(false);
                 }}
@@ -4823,7 +5818,13 @@ function TaskInspector({
                           operationId
                             ? {
                                 label: "撤销",
-                                run: () => void controller.undo(operationId),
+                                run: () => {
+                                  void undoTaskOperationWithFeedback(
+                                    controller,
+                                    operationId,
+                                    notify,
+                                  );
+                                },
                               }
                             : undefined,
                         ),
@@ -4917,11 +5918,15 @@ function TaskInspector({
               if (!next) {
                 setTitle(task.title);
                 clearDirtyIfCurrent("title", revision);
+                clearEditorDraftIfSettled();
                 notify("任务标题不能为空", "error");
                 return;
               }
               void save({ title: next }).then((saved) => {
-                if (saved) clearDirtyIfCurrent("title", revision);
+                if (saved) {
+                  clearDirtyIfCurrent("title", revision);
+                  clearEditorDraftIfSettled();
+                }
               });
             }}
             aria-label="任务标题"
@@ -4937,7 +5942,10 @@ function TaskInspector({
               if (!dirtyFieldsRef.current.has("notes")) return;
               const revision = currentDirtyRevision("notes");
               void save({ notes }).then((saved) => {
-                if (saved) clearDirtyIfCurrent("notes", revision);
+                if (saved) {
+                  clearDirtyIfCurrent("notes", revision);
+                  clearEditorDraftIfSettled();
+                }
               });
             }}
             placeholder="添加备注…"
@@ -5301,7 +6309,11 @@ function TaskInspector({
                   <button
                     type="button"
                     className="task-link-open"
-                    onClick={() => void window.desktopApi?.shell.openExternal(link.url)}
+                    onClick={() =>
+                      void window.desktopApi?.shell
+                        .openExternal(link.url)
+                        .catch(() => undefined)
+                    }
                     title={link.url}
                   >
                     <ExternalLink size={14} aria-hidden="true" />
@@ -5377,7 +6389,11 @@ function TaskInspector({
                       <button
                         type="button"
                         className="research-card-source"
-                        onClick={() => void window.desktopApi?.shell.openExternal(card.url!)}
+                        onClick={() =>
+                          void window.desktopApi?.shell
+                            .openExternal(card.url!)
+                            .catch(() => undefined)
+                        }
                         title={card.url}
                       >
                         <ExternalLink size={13} aria-hidden="true" />
@@ -5489,7 +6505,10 @@ function TaskInspector({
               id="custom-field-key"
               className="field-input"
               value={customFieldKey}
-              onChange={(event) => setCustomFieldKey(event.target.value)}
+              onChange={(event) => {
+                customFieldDraftRevisionRef.current += 1;
+                setCustomFieldKey(event.target.value);
+              }}
               placeholder="字段名称"
               aria-label="自定义字段名称"
               maxLength={40}
@@ -5499,6 +6518,7 @@ function TaskInspector({
               className="field-select"
               value={customFieldType}
               onChange={(event) => {
+                customFieldDraftRevisionRef.current += 1;
                 const nextType = event.target.value as CustomFieldType;
                 setCustomFieldType(nextType);
                 if (nextType === "checkbox" && !customFieldValue) setCustomFieldValue("false");
@@ -5515,7 +6535,10 @@ function TaskInspector({
                 id="custom-field-value"
                 className="field-select"
                 value={customFieldValue || "false"}
-                onChange={(event) => setCustomFieldValue(event.target.value)}
+                onChange={(event) => {
+                  customFieldDraftRevisionRef.current += 1;
+                  setCustomFieldValue(event.target.value);
+                }}
                 aria-label="自定义字段值"
               >
                 <option value="false">未勾选</option>
@@ -5527,7 +6550,10 @@ function TaskInspector({
                 className="field-input"
                 type={customFieldType === "date" ? "date" : customFieldType === "number" ? "number" : "text"}
                 value={customFieldValue}
-                onChange={(event) => setCustomFieldValue(event.target.value)}
+                onChange={(event) => {
+                  customFieldDraftRevisionRef.current += 1;
+                  setCustomFieldValue(event.target.value);
+                }}
                 placeholder={customFieldType === "url" ? "https://…" : customFieldType === "number" ? "例如 30" : "字段值"}
                 aria-label="自定义字段值"
                 maxLength={500}
@@ -5575,7 +6601,9 @@ function TaskInspector({
                       aria-label={`预览附件${attachment.name}`}
                       title="预览附件"
                       disabled={previewBusyId === attachment.id}
-                      onClick={() => void previewTaskAttachment(attachment)}
+                      onClick={(event) =>
+                        void previewTaskAttachment(attachment, event.currentTarget)
+                      }
                     >
                       <Eye size={14} aria-hidden="true" />
                     </button>
@@ -6389,10 +7417,12 @@ function TaskInspector({
       {pendingPatch && (
         <div className="modal-backdrop">
           <div
+            ref={recurrenceDialogRef}
             className="modal-sheet compact-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="recurrence-scope-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -6411,7 +7441,8 @@ function TaskInspector({
               <button
                 type="button"
                 className="soft-button"
-                onClick={() => setPendingPatch(undefined)}
+                ref={recurrenceCancelRef}
+                onClick={closePendingPatch}
               >
                 取消
               </button>
@@ -6419,11 +7450,7 @@ function TaskInspector({
               <button
                 type="button"
                 className="soft-button"
-                onClick={() => {
-                  const patch = pendingPatch;
-                  setPendingPatch(undefined);
-                  void applySave(patch, "this");
-                }}
+                onClick={() => applyPendingPatch("this")}
               >
                 仅本次
               </button>
@@ -6431,11 +7458,7 @@ function TaskInspector({
                 type="button"
                 className="soft-button"
                 disabled={pendingTemporalChange}
-                onClick={() => {
-                  const patch = pendingPatch;
-                  setPendingPatch(undefined);
-                  void applySave(patch, "future");
-                }}
+                onClick={() => applyPendingPatch("future")}
               >
                 本次及以后
               </button>
@@ -6443,11 +7466,7 @@ function TaskInspector({
                 type="button"
                 className="primary-button"
                 disabled={pendingTemporalChange}
-                onClick={() => {
-                  const patch = pendingPatch;
-                  setPendingPatch(undefined);
-                  void applySave(patch, "series");
-                }}
+                onClick={() => applyPendingPatch("series")}
               >
                 整个系列
               </button>
@@ -6461,16 +7480,17 @@ function TaskInspector({
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setAttachmentPreview(undefined);
-              setAttachmentPreviewSource(undefined);
+              closeAttachmentPreview();
             }
           }}
         >
           <section
+            ref={attachmentDialogRef}
             className="modal-sheet attachment-preview-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="attachment-preview-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon"><Eye size={19} /></span>
@@ -6489,11 +7509,9 @@ function TaskInspector({
               <button
                 type="button"
                 className="icon-button"
+                ref={attachmentCloseRef}
                 aria-label="关闭附件预览"
-                onClick={() => {
-                  setAttachmentPreview(undefined);
-                  setAttachmentPreviewSource(undefined);
-                }}
+                onClick={closeAttachmentPreview}
               >
                 <X size={16} />
               </button>
@@ -6521,10 +7539,7 @@ function TaskInspector({
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => {
-                  setAttachmentPreview(undefined);
-                  setAttachmentPreviewSource(undefined);
-                }}
+                onClick={closeAttachmentPreview}
               >
                 完成
               </button>
@@ -6536,7 +7551,7 @@ function TaskInspector({
         <TaskTemplateSaveSheet
           task={task}
           subtasks={subtasks}
-          onClose={() => setShowTemplateSave(false)}
+          onClose={closeTemplateSave}
           onConfirm={saveAsTaskTemplate}
         />
       )}
@@ -6584,8 +7599,16 @@ function NewTaskSheet({
   const [recurrenceInterval, setRecurrenceInterval] = useState(1);
   const [feishuStatus, setFeishuStatus] = useState<FeishuStatusView>();
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  useDialogFocus(dialogRef, titleInputRef, () => {
+    if (!submitting) onClose();
+  });
   useEffect(() => {
-    void window.desktopApi?.feishu.status().then(setFeishuStatus);
+    void window.desktopApi?.feishu
+      .status()
+      .then(setFeishuStatus)
+      .catch(() => undefined);
     return window.desktopApi?.events.onFeishuStatus(setFeishuStatus);
   }, []);
   const submit = async (event: FormEvent) => {
@@ -6689,13 +7712,14 @@ function NewTaskSheet({
     <div
       className="modal-backdrop"
       role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <form
+        ref={dialogRef}
         className="modal-sheet new-task-sheet"
         onSubmit={(event) => void submit(event)}
         aria-label="新建任务"
         aria-busy={submitting}
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -6710,6 +7734,7 @@ function NewTaskSheet({
           <div className="detail-field">
             <label htmlFor="new-title">标题</label>
             <input
+              ref={titleInputRef}
               id="new-title"
               className="field-input"
               autoFocus
@@ -6993,12 +8018,14 @@ function AgentPage({
     sourceText: string;
     drafts: CalendarActionItemDraft[];
   }>();
+  const agentActionItemsReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
   const [agentResearchCard, setAgentResearchCard] = useState<{
     taskId: string;
     taskTitle: string;
     sourceText: string;
     draft: ReturnType<typeof buildAgentResearchCardDraft>;
   }>();
+  const agentResearchCardReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
   const [agentCapabilities, setAgentCapabilities] = useState(
     defaultSettings.agentCapabilities,
   );
@@ -7025,7 +8052,12 @@ function AgentPage({
     return `模型未启用。今天这个视图有 ${controller.tasks.filter((task) => task.status === "open").length} 项未完成；启用模型后可用自然语言查询、创建和整理任务。`;
   };
   const chat = useAgentChat({
-    initialMessage: `我可以查询、创建和整理任务。当前有 ${controller.tasks.length} 项任务在这个视图里。`,
+    // The Agent page stays mounted while navigation changes. Reflect the
+    // loading state first, then refresh the generated welcome when the task
+    // snapshot arrives so it cannot permanently show the loading-time count.
+    initialMessage: controller.loading
+      ? "我可以查询、创建和整理任务。正在读取当前视图的任务…"
+      : `我可以查询、创建和整理任务。当前有 ${controller.tasks.length} 项任务在这个视图里。`,
     onFallback: fallback,
     persistConversation: true,
   });
@@ -7120,12 +8152,12 @@ function AgentPage({
     );
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `todo-agent-conversation-${new Date().toISOString().slice(0, 10)}.md`;
+    anchor.download = `todo-agent-conversation-${dateKey()}.md`;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
     notify("对话已导出为 Markdown", "success");
   };
-  const openAgentActionItems = (text: string): void => {
+  const openAgentActionItems = (text: string, trigger?: HTMLElement): void => {
     const drafts = extractActionItemsFromText({
       id: `agent-reply-${crypto.randomUUID()}`,
       label: "Agent 研究回复",
@@ -7136,9 +8168,20 @@ function AgentPage({
       notify("回复中没有识别到明确行动项", "info");
       return;
     }
+    agentActionItemsReturnFocusRef.current = trigger;
     setAgentActionItems({ sourceText: text, drafts });
   };
-  const openAgentResearchCard = (text: string): void => {
+  const closeAgentActionItems = (): void => {
+    setAgentActionItems(undefined);
+    const returnFocus = agentActionItemsReturnFocusRef.current;
+    agentActionItemsReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  const openAgentResearchCard = (text: string, trigger?: HTMLElement): void => {
     const task = controller.selected;
     if (!task) {
       notify("请先在任务页选中要关联的任务", "info");
@@ -7148,11 +8191,22 @@ function AgentPage({
       notify("当前任务最多保留 20 张研究卡", "error");
       return;
     }
+    agentResearchCardReturnFocusRef.current = trigger;
     setAgentResearchCard({
       taskId: task.id,
       taskTitle: task.title,
       sourceText: text,
       draft: buildAgentResearchCardDraft(text, dateKey()),
+    });
+  };
+  const closeAgentResearchCard = (): void => {
+    setAgentResearchCard(undefined);
+    const returnFocus = agentResearchCardReturnFocusRef.current;
+    agentResearchCardReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
     });
   };
   const saveAgentResearchCard = async (
@@ -7180,7 +8234,7 @@ function AgentPage({
       researchCards: [...existingCards, card],
     });
     notify(`研究卡已保存到“${task.title}”`, "success");
-    setAgentResearchCard(undefined);
+    closeAgentResearchCard();
   };
   useEffect(() => {
     if (!initialPrompt) return;
@@ -7542,6 +8596,7 @@ function AgentPage({
             }}
           />
         )}
+        <AgentContextControls chat={chat} />
         <div className="composer">
           <textarea
             value={input}
@@ -7658,7 +8713,7 @@ function AgentPage({
           sourceLabel="Agent 研究回复"
           sourceText={agentActionItems.sourceText}
           drafts={agentActionItems.drafts}
-          onClose={() => setAgentActionItems(undefined)}
+          onClose={closeAgentActionItems}
           onConfirm={async (items) => {
             let created = 0;
             try {
@@ -7684,7 +8739,7 @@ function AgentPage({
               );
             }
             notify(`已创建 ${created} 项本地行动任务`, "success");
-            setAgentActionItems(undefined);
+            closeAgentActionItems();
           }}
         />
       )}
@@ -7693,7 +8748,7 @@ function AgentPage({
           taskTitle={agentResearchCard.taskTitle}
           sourceText={agentResearchCard.sourceText}
           draft={agentResearchCard.draft}
-          onClose={() => setAgentResearchCard(undefined)}
+          onClose={closeAgentResearchCard}
           onConfirm={saveAgentResearchCard}
         />
       )}
@@ -7754,6 +8809,31 @@ function PermissionSheet({
   onAllow: () => void;
   onAllowForHour?: () => void | Promise<void>;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const denyButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  useEffect(() => {
+    const activeElement = document.activeElement;
+    returnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    return () => {
+      const returnFocus = returnFocusRef.current;
+      if (!returnFocus) return;
+      window.requestAnimationFrame(() => {
+        if (
+          !returnFocus.isConnected ||
+          returnFocus.hasAttribute("disabled") ||
+          returnFocus.getAttribute("aria-disabled") === "true"
+        ) {
+          return;
+        }
+        returnFocus.focus({ preventScroll: true });
+      });
+    };
+  }, []);
+  useDialogFocus(dialogRef, denyButtonRef, onDeny);
   const reviewDescription = !approval
     ? "这是批量操作；请确认精确目标与可逆性。"
     : approval.toolName.startsWith("task_bulk_")
@@ -7765,10 +8845,12 @@ function PermissionSheet({
   return (
     <div className="modal-backdrop">
       <div
+        ref={dialogRef}
         className="modal-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="permission-title"
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -7831,7 +8913,12 @@ function PermissionSheet({
           标准模式下，批量、删除或外部修改不会自动记住授权。
         </div>
         <div className="modal-actions">
-          <button type="button" className="soft-button" onClick={onDeny}>
+          <button
+            ref={denyButtonRef}
+            type="button"
+            className="soft-button"
+            onClick={onDeny}
+          >
             拒绝
           </button>
           <span className="action-spacer" />
@@ -7862,14 +8949,44 @@ function ActivityPage({
 }) {
   const [records, setRecords] = useState<AuditRecord[]>([]);
   const [selected, setSelected] = useState<AuditRecord>();
+  const auditDialogRef = useRef<HTMLDivElement>(null);
+  const auditDoneButtonRef = useRef<HTMLButtonElement>(null);
+  const auditReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const rememberAuditTrigger = (trigger: HTMLElement): void => {
+    auditReturnFocusRef.current = trigger;
+  };
+  const closeAuditDetail = (): void => {
+    setSelected(undefined);
+    const returnFocus = auditReturnFocusRef.current;
+    auditReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (
+        !returnFocus.isConnected ||
+        returnFocus.hasAttribute("disabled") ||
+        returnFocus.getAttribute("aria-disabled") === "true"
+      ) {
+        return;
+      }
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  useDialogFocus(
+    auditDialogRef,
+    auditDoneButtonRef,
+    closeAuditDetail,
+    Boolean(selected),
+  );
   useEffect(() => {
     void window.desktopApi?.agent
       .audit(300)
-      .then((value) => setRecords(value.toReversed()));
+      .then((value) => setRecords(value.toReversed()))
+      .catch(() => undefined);
     return window.desktopApi?.events.onAgentEvent(() => {
       void window.desktopApi?.agent
         .audit(300)
-        .then((value) => setRecords(value.toReversed()));
+        .then((value) => setRecords(value.toReversed()))
+        .catch(() => undefined);
     });
   }, []);
   const exportAudit = async () => {
@@ -7958,7 +9075,10 @@ function ActivityPage({
             <button
               type="button"
               className="ghost-button"
-              onClick={() => setSelected(item)}
+              onClick={(event) => {
+                rememberAuditTrigger(event.currentTarget);
+                setSelected(item);
+              }}
             >
               详情
             </button>
@@ -7968,10 +9088,12 @@ function ActivityPage({
       {selected && (
         <div className="modal-backdrop">
           <div
+            ref={auditDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="audit-detail-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -8018,7 +9140,8 @@ function ActivityPage({
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => setSelected(undefined)}
+                ref={auditDoneButtonRef}
+                onClick={closeAuditDetail}
               >
                 完成
               </button>
@@ -10421,6 +11544,95 @@ function SettingsPage({
   });
   const [markdownIncludesHistory, setMarkdownIncludesHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+  const settingsModalReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const disconnectDialogRef = useRef<HTMLDivElement>(null);
+  const disconnectCancelRef = useRef<HTMLButtonElement>(null);
+  const dataPreviewDialogRef = useRef<HTMLDivElement>(null);
+  const importStrategyRef = useRef<HTMLSelectElement>(null);
+  const petDataPreviewDialogRef = useRef<HTMLDivElement>(null);
+  const petImportStrategyRef = useRef<HTMLSelectElement>(null);
+  const clearDataDialogRef = useRef<HTMLDivElement>(null);
+  const clearDataCancelRef = useRef<HTMLButtonElement>(null);
+  const rememberSettingsModalTrigger = (trigger?: HTMLElement): void => {
+    const activeElement = trigger ?? document.activeElement;
+    settingsModalReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+  };
+  const restoreSettingsModalFocus = (): void => {
+    const returnFocus = settingsModalReturnFocusRef.current;
+    settingsModalReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (
+        !returnFocus.isConnected ||
+        returnFocus.hasAttribute("disabled") ||
+        returnFocus.getAttribute("aria-disabled") === "true"
+      ) {
+        return;
+      }
+      returnFocus.focus({ preventScroll: true });
+    });
+  };
+  const closeDisconnectSheet = (): void => {
+    setDisconnectSheet(false);
+    restoreSettingsModalFocus();
+  };
+  const closeDataPreview = (cancel = true): void => {
+    if (cancel && dataPreview) {
+      void window.desktopApi?.data
+        .cancelPreview(dataPreview.previewToken)
+        .catch(() => undefined);
+    }
+    setDataPreview(undefined);
+    restoreSettingsModalFocus();
+  };
+  const closePetDataPreview = (cancel = true): void => {
+    if (cancel && petDataPreview) {
+      void window.desktopApi?.pet
+        .cancelDataImport(petDataPreview.previewToken)
+        .catch(() => undefined);
+    }
+    setPetDataPreview(undefined);
+    restoreSettingsModalFocus();
+  };
+  const closeClearDataSheet = (): void => {
+    setClearDataSheet(false);
+    restoreSettingsModalFocus();
+  };
+  useDialogFocus(
+    disconnectDialogRef,
+    disconnectCancelRef,
+    () => {
+      if (!saving) closeDisconnectSheet();
+    },
+    disconnectSheet,
+  );
+  useDialogFocus(
+    dataPreviewDialogRef,
+    importStrategyRef,
+    () => {
+      if (!saving) closeDataPreview();
+    },
+    Boolean(dataPreview),
+  );
+  useDialogFocus(
+    petDataPreviewDialogRef,
+    petImportStrategyRef,
+    () => {
+      if (!saving) closePetDataPreview();
+    },
+    Boolean(petDataPreview),
+  );
+  useDialogFocus(
+    clearDataDialogRef,
+    clearDataCancelRef,
+    () => {
+      if (!saving) closeClearDataSheet();
+    },
+    clearDataSheet,
+  );
   const [automationName, setAutomationName] = useState("");
   const [automationTrigger, setAutomationTrigger] =
     useState<TaskAutomationTrigger>("task-created");
@@ -10506,10 +11718,7 @@ function SettingsPage({
     )).sort((left, right) => left.localeCompare(right, "zh-CN")).slice(0, 100),
     [projectController.tasks],
   );
-  const activeAiProvider =
-    appSettings.ai.routing === "local-only"
-      ? appSettings.ai.fallback
-      : appSettings.ai;
+  const activeAiProvider = agentProviderFor(appSettings);
   const activeAiModelConfigured = Boolean(activeAiProvider.model.trim());
   const activeAiAuthConfigured =
     activeAiProvider.authMode === "none" || Boolean(activeAiProvider.credentialId);
@@ -10539,7 +11748,7 @@ function SettingsPage({
       .get()
       .then(setAppSettings)
       .catch(() => notify("读取设置失败", "error"));
-    void window.desktopApi.feishu.status().then(setFeishuStatus);
+    void window.desktopApi.feishu.status().then(setFeishuStatus).catch(() => undefined);
     void window.desktopApi.agent
       .modelUsage()
       .then(setModelUsage)
@@ -11067,7 +12276,7 @@ function SettingsPage({
         }
         await window.desktopApi.tasks.purge(task.id);
       }
-      setDisconnectSheet(false);
+      closeDisconnectSheet();
       notify(
         strategy === "keep"
           ? "已断开飞书；本地缓存、映射和冲突记录均已保留"
@@ -11180,12 +12389,6 @@ function SettingsPage({
       setSaving(false);
     }
   };
-  const cancelPetDataImport = () => {
-    if (petDataPreview) {
-      void window.desktopApi?.pet.cancelDataImport(petDataPreview.previewToken);
-    }
-    setPetDataPreview(undefined);
-  };
   const commitPetDataImport = async () => {
     if (!window.desktopApi || !petDataPreview) return;
     setSaving(true);
@@ -11200,17 +12403,12 @@ function SettingsPage({
           : "已保留本机 Todo Pet 档案",
         "success",
       );
-      setPetDataPreview(undefined);
+      closePetDataPreview(false);
     } catch (reason) {
       notify(reason instanceof Error ? reason.message : "宠物档案导入失败", "error");
     } finally {
       setSaving(false);
     }
-  };
-  const cancelImport = () => {
-    if (dataPreview)
-      void window.desktopApi?.data.cancelPreview(dataPreview.previewToken);
-    setDataPreview(undefined);
   };
   const commitImport = async () => {
     if (!window.desktopApi || !dataPreview) return;
@@ -11224,13 +12422,13 @@ function SettingsPage({
         `导入完成：新增 ${committed.result.tasks.create} 项任务`,
         "success",
       );
-      setDataPreview(undefined);
+      closeDataPreview(false);
     } catch (reason) {
       notify(
         reason instanceof Error ? reason.message : "导入提交失败",
         "error",
       );
-      setDataPreview(undefined);
+      closeDataPreview();
     } finally {
       setSaving(false);
     }
@@ -11247,7 +12445,7 @@ function SettingsPage({
           `已清除 ${result.tasks} 项任务、${result.drafts} 份草稿`,
           "success",
         );
-        setClearDataSheet(false);
+        closeClearDataSheet();
         setAppSettings(await window.desktopApi.settings.get());
       }
     } catch (reason) {
@@ -11329,7 +12527,13 @@ function SettingsPage({
                           value ? "已启用开机启动" : "已关闭开机启动",
                           "success",
                         );
-                      });
+                      })
+                      .catch((reason) =>
+                        notify(
+                          reason instanceof Error ? reason.message : "开机启动设置失败",
+                          "error",
+                        ),
+                      );
                   else update({ launchAtLogin: value });
                 }}
                 label="开机启动"
@@ -11432,6 +12636,7 @@ function SettingsPage({
           <section className="settings-section">
             <h1>Todo Pet 与桌面</h1>
             <p>桌面宠物、随身面板和主应用保持同一任务语境。</p>
+            <BuddyGallery onOpenAgentSettings={() => setSection('ai')} />
             <div className="settings-subheading">
               <span>身份与外观</span>
               <p>同一个名字会用于桌面陪伴、提醒和对话。</p>
@@ -11466,7 +12671,13 @@ function SettingsPage({
                   if (window.desktopApi)
                     void window.desktopApi.shell
                       .setFloatingVisible(value)
-                      .then(setAppSettings);
+                      .then(setAppSettings)
+                      .catch((reason) =>
+                        notify(
+                          reason instanceof Error ? reason.message : "Todo Pet 显示设置失败",
+                          "error",
+                        ),
+                      );
                   else
                     void persist({
                       ...appSettings,
@@ -13563,6 +14774,12 @@ function SettingsPage({
                     void window.desktopApi?.feishu
                       .cancelOAuth()
                       .then(setFeishuStatus)
+                      .catch((reason) =>
+                        notify(
+                          reason instanceof Error ? reason.message : "取消授权失败",
+                          "error",
+                        ),
+                      )
                   }
                 >
                   取消授权
@@ -13606,7 +14823,10 @@ function SettingsPage({
                   type="button"
                   className="danger-button"
                   disabled={saving}
-                  onClick={() => setDisconnectSheet(true)}
+                  onClick={(event) => {
+                    rememberSettingsModalTrigger(event.currentTarget);
+                    setDisconnectSheet(true);
+                  }}
                 >
                   断开连接
                 </button>
@@ -13773,7 +14993,8 @@ function SettingsPage({
                       }
                       void navigator.clipboard
                         .writeText(activityExample)
-                        .then(() => notify("接入示例已复制", "success"));
+                        .then(() => notify("接入示例已复制", "success"))
+                        .catch(() => notify("复制失败，请手动选择示例", "error"));
                     }}
                   >
                     复制接入示例
@@ -13813,6 +15034,12 @@ function SettingsPage({
               />
             </div>
             <div className="settings-subheading">模型连接</div>
+            <div className="settings-row">
+              <div><strong>连接协议</strong><p>Ollama 使用原生 /api/chat；选择协议不会更改现有地址或密钥。</p></div>
+              <select className="settings-input" aria-label="主模型连接协议" value={appSettings.ai.protocol ?? 'openai-compatible'} onChange={event => void persist({ ...appSettings, ai: { ...appSettings.ai, protocol: event.target.value as 'openai-compatible' | 'ollama' } })}>
+                <option value="openai-compatible">OpenAI-compatible</option><option value="ollama">Ollama 本地模型</option>
+              </select>
+            </div>
             <div className="settings-row">
               <div>
                 <strong>Endpoint</strong>
@@ -13959,6 +15186,12 @@ function SettingsPage({
               </button>
             </div>
             <div className="settings-subheading">本地备用模型</div>
+            <div className="settings-row">
+              <div><strong>备用连接协议</strong><p>Ollama 本机地址通常为 http://127.0.0.1:11434，并使用无 API Key 模式。</p></div>
+              <select className="settings-input" aria-label="备用模型连接协议" value={appSettings.ai.fallback.protocol ?? 'openai-compatible'} onChange={event => void persist({ ...appSettings, ai: { ...appSettings.ai, fallback: { ...appSettings.ai.fallback, protocol: event.target.value as 'openai-compatible' | 'ollama' } } })}>
+                <option value="openai-compatible">OpenAI-compatible</option><option value="ollama">Ollama 本地模型</option>
+              </select>
+            </div>
             <div className="settings-row">
               <div>
                 <strong>启用本地备用</strong>
@@ -14247,7 +15480,7 @@ function SettingsPage({
             <div className="settings-row">
               <div>
                 <strong>与 Todo Pet 同步人格</strong>
-                <p>开启后，Agent 会跟随小窝中的陪伴性格更新表达方式；不改变权限、工具或任务规则。</p>
+                <p>开启后，Agent 跟随「设置 → Todo Pet」中的温柔、轻吐槽、安静或效率人格；关闭后使用独立表达风格，不改变权限、工具或任务规则。</p>
               </div>
               <Switch
                 checked={appSettings.persona.syncWithPet !== false}
@@ -14701,7 +15934,10 @@ function SettingsPage({
                 type="button"
                 className="soft-button"
                 disabled={saving}
-                onClick={() => void previewImport()}
+                onClick={(event) => {
+                  rememberSettingsModalTrigger(event.currentTarget);
+                  void previewImport();
+                }}
               >
                 <Upload size={15} />
                 选择文件并预览
@@ -14726,7 +15962,10 @@ function SettingsPage({
                   type="button"
                   className="soft-button"
                   disabled={saving}
-                  onClick={() => void previewPetDataImport()}
+                  onClick={(event) => {
+                    rememberSettingsModalTrigger(event.currentTarget);
+                    void previewPetDataImport();
+                  }}
                 >
                   <Upload size={15} />
                   导入并预览
@@ -14742,7 +15981,10 @@ function SettingsPage({
                 type="button"
                 className="danger-button"
                 disabled={saving}
-                onClick={() => setClearDataSheet(true)}
+                onClick={(event) => {
+                  rememberSettingsModalTrigger(event.currentTarget);
+                  setClearDataSheet(true);
+                }}
               >
                 选择清除范围
               </button>
@@ -14758,10 +16000,12 @@ function SettingsPage({
       {disconnectSheet && (
         <div className="modal-backdrop">
           <div
+            ref={disconnectDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="disconnect-feishu-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -14808,8 +16052,9 @@ function SettingsPage({
               <button
                 type="button"
                 className="soft-button"
+                ref={disconnectCancelRef}
                 disabled={saving}
-                onClick={() => setDisconnectSheet(false)}
+                onClick={closeDisconnectSheet}
               >
                 取消
               </button>
@@ -14820,10 +16065,12 @@ function SettingsPage({
       {dataPreview && (
         <div className="modal-backdrop">
           <div
+            ref={dataPreviewDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="import-preview-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -14844,6 +16091,7 @@ function SettingsPage({
                   <p>推荐先跳过已有项目，最容易撤销</p>
                 </div>
                 <select
+                  ref={importStrategyRef}
                   className="settings-input"
                   value={importStrategy}
                   onChange={(event) =>
@@ -14907,7 +16155,7 @@ function SettingsPage({
               <button
                 type="button"
                 className="soft-button"
-                onClick={cancelImport}
+                onClick={() => closeDataPreview()}
               >
                 取消
               </button>
@@ -14931,10 +16179,12 @@ function SettingsPage({
       {petDataPreview && (
         <div className="modal-backdrop">
           <div
+            ref={petDataPreviewDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="pet-import-preview-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -14971,6 +16221,7 @@ function SettingsPage({
                         <p>宠物是单一档案；跳过会保留本机，覆盖会替换本机档案。</p>
                       </div>
                       <select
+                        ref={petImportStrategyRef}
                         className="settings-input"
                         value={petImportStrategy}
                         onChange={(event) =>
@@ -15004,7 +16255,7 @@ function SettingsPage({
               })()}
             </div>
             <div className="modal-actions">
-              <button type="button" className="soft-button" onClick={cancelPetDataImport}>
+              <button type="button" className="soft-button" onClick={() => closePetDataPreview()}>
                 取消
               </button>
               <span className="action-spacer" />
@@ -15023,10 +16274,12 @@ function SettingsPage({
       {clearDataSheet && (
         <div className="modal-backdrop">
           <div
+            ref={clearDataDialogRef}
             className="modal-sheet"
             role="dialog"
             aria-modal="true"
             aria-labelledby="clear-data-title"
+            tabIndex={-1}
           >
             <div className="modal-header">
               <span className="feature-icon">
@@ -15107,7 +16360,8 @@ function SettingsPage({
               <button
                 type="button"
                 className="soft-button"
-                onClick={() => setClearDataSheet(false)}
+                ref={clearDataCancelRef}
+                onClick={closeClearDataSheet}
               >
                 取消
               </button>
@@ -15132,6 +16386,9 @@ function SettingsPage({
 
 function Onboarding({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const primaryActionRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus(dialogRef, primaryActionRef, onDone);
   const steps = [
     {
       icon: <Check size={23} />,
@@ -15153,10 +16410,12 @@ function Onboarding({ onDone }: { onDone: () => void }) {
   return (
     <div className="modal-backdrop">
       <div
+        ref={dialogRef}
         className="modal-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-title"
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">{current.icon}</span>
@@ -15198,6 +16457,7 @@ function Onboarding({ onDone }: { onDone: () => void }) {
             </button>
           )}
           <button
+            ref={primaryActionRef}
             type="button"
             className="primary-button"
             onClick={() =>
@@ -15232,6 +16492,33 @@ function ReminderActionSheet({
   );
   const [busy, setBusy] = useState(false);
   const available = new Set(delivery.actions.map((action) => action.id));
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const firstActionRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  useEffect(() => {
+    const activeElement = document.activeElement;
+    returnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    return () => {
+      const returnFocus = returnFocusRef.current;
+      if (!returnFocus) return;
+      window.requestAnimationFrame(() => {
+        if (
+          !returnFocus.isConnected ||
+          returnFocus.hasAttribute("disabled") ||
+          returnFocus.getAttribute("aria-disabled") === "true"
+        ) {
+          return;
+        }
+        returnFocus.focus({ preventScroll: true });
+      });
+    };
+  }, []);
+  useDialogFocus(dialogRef, firstActionRef, () => {
+    if (!busy) onClose();
+  });
   const act = async (action: ReminderPresetAction) => {
     if (!window.desktopApi || busy) return;
     setBusy(true);
@@ -15284,10 +16571,12 @@ function ReminderActionSheet({
   return (
     <div className="modal-backdrop">
       <div
+        ref={dialogRef}
         className="modal-sheet compact-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="reminder-action-title"
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -15312,6 +16601,7 @@ function ReminderActionSheet({
           <div className="reminder-presets">
             {available.has("snooze-10m") && (
               <button
+                ref={firstActionRef}
                 type="button"
                 className="soft-button"
                 disabled={busy}
@@ -15415,6 +16705,17 @@ function MainWindow() {
   const [search, setSearch] = useState("");
   const [agentDraft, setAgentDraft] = useState("");
   const [pendingTaskId, setPendingTaskId] = useState<string>();
+  const [pendingTaskFocusId, setPendingTaskFocusId] = useState<TaskId>();
+  const [inboxTriageRequest, setInboxTriageRequest] = useState(0);
+  const inboxTriageSequenceRef = useRef(0);
+  const [inboxTriageOpen, setInboxTriageOpen] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  const [wideDesktop, setWideDesktop] = useState(() =>
+    typeof window === "undefined"
+      ? true
+      : window.matchMedia("(min-width: 761px)").matches,
+  );
   const [feishuStatus, setFeishuStatus] = useState<FeishuStatusView>();
   const [taskCollectionEpoch, setTaskCollectionEpoch] = useState(0);
   const [sourceFilter, setSourceFilter] = useState<TaskSourceType | undefined>(
@@ -15424,6 +16725,10 @@ function MainWindow() {
     navigation.current = next;
     setRoute(next.route);
     setSourceFilter(next.sourceFilter);
+    if (next.route !== "inbox") {
+      setInboxTriageRequest(0);
+      setInboxTriageOpen(false);
+    }
   }, []);
   const navigate = useCallback(
     (
@@ -15431,6 +16736,10 @@ function MainWindow() {
       nextSourceFilter?: TaskSourceType,
       options: { replace?: boolean } = {},
     ) => {
+      // A route change invalidates a pending search jump. The search handler
+      // sets its new focus target immediately after navigating, while any
+      // later user navigation cannot leave a stale target behind.
+      setPendingTaskFocusId(undefined);
       const current = navigation.current;
       if (
         !options.replace &&
@@ -15504,13 +16813,47 @@ function MainWindow() {
   // the timeline snapshot so the week overview can show a truthful review
   // rather than silently reporting zero completions.
   const timelineCompletedController = useTaskController("completed", "", sourceFilter);
+  const [latestUndoableOperation, setLatestUndoableOperation] =
+    useState<TaskOperationSummary>();
+  const [latestRedoableOperation, setLatestRedoableOperation] =
+    useState<TaskOperationSummary>();
+  const latestUndoRequestRef = useRef(0);
+  const latestRedoRequestRef = useRef(0);
+  const undoInFlightRef = useRef<string | undefined>(undefined);
+  const redoInFlightRef = useRef<string | undefined>(undefined);
   const sidebarCounts = useSidebarCounts();
   const projectState = useProjects();
   const listState = useLists();
   const [newTask, setNewTask] = useState(false);
   const [newTaskPreset, setNewTaskPreset] = useState<CalendarFollowUpDraft>();
+  const newTaskReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const openNewTask = useCallback(() => {
+    const activeElement = document.activeElement;
+    newTaskReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
+    setNewTask(true);
+  }, []);
+  const closeNewTask = useCallback(() => {
+    setNewTask(false);
+    setNewTaskPreset(undefined);
+    const returnFocus = newTaskReturnFocusRef.current;
+    newTaskReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  }, []);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const shortcutsButtonRef = useRef<HTMLButtonElement>(null);
+  const shortcutsReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const commandPaletteReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const globalSearchRequestRef = useRef(0);
+  const globalSearchReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
   const [globalSearchTasks, setGlobalSearchTasks] = useState<Task[]>([]);
   const [globalSearchConversations, setGlobalSearchConversations] = useState<GlobalSearchConversation[]>([]);
   const [timelineFocusDate, setTimelineFocusDate] = useState<string>();
@@ -15528,12 +16871,49 @@ function MainWindow() {
     event: CalendarEvent;
     drafts: CalendarActionItemDraft[];
   }>();
+  const calendarActionItemsReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
+  const closeCalendarActionItems = useCallback(() => {
+    setCalendarActionItems(undefined);
+    const returnFocus = calendarActionItemsReturnFocusRef.current;
+    calendarActionItemsReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  }, []);
   const [activeReminder, setActiveReminder] = useState<ReminderDelivery>();
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastRouteRef = useRef(route);
   const [onboarding, setOnboarding] = useState(
     () => localStorage.getItem("todo-agent:onboarding-complete") !== "true",
   );
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 761px)");
+    const onChange = () => setWideDesktop(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    // Native window resizing is the source of truth for Electron. Chromium
+    // normally emits the MediaQueryList event as well, but the resize event
+    // keeps the preference/action surface correct across platform window
+    // managers that only update the viewport on the latter.
+    window.addEventListener("resize", onChange);
+    return () => {
+      media.removeEventListener("change", onChange);
+      window.removeEventListener("resize", onChange);
+    };
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(sidebarCollapsedStorageKey, String(sidebarCollapsed));
+    } catch {
+      // A restricted storage area should not make the main workspace unusable.
+    }
+  }, [sidebarCollapsed]);
+  const toggleSidebar = useCallback(() => {
+    if (!wideDesktop) return;
+    setSidebarCollapsed((value) => !value);
+  }, [wideDesktop]);
   const loadDailyPlan = useCallback(async () => {
     setDailyPlanLoading(true);
     setDailyPlanError(undefined);
@@ -15569,7 +16949,15 @@ function MainWindow() {
     (preset?: MorningKickoffPreset) => openDailyPlan(dateKey(), preset),
     [openDailyPlan],
   );
+  const openInboxTriage = useCallback(() => {
+    navigateTaskCollection("inbox");
+    setInboxTriageRequest(() => {
+      inboxTriageSequenceRef.current += 1;
+      return inboxTriageSequenceRef.current;
+    });
+  }, [navigateTaskCollection]);
   const loadGlobalSearch = useCallback(async () => {
+    const requestId = ++globalSearchRequestRef.current;
     setGlobalSearchLoading(true);
     setGlobalSearchError(undefined);
     try {
@@ -15578,6 +16966,7 @@ function MainWindow() {
         : [...controller.tasks, ...timelineController.tasks, ...timelineCompletedController.tasks].filter(
             (task, index, all) => all.findIndex((candidate) => candidate.id === task.id) === index,
           );
+      if (requestId !== globalSearchRequestRef.current) return;
       const collection = readStoredAgentConversationCollection();
       setGlobalSearchTasks(tasks);
       setGlobalSearchConversations(
@@ -15589,24 +16978,44 @@ function MainWindow() {
         })),
       );
     } catch (reason) {
+      if (requestId !== globalSearchRequestRef.current) return;
       setGlobalSearchError(
         reason instanceof Error ? reason.message : "暂时无法读取本地工作区",
       );
     } finally {
-      setGlobalSearchLoading(false);
+      if (requestId === globalSearchRequestRef.current) {
+        setGlobalSearchLoading(false);
+      }
     }
   }, [controller.tasks, timelineCompletedController.tasks, timelineController.tasks]);
   const openGlobalSearch = useCallback(() => {
+    const activeElement = document.activeElement;
+    globalSearchReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
     setGlobalSearchOpen(true);
     void loadGlobalSearch();
   }, [loadGlobalSearch]);
-  const closeGlobalSearch = useCallback(() => {
+  const closeGlobalSearch = useCallback((restoreFocus = true) => {
+    globalSearchRequestRef.current += 1;
     setGlobalSearchOpen(false);
+    setGlobalSearchLoading(false);
     setGlobalSearchError(undefined);
+    const returnFocus = restoreFocus ? globalSearchReturnFocusRef.current : undefined;
+    globalSearchReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
+  }, []);
+  const handleTaskFocused = useCallback((taskId: TaskId) => {
+    setPendingTaskFocusId((current) => (current === taskId ? undefined : current));
   }, []);
   const handleGlobalSearchSelect = useCallback(
     (result: GlobalSearchResult) => {
-      closeGlobalSearch();
+      closeGlobalSearch(false);
       if (result.kind === "task" && result.task) {
         setPendingTaskId(result.task.id);
         const destination = result.task.deletedAt
@@ -15615,6 +17024,7 @@ function MainWindow() {
             ? "completed"
             : "all";
         navigateTaskCollection(destination, result.task.source.type);
+        setPendingTaskFocusId(result.task.id);
         return;
       }
       if (result.kind === "conversation" && result.conversationId) {
@@ -15676,7 +17086,8 @@ function MainWindow() {
     if (!window.desktopApi) return;
     void window.desktopApi.settings
       .get()
-      .then((settings) => setOnboarding(!settings.onboardingComplete));
+      .then((settings) => setOnboarding(!settings.onboardingComplete))
+      .catch(() => undefined);
   }, []);
   const notify = useCallback(
     (
@@ -15685,7 +17096,28 @@ function MainWindow() {
       action?: ToastState["action"],
     ) => {
       const id = Date.now() + Math.random();
-      setToasts((current) => [...current, { id, message, kind, action }]);
+      let actionInvoked = false;
+      const guardedAction = action
+        ? {
+            ...action,
+            run: () => {
+              if (actionInvoked) return;
+              actionInvoked = true;
+              // An action toast represents an available transaction. Remove
+              // it as soon as the user commits that transaction so a second
+              // click cannot submit the same operation again while the IPC
+              // request is still settling.
+              setToasts((current) => current.filter((toast) => toast.id !== id));
+              action.run();
+            },
+          }
+        : undefined;
+      setToasts((current) => [
+        ...current.filter(
+          (toast) => toast.message !== message || toast.kind !== kind,
+        ),
+        { id, message, kind, action: guardedAction },
+      ]);
       window.setTimeout(
         () =>
           setToasts((current) => current.filter((toast) => toast.id !== id)),
@@ -15694,38 +17126,306 @@ function MainWindow() {
     },
     [],
   );
+  const refreshLatestUndoableOperation = useCallback(async () => {
+    const requestId = ++latestUndoRequestRef.current;
+    const taskApi = window.desktopApi?.tasks;
+    if (!taskApi || typeof taskApi.getLatestUndoableOperation !== "function") {
+      if (requestId === latestUndoRequestRef.current) {
+        setLatestUndoableOperation(undefined);
+      }
+      return;
+    }
+    try {
+      const operation = await taskApi.getLatestUndoableOperation();
+      if (requestId === latestUndoRequestRef.current) {
+        setLatestUndoableOperation(operation);
+      }
+    } catch {
+      if (requestId === latestUndoRequestRef.current) {
+        setLatestUndoableOperation(undefined);
+      }
+    }
+  }, []);
+  const refreshLatestRedoableOperation = useCallback(async () => {
+    const requestId = ++latestRedoRequestRef.current;
+    const taskApi = window.desktopApi?.tasks;
+    if (!taskApi || typeof taskApi.getLatestRedoableOperation !== "function") {
+      if (requestId === latestRedoRequestRef.current) {
+        setLatestRedoableOperation(undefined);
+      }
+      return;
+    }
+    try {
+      const operation = await taskApi.getLatestRedoableOperation();
+      if (requestId === latestRedoRequestRef.current) {
+        setLatestRedoableOperation(operation);
+      }
+    } catch {
+      if (requestId === latestRedoRequestRef.current) {
+        setLatestRedoableOperation(undefined);
+      }
+    }
+  }, []);
+  useEffect(() => {
+    const desktopApi = window.desktopApi;
+    if (
+      !desktopApi ||
+      typeof desktopApi.tasks.getLatestUndoableOperation !== "function" ||
+      typeof desktopApi.tasks.getLatestRedoableOperation !== "function"
+    ) {
+      setLatestUndoableOperation(undefined);
+      setLatestRedoableOperation(undefined);
+      return undefined;
+    }
+    void refreshLatestUndoableOperation();
+    void refreshLatestRedoableOperation();
+    return desktopApi.events.onTasksChanged(() => {
+      void refreshLatestUndoableOperation();
+      void refreshLatestRedoableOperation();
+    });
+  }, [refreshLatestRedoableOperation, refreshLatestUndoableOperation]);
+  const undoLastTaskOperation = useCallback(async () => {
+    const operation = latestUndoableOperation;
+    const taskApi = window.desktopApi?.tasks;
+    if (
+      !operation ||
+      !taskApi ||
+      undoInFlightRef.current === operation.id
+    ) {
+      return;
+    }
+    undoInFlightRef.current = operation.id;
+    // Make repeated key presses and a second palette click harmless while the
+    // main process validates the exact snapshot.
+    setLatestUndoableOperation(undefined);
+    try {
+      try {
+        await taskApi.undo(operation.id);
+      } catch (reason) {
+        await refreshLatestUndoableOperation();
+        notify(
+          taskUndoFailureMessage(reason),
+          "error",
+        );
+        return;
+      }
+      await Promise.all([
+        controller.refresh().catch(() => undefined),
+        timelineController.refresh().catch(() => undefined),
+        timelineCompletedController.refresh().catch(() => undefined),
+      ]);
+      await refreshLatestUndoableOperation();
+      setToasts((current) =>
+        current.filter(
+          (toast) => toast.kind !== "success" || toast.action?.label !== "撤销",
+        ),
+      );
+      notify("已撤销最近一次任务变更", "success");
+    } finally {
+      if (undoInFlightRef.current === operation.id) {
+        undoInFlightRef.current = undefined;
+      }
+    }
+  }, [
+    controller,
+    latestUndoableOperation,
+    notify,
+    refreshLatestUndoableOperation,
+    timelineCompletedController,
+    timelineController,
+  ]);
+  const redoLastTaskOperation = useCallback(async () => {
+    const operation = latestRedoableOperation;
+    const taskApi = window.desktopApi?.tasks;
+    if (
+      !operation ||
+      !taskApi ||
+      redoInFlightRef.current === operation.id
+    ) {
+      return;
+    }
+    redoInFlightRef.current = operation.id;
+    // Make repeated key presses and a second palette click harmless while the
+    // main process validates the exact pre-redo snapshot.
+    setLatestRedoableOperation(undefined);
+    try {
+      try {
+        await taskApi.redo(operation.id);
+      } catch (reason) {
+        await refreshLatestRedoableOperation();
+        notify(
+          reason instanceof Error
+            ? reason.message.includes("changed afterwards")
+              ? "这项变更已被后续修改，无法安全重做"
+              : reason.message
+            : "最近一次任务变更暂时无法重做",
+          "error",
+        );
+        return;
+      }
+      await Promise.all([
+        controller.refresh().catch(() => undefined),
+        timelineController.refresh().catch(() => undefined),
+        timelineCompletedController.refresh().catch(() => undefined),
+      ]);
+      await Promise.all([
+        refreshLatestUndoableOperation(),
+        refreshLatestRedoableOperation(),
+      ]);
+      setToasts((current) =>
+        current.filter(
+          (toast) => toast.kind !== "success" || toast.action?.label !== "撤销",
+        ),
+      );
+      notify("已重做最近一次任务变更", "success");
+    } finally {
+      if (redoInFlightRef.current === operation.id) {
+        redoInFlightRef.current = undefined;
+      }
+    }
+  }, [
+    controller,
+    latestRedoableOperation,
+    notify,
+    refreshLatestRedoableOperation,
+    refreshLatestUndoableOperation,
+    timelineCompletedController,
+    timelineController,
+  ]);
+  const undoTimelineOperation = useCallback(
+    async (operationId: string): Promise<void> => {
+      const taskApi = window.desktopApi?.tasks;
+      if (!taskApi) return;
+      try {
+        await taskApi.undo(operationId);
+        await Promise.all([
+          controller.refresh().catch(() => undefined),
+          timelineController.refresh().catch(() => undefined),
+          timelineCompletedController.refresh().catch(() => undefined),
+        ]);
+        await Promise.all([
+          refreshLatestUndoableOperation(),
+          refreshLatestRedoableOperation(),
+        ]);
+        notify("已撤销时间线任务变更", "success");
+      } catch (reason) {
+        await refreshLatestUndoableOperation();
+        await refreshLatestRedoableOperation();
+        notify(taskUndoFailureMessage(reason), "error");
+      }
+    },
+    [
+      controller,
+      notify,
+      refreshLatestRedoableOperation,
+      refreshLatestUndoableOperation,
+      timelineCompletedController,
+      timelineController,
+    ],
+  );
   const openCommandPalette = useCallback(() => {
+    const activeElement = document.activeElement;
+    commandPaletteReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : undefined;
     setCommandPaletteOpen(true);
   }, []);
-  const closeCommandPalette = useCallback(() => {
+  const closeCommandPalette = useCallback((restoreFocus = true) => {
     setCommandPaletteOpen(false);
+    const returnFocus = restoreFocus ? commandPaletteReturnFocusRef.current : undefined;
+    commandPaletteReturnFocusRef.current = undefined;
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (!returnFocus.isConnected || returnFocus.hasAttribute("disabled")) return;
+      returnFocus.focus({ preventScroll: true });
+    });
   }, []);
+  const openShortcuts = useCallback(() => {
+    const activeElement = document.activeElement;
+    shortcutsReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : shortcutsButtonRef.current ?? undefined;
+    setShortcutsOpen(true);
+  }, []);
+  const closeShortcuts = useCallback(() => {
+    setShortcutsOpen(false);
+    const returnFocus = shortcutsReturnFocusRef.current;
+    shortcutsReturnFocusRef.current = undefined;
+    window.requestAnimationFrame(() => {
+      const target =
+        returnFocus?.isConnected && !returnFocus.hasAttribute("disabled")
+          ? returnFocus
+          : shortcutsButtonRef.current;
+      target?.focus({ preventScroll: true });
+    });
+  }, []);
+  const commandModifier = isMacPlatform() ? "⌘" : "Ctrl";
   const commandPaletteActions = useMemo<readonly CommandPaletteAction[]>(
     () => [
+      {
+        id: "keyboard-shortcuts",
+        label: "查看快捷键",
+        description: "搜索桌面端常用操作与任务列表快捷键",
+        keywords: ["keyboard", "shortcut", "help", "快捷键", "键盘", "帮助"],
+        shortcut: "?",
+        icon: <Keyboard size={16} />,
+        run: openShortcuts,
+      },
+      ...(latestUndoableOperation
+        ? [
+            {
+              id: "undo-task-operation",
+              label: "撤销最近任务变更",
+              description: `恢复最近一次${taskHistoryOperationLabels[latestUndoableOperation.kind] ?? "任务变更"}`,
+              keywords: ["undo", "rollback", "撤销", "恢复", "回滚"],
+              shortcut: `${isMacPlatform() ? "⌘" : "Ctrl"} Z`,
+              icon: <Undo2 size={16} />,
+              run: () => void undoLastTaskOperation(),
+            },
+          ]
+        : []),
+      ...(latestRedoableOperation
+        ? [
+            {
+              id: "redo-task-operation",
+              label: "重做最近任务变更",
+              description: `重新应用最近一次${taskHistoryOperationLabels[latestRedoableOperation.kind] ?? "任务变更"}`,
+              keywords: ["redo", "reapply", "重做", "恢复操作", "再次应用"],
+              shortcut: `${isMacPlatform() ? "⌘" : "Ctrl"} ⇧ Z`,
+              icon: <Redo2 size={16} />,
+              run: () => void redoLastTaskOperation(),
+            },
+          ]
+        : []),
       {
         id: "new-task",
         label: "新建任务",
         description: "打开完整编辑器，补充日期、提醒、标签或来源",
         keywords: ["create", "new", "任务", "新增"],
-        shortcut: "⌘ N",
+        shortcut: `${commandModifier} N`,
         icon: <Plus size={16} />,
-        run: () => setNewTask(true),
+        run: openNewTask,
       },
       {
         id: "quick-capture",
         label: "快速捕获",
         description: "用一句话、语音或上下文快速记下新任务",
         keywords: ["quick", "capture", "inbox", "快捷", "语音"],
-        shortcut: "⌘ ⇧ Space",
+        shortcut: `${commandModifier} ⇧ Space`,
         icon: <Clipboard size={16} />,
-        run: () => void window.desktopApi?.shell.showQuickCapture(),
+        run: () =>
+          void window.desktopApi?.shell
+            .showQuickCapture()
+            .catch(() => notify("快速捕获窗口暂时无法打开", "error")),
       },
       {
         id: "global-search",
         label: "全局查找",
         description: "跨任务、项目、清单和本机会话搜索，不离开当前工作流",
         keywords: ["global", "workspace", "search", "find", "全局", "查找", "会话"],
-        shortcut: "⌘ ⇧ F",
+        shortcut: `${commandModifier} ⇧ F`,
         icon: <Search size={16} />,
         run: openGlobalSearch,
       },
@@ -15734,7 +17434,7 @@ function MainWindow() {
         label: "搜索当前任务列表",
         description: "进入全部任务并聚焦当前列表搜索框",
         keywords: ["search", "find", "搜索", "查找"],
-        shortcut: "⌘ F",
+        shortcut: `${commandModifier} F`,
         icon: <Search size={16} />,
         run: () => {
           navigateTaskCollection("all");
@@ -15761,7 +17461,7 @@ function MainWindow() {
         description: "逐项处理尚未安排日期、项目或清单的任务",
         keywords: ["inbox", "暂存", "整理"],
         icon: <Inbox size={16} />,
-        run: () => navigateTaskCollection("inbox"),
+        run: openInboxTriage,
       },
       {
         id: "all",
@@ -15846,8 +17546,26 @@ function MainWindow() {
         description: "重新显示并唤起置顶的 Todo Pet",
         keywords: ["floating", "pet", "show", "悬浮", "显示"],
         icon: <PanelTop size={16} />,
-        run: () => void window.desktopApi?.shell.setFloatingVisible(true),
+        run: () =>
+          void window.desktopApi?.shell
+            .setFloatingVisible(true)
+            .catch(() => notify("Todo Pet 暂时无法显示", "error")),
       },
+      ...(wideDesktop
+        ? [
+            {
+              id: sidebarCollapsed ? "show-sidebar" : "hide-sidebar",
+              label: sidebarCollapsed ? "显示侧栏" : "隐藏侧栏",
+              description: sidebarCollapsed
+                ? "恢复主导航，保留当前工作区与任务选择"
+                : "收起主导航，为任务列表和详情留出更多空间",
+              keywords: ["sidebar", "focus", "navigation", "侧栏", "专注", "导航"],
+              shortcut: `${commandModifier} /`,
+              icon: sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />,
+              run: toggleSidebar,
+            },
+          ]
+        : []),
       {
         id: "settings",
         label: "打开设置",
@@ -15857,7 +17575,24 @@ function MainWindow() {
         run: () => navigate("settings"),
       },
     ],
-    [navigate, navigateTaskCollection, notify, openDailyPlan, openGlobalSearch],
+    [
+      navigate,
+      navigateTaskCollection,
+      notify,
+      openDailyPlan,
+      openGlobalSearch,
+      openInboxTriage,
+      openNewTask,
+      openShortcuts,
+      latestRedoableOperation,
+      latestUndoableOperation,
+      commandModifier,
+      redoLastTaskOperation,
+      sidebarCollapsed,
+      toggleSidebar,
+      undoLastTaskOperation,
+      wideDesktop,
+    ],
   );
   useEffect(
     () =>
@@ -15904,7 +17639,8 @@ function MainWindow() {
             if (!draft?.text) return;
             setAgentDraft(draft.text);
             return window.desktopApi?.tasks.deleteDraft(floatingAgentDraftId);
-          });
+          })
+          .catch(() => undefined);
       }
     };
     if (window.desktopApi) {
@@ -15941,9 +17677,65 @@ function MainWindow() {
     "completed",
     "trash",
   ].includes(route);
+  useEffect(() => {
+    if (!isTaskRoute) return;
+    const compactViewport = window.matchMedia("(max-width: 980px)");
+    const restoreInspector = () => {
+      if (compactViewport.matches) setInspectorCollapsed(false);
+    };
+    restoreInspector();
+    compactViewport.addEventListener("change", restoreInspector);
+    return () => compactViewport.removeEventListener("change", restoreInspector);
+  }, [isTaskRoute]);
+  useEffect(() => {
+    if (controller.selectedId) setInspectorCollapsed(false);
+  }, [controller.selectedId]);
   const modalOpen = Boolean(
-    newTask || commandPaletteOpen || globalSearchOpen || dailyPlanOpen || activeReminder || onboarding || calendarActionItems,
+    newTask ||
+    commandPaletteOpen ||
+    shortcutsOpen ||
+    globalSearchOpen ||
+    dailyPlanOpen ||
+    activeReminder ||
+    inboxTriageOpen ||
+    onboarding ||
+    calendarActionItems,
   );
+  const focusTaskRowOrList = useCallback((taskId: TaskId) => {
+    window.requestAnimationFrame(() => {
+      const row = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-task-id]"),
+      ).find(
+        (element) =>
+          element.dataset.taskId === taskId && !element.closest("[hidden]"),
+      );
+      const target = row?.querySelector<HTMLElement>(
+        ".task-body, .task-table-title",
+      );
+      (target ?? document.querySelector<HTMLElement>(".content-column"))?.focus({
+        preventScroll: true,
+      });
+    });
+  }, []);
+  const closeSelectedTask = useCallback(() => {
+    const selectedTaskId = controller.selectedId;
+    controller.select(undefined);
+    if (selectedTaskId) focusTaskRowOrList(selectedTaskId);
+  }, [controller, focusTaskRowOrList]);
+  const collapseSelectedInspector = useCallback(() => {
+    const selectedTaskId = controller.selectedId;
+    setInspectorCollapsed(true);
+    window.requestAnimationFrame(() => {
+      const reopen = document.querySelector<HTMLElement>(
+        '[aria-label="展开任务详情"]',
+      );
+      if (reopen) {
+        reopen.focus({ preventScroll: true });
+        return;
+      }
+      if (selectedTaskId) focusTaskRowOrList(selectedTaskId);
+    });
+  }, [controller, focusTaskRowOrList]);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       const isBackShortcut = isMacPlatform()
@@ -15956,12 +17748,103 @@ function MainWindow() {
         (event.metaKey || event.ctrlKey) &&
         event.shiftKey &&
         event.key.toLocaleLowerCase() === "f";
+      const undoShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLocaleLowerCase() === "z";
+      const redoShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.key.toLocaleLowerCase() === "z";
+      const sidebarShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.key === "/" || event.code === "Slash");
+      const target = event.target instanceof Element ? event.target : undefined;
+      const shortcutHelpBlocked = target?.closest(
+        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]',
+      );
+      // A dialog-owned control must keep all desktop-global shortcuts scoped
+      // to the current layer. Individual dialogs still receive Escape and
+      // native editing shortcuts without the shell opening another surface.
+      if (target?.closest('[role="dialog"], [role="menu"]') && event.key !== "Escape") {
+        return;
+      }
+      if (
+        event.key === "?" &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !modalOpen &&
+        !shortcutHelpBlocked
+      ) {
+        event.preventDefault();
+        openShortcuts();
+        return;
+      }
+      if (
+        redoShortcut &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !modalOpen &&
+        !shortcutHelpBlocked &&
+        latestRedoableOperation
+      ) {
+        event.preventDefault();
+        void redoLastTaskOperation();
+        return;
+      }
+      if (
+        undoShortcut &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !modalOpen &&
+        !shortcutHelpBlocked &&
+        latestUndoableOperation
+      ) {
+        event.preventDefault();
+        void undoLastTaskOperation();
+        return;
+      }
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !modalOpen &&
+        !commandPaletteOpen &&
+        isTaskRoute &&
+        controller.selectedId
+      ) {
+        const target = event.target instanceof Element ? event.target : undefined;
+        if (!target?.closest('[role="dialog"], [role="menu"]')) {
+          event.preventDefault();
+          closeSelectedTask();
+        }
+        return;
+      }
       if (modalOpen && !commandPaletteOpen) {
-        if (isBackShortcut || shortcutKey || globalSearchShortcut) event.preventDefault();
+        if (isBackShortcut || shortcutKey || globalSearchShortcut || sidebarShortcut) event.preventDefault();
         return;
       }
       if (commandPaletteOpen) {
-        if (isBackShortcut || shortcutKey || globalSearchShortcut) event.preventDefault();
+        if (isBackShortcut || shortcutKey || globalSearchShortcut || sidebarShortcut) event.preventDefault();
+        return;
+      }
+      if (
+        sidebarShortcut &&
+        wideDesktop &&
+        !event.defaultPrevented &&
+        !event.isComposing &&
+        !modalOpen &&
+        !shortcutHelpBlocked
+      ) {
+        event.preventDefault();
+        toggleSidebar();
         return;
       }
       if (isBackShortcut) {
@@ -15984,7 +17867,7 @@ function MainWindow() {
             .querySelector<HTMLInputElement>("[data-search-input]")
             ?.focus();
         } else {
-          setCommandPaletteOpen(true);
+          openCommandPalette();
         }
       }
       if (
@@ -15992,7 +17875,7 @@ function MainWindow() {
         event.key.toLocaleLowerCase() === "n"
       ) {
         event.preventDefault();
-        setNewTask(true);
+        openNewTask();
       }
       if (globalSearchShortcut) {
         event.preventDefault();
@@ -16001,7 +17884,24 @@ function MainWindow() {
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [commandPaletteOpen, goBack, isTaskRoute, modalOpen, openGlobalSearch]);
+  }, [
+    commandPaletteOpen,
+    closeSelectedTask,
+    controller,
+    goBack,
+    isTaskRoute,
+    latestRedoableOperation,
+    latestUndoableOperation,
+    modalOpen,
+    openCommandPalette,
+    openGlobalSearch,
+    openNewTask,
+    openShortcuts,
+    redoLastTaskOperation,
+    toggleSidebar,
+    undoLastTaskOperation,
+    wideDesktop,
+  ]);
   const feishuState = feishuSyncVisualState(feishuStatus);
   const syncState: TaskSyncVisualState = controller.tasks.some(
     (task) => taskSyncVisualState(task.sync.status) === "error",
@@ -16020,12 +17920,15 @@ function MainWindow() {
     localStorage.setItem("todo-agent:onboarding-complete", "true");
     setOnboarding(false);
     if (window.desktopApi) {
-      void window.desktopApi.settings.get().then((settings) =>
-        window.desktopApi!.settings.replace({
-          ...settings,
-          onboardingComplete: true,
-        }),
-      );
+      void window.desktopApi.settings
+        .get()
+        .then((settings) =>
+          window.desktopApi!.settings.replace({
+            ...settings,
+            onboardingComplete: true,
+          }),
+        )
+        .catch(() => undefined);
     }
   };
   const showSource = useCallback(
@@ -16044,7 +17947,7 @@ function MainWindow() {
     <div
       className="app-background"
       data-inspector-open={
-        isTaskRoute && controller.selected ? "true" : undefined
+        isTaskRoute && controller.selected && !inspectorCollapsed ? "true" : undefined
       }
       data-modal-open={
         modalOpen ? "true" : undefined
@@ -16054,13 +17957,24 @@ function MainWindow() {
         <Titlebar
           search={isTaskRoute ? search : undefined}
           onSearch={isTaskRoute ? setSearch : undefined}
-          onNew={() => setNewTask(true)}
+          onNew={openNewTask}
           onOpenCommands={openCommandPalette}
+          onOpenShortcuts={openShortcuts}
+          onToggleSidebar={toggleSidebar}
+          sidebarCollapsed={sidebarCollapsed}
+          shortcutsButtonRef={shortcutsButtonRef}
           onHome={() => navigateTaskCollection("today")}
           onBack={route === "today" ? undefined : goBack}
           syncState={syncState}
         />
-        <div className="shell-grid" data-route={route}>
+        <div
+          className="shell-grid"
+          data-route={route}
+          data-inspector-collapsed={
+            isTaskRoute && inspectorCollapsed ? "true" : undefined
+          }
+          data-sidebar-collapsed={sidebarCollapsed ? "true" : undefined}
+        >
           <Sidebar
             route={route}
             sourceFilter={sourceFilter}
@@ -16080,9 +17994,20 @@ function MainWindow() {
                 planningTasks={timelineController.tasks}
                 search={search}
                 navigationKey={`${taskView}:${taskCollectionEpoch}`}
+                focusTaskId={pendingTaskFocusId}
+                onTaskFocused={handleTaskFocused}
+                inboxTriageRequest={inboxTriageRequest}
+                onInboxTriageRequestHandled={(request) => {
+                  setInboxTriageRequest((current) =>
+                    current === request ? 0 : current,
+                  );
+                }}
+                inboxTriageOpen={inboxTriageOpen}
+                onInboxTriageOpenChange={setInboxTriageOpen}
+                wideDesktop={wideDesktop}
                 sourceFilter={sourceFilter}
                 notify={notify}
-                onNew={() => setNewTask(true)}
+                onNew={openNewTask}
                 onClearSearch={() => setSearch("")}
                 onAskAgent={askAgent}
                 onPlanToday={openTodayPlan}
@@ -16093,15 +18018,29 @@ function MainWindow() {
                 onOpenTimeline={() => navigate("timeline")}
                 onOpenAll={() => navigateTaskCollection("all")}
               />
-              <TaskInspector
-                task={controller.selected}
-                controller={controller}
-                projects={projectState.projects}
-                lists={listState.lists}
-                notify={notify}
-                onAskAgent={askAgent}
-                onClose={() => controller.select(undefined)}
-              />
+              {!inspectorCollapsed && (
+                <TaskInspector
+                  task={controller.selected}
+                  controller={controller}
+                  projects={projectState.projects}
+                  lists={listState.lists}
+                  notify={notify}
+                  onAskAgent={askAgent}
+                  onClose={closeSelectedTask}
+                  onToggleCollapse={collapseSelectedInspector}
+                />
+              )}
+              {inspectorCollapsed && controller.selected && (
+                <button
+                  type="button"
+                  className="inspector-reopen-tab"
+                  aria-label="展开任务详情"
+                  title="展开任务详情"
+                  onClick={() => setInspectorCollapsed(false)}
+                >
+                  <PanelRightOpen size={17} aria-hidden="true" />
+                </button>
+              )}
             </>
           )}
           <div className="route-workspace" hidden={route !== "agent"}>
@@ -16119,113 +18058,118 @@ function MainWindow() {
           </div>
           {route === "timeline" && (
             <div className="route-workspace">
-              <TimelinePage
-                tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
-                loading={timelineController.loading || timelineCompletedController.loading}
-                error={timelineController.error ?? timelineCompletedController.error}
-                onRetry={() => {
-                  void timelineController.refresh();
-                  void timelineCompletedController.refresh();
-                }}
-                onSelect={(taskId) => {
-                  setPendingTaskId(taskId);
-                  navigateTaskCollection("all", sourceFilter);
-                }}
-                onMove={(taskId, patch) => timelineController.update(taskId, patch)}
-                onUndo={(operationId) => {
-                  void timelineController.undo(operationId);
-                }}
-                notify={notify}
-                focusDate={timelineFocusDate}
-                calendarEvents={calendarEvents}
-                onCalendarEventsChange={updateCalendarEvents}
-                onCreateFollowUp={(event) => {
-                  setNewTaskPreset(buildCalendarFollowUpDraft(event, dateKey()));
-                  setNewTask(true);
-                }}
-                onExtractActionItems={(event) => {
-                  const drafts = extractCalendarActionItems(event, dateKey());
-                  if (!drafts.length) {
-                    notify("会议备注中没有识别到明确行动项", "info");
-                    return;
-                  }
-                  setCalendarActionItems({ event, drafts });
-                }}
-              />
+              <Suspense fallback={<DeferredRouteFallback label="正在打开时间线…" />}>
+                <TimelinePage
+                  tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
+                  loading={timelineController.loading || timelineCompletedController.loading}
+                  error={timelineController.error ?? timelineCompletedController.error}
+                  onRetry={() => {
+                    void timelineController.refresh();
+                    void timelineCompletedController.refresh();
+                  }}
+                  onSelect={(taskId) => {
+                    setPendingTaskId(taskId);
+                    navigateTaskCollection("all", sourceFilter);
+                  }}
+                  onMove={(taskId, patch) => timelineController.update(taskId, patch)}
+                  onUndo={undoTimelineOperation}
+                  notify={notify}
+                  focusDate={timelineFocusDate}
+                  calendarEvents={calendarEvents}
+                  onCalendarEventsChange={updateCalendarEvents}
+                  onCreateFollowUp={(event) => {
+                    setNewTaskPreset(buildCalendarFollowUpDraft(event, dateKey()));
+                    openNewTask();
+                  }}
+                  onExtractActionItems={(event, trigger) => {
+                    const drafts = extractCalendarActionItems(event, dateKey());
+                    if (!drafts.length) {
+                      notify("会议备注中没有识别到明确行动项", "info");
+                      return;
+                    }
+                    calendarActionItemsReturnFocusRef.current = trigger;
+                    setCalendarActionItems({ event, drafts });
+                  }}
+                />
+              </Suspense>
             </div>
           )}
           {route === "projects" && (
             <div className="route-workspace">
-              <ProjectPage
-                tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
-                projects={projectState.projects}
-                loading={timelineController.loading || timelineCompletedController.loading || projectState.loading}
-                error={timelineController.error ?? timelineCompletedController.error ?? projectState.error}
-                onRetry={() => {
-                  void timelineController.refresh();
-                  void timelineCompletedController.refresh();
-                  void projectState.refresh();
-                }}
-                onSelect={(task) => {
-                  setPendingTaskId(task.id);
-                  navigateTaskCollection(task.status === "completed" ? "completed" : "all", sourceFilter);
-                }}
-                onCreateProject={async (input) => {
-                  if (!window.desktopApi) return;
-                  await window.desktopApi.tasks.createProject(input);
-                  await projectState.refresh();
-                  notify(`项目“${input.name}”已创建`, "success");
-                }}
-                onUpdateProject={async (id, patch) => {
-                  if (!window.desktopApi) return;
-                  await window.desktopApi.tasks.updateProject({ id, patch });
-                  await projectState.refresh();
-                  notify("项目已更新", "success");
-                }}
-                onDeleteProject={async (id) => {
-                  if (!window.desktopApi) return;
-                  const result = await window.desktopApi.tasks.deleteProject(id);
-                  await projectState.refresh();
-                  notify(result.clearedTaskIds.length > 0 ? `项目已删除，并解除 ${result.clearedTaskIds.length} 项任务关联` : "项目已删除", "success");
-                }}
-              />
+              <Suspense fallback={<DeferredRouteFallback label="正在打开项目…" />}>
+                <ProjectPage
+                  tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
+                  projects={projectState.projects}
+                  loading={timelineController.loading || timelineCompletedController.loading || projectState.loading}
+                  error={timelineController.error ?? timelineCompletedController.error ?? projectState.error}
+                  onRetry={() => {
+                    void timelineController.refresh();
+                    void timelineCompletedController.refresh();
+                    void projectState.refresh();
+                  }}
+                  onSelect={(task) => {
+                    setPendingTaskId(task.id);
+                    navigateTaskCollection(task.status === "completed" ? "completed" : "all", sourceFilter);
+                  }}
+                  onCreateProject={async (input) => {
+                    if (!window.desktopApi) return;
+                    await window.desktopApi.tasks.createProject(input);
+                    await projectState.refresh();
+                    notify(`项目“${input.name}”已创建`, "success");
+                  }}
+                  onUpdateProject={async (id, patch) => {
+                    if (!window.desktopApi) return;
+                    await window.desktopApi.tasks.updateProject({ id, patch });
+                    await projectState.refresh();
+                    notify("项目已更新", "success");
+                  }}
+                  onDeleteProject={async (id) => {
+                    if (!window.desktopApi) return;
+                    const result = await window.desktopApi.tasks.deleteProject(id);
+                    await projectState.refresh();
+                    notify(result.clearedTaskIds.length > 0 ? `项目已删除，并解除 ${result.clearedTaskIds.length} 项任务关联` : "项目已删除", "success");
+                  }}
+                />
+              </Suspense>
             </div>
           )}
           {route === "lists" && (
             <div className="route-workspace">
-              <ListPage
-                tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
-                lists={listState.lists}
-                loading={timelineController.loading || timelineCompletedController.loading || listState.loading}
-                error={timelineController.error ?? timelineCompletedController.error ?? listState.error}
-                onRetry={() => {
-                  void timelineController.refresh();
-                  void timelineCompletedController.refresh();
-                  void listState.refresh();
-                }}
-                onSelect={(task) => {
-                  setPendingTaskId(task.id);
-                  navigateTaskCollection(task.status === "completed" ? "completed" : "all", sourceFilter);
-                }}
-                onCreateList={async (input) => {
-                  if (!window.desktopApi) return;
-                  await window.desktopApi.tasks.createList(input);
-                  await listState.refresh();
-                  notify(`清单“${input.name}”已创建`, "success");
-                }}
-                onUpdateList={async (id, patch) => {
-                  if (!window.desktopApi) return;
-                  await window.desktopApi.tasks.updateList({ id, patch });
-                  await listState.refresh();
-                  notify("清单已更新", "success");
-                }}
-                onDeleteList={async (id) => {
-                  if (!window.desktopApi) return;
-                  const result = await window.desktopApi.tasks.deleteList(id);
-                  await listState.refresh();
-                  notify(result.clearedTaskIds.length > 0 ? `清单已删除，并解除 ${result.clearedTaskIds.length} 项任务关联` : "清单已删除", "success");
-                }}
-              />
+              <Suspense fallback={<DeferredRouteFallback label="正在打开清单…" />}>
+                <ListPage
+                  tasks={[...timelineController.tasks, ...timelineCompletedController.tasks]}
+                  lists={listState.lists}
+                  loading={timelineController.loading || timelineCompletedController.loading || listState.loading}
+                  error={timelineController.error ?? timelineCompletedController.error ?? listState.error}
+                  onRetry={() => {
+                    void timelineController.refresh();
+                    void timelineCompletedController.refresh();
+                    void listState.refresh();
+                  }}
+                  onSelect={(task) => {
+                    setPendingTaskId(task.id);
+                    navigateTaskCollection(task.status === "completed" ? "completed" : "all", sourceFilter);
+                  }}
+                  onCreateList={async (input) => {
+                    if (!window.desktopApi) return;
+                    await window.desktopApi.tasks.createList(input);
+                    await listState.refresh();
+                    notify(`清单“${input.name}”已创建`, "success");
+                  }}
+                  onUpdateList={async (id, patch) => {
+                    if (!window.desktopApi) return;
+                    await window.desktopApi.tasks.updateList({ id, patch });
+                    await listState.refresh();
+                    notify("清单已更新", "success");
+                  }}
+                  onDeleteList={async (id) => {
+                    if (!window.desktopApi) return;
+                    const result = await window.desktopApi.tasks.deleteList(id);
+                    await listState.refresh();
+                    notify(result.clearedTaskIds.length > 0 ? `清单已删除，并解除 ${result.clearedTaskIds.length} 项任务关联` : "清单已删除", "success");
+                  }}
+                />
+              </Suspense>
             </div>
           )}
           {route === "pet" && (
@@ -16273,16 +18217,15 @@ function MainWindow() {
           )}
           {route === "docs" && (
             <div className="route-workspace">
-              <DocsPage />
+              <Suspense fallback={<DeferredRouteFallback label="正在打开文档中心…" />}>
+                <DocsPage />
+              </Suspense>
             </div>
           )}
         </div>
         {newTask && (
           <NewTaskSheet
-            onClose={() => {
-              setNewTask(false);
-              setNewTaskPreset(undefined);
-            }}
+            onClose={closeNewTask}
             controller={controller}
             projects={projectState.projects}
             lists={listState.lists}
@@ -16296,7 +18239,7 @@ function MainWindow() {
           <CalendarActionItemsSheet
             event={calendarActionItems.event}
             drafts={calendarActionItems.drafts}
-            onClose={() => setCalendarActionItems(undefined)}
+            onClose={closeCalendarActionItems}
             onConfirm={async (items) => {
               let created = 0;
               try {
@@ -16322,7 +18265,7 @@ function MainWindow() {
                 );
               }
               notify(`已创建 ${created} 项会后行动任务`, "success");
-              setCalendarActionItems(undefined);
+              closeCalendarActionItems();
             }}
           />
         )}
@@ -16332,6 +18275,7 @@ function MainWindow() {
             onClose={closeCommandPalette}
           />
         )}
+        {shortcutsOpen && <KeyboardShortcutsSheet onClose={closeShortcuts} />}
         {globalSearchOpen && (
           <GlobalSearchSheet
             tasks={globalSearchTasks}
@@ -16545,7 +18489,7 @@ function QuickCaptureWindow() {
     parsed?.originalText === text.trim()
       ? {
           source: parsed.source,
-          date: (parsed.privatePlanAt ?? parsed.dueAt)?.slice(0, 10),
+          date: temporalDateKey(parsed.privatePlanAt ?? parsed.dueAt),
           title: parsed.title,
           dueAt: parsed.dueAt,
           privatePlanAt: parsed.privatePlanAt,
@@ -16617,14 +18561,17 @@ function QuickCaptureWindow() {
   };
   const templatePreview = selectedTemplate && fields.title
     ? previewTaskTemplate(selectedTemplate, fields.title, {
-        date: fields.privatePlanAt?.slice(0, 10) ?? fields.date ?? new Date().toISOString().slice(0, 10),
+        date: fields.date ?? dateKey(),
         dueAt: fields.dueAt,
       })
     : undefined;
   useEffect(() => {
-    void window.desktopApi?.tasks.getDraft("quick-capture").then((draft) => {
-      if (draft?.text) setText(draft.text);
-    });
+    void window.desktopApi?.tasks
+      .getDraft("quick-capture")
+      .then((draft) => {
+        if (draft?.text) setText(draft.text);
+      })
+      .catch(() => undefined);
     const unsubscribe = window.desktopApi?.events.onQuickCaptureFocus(() =>
       inputRef.current?.focus(),
     );
@@ -16647,11 +18594,13 @@ function QuickCaptureWindow() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (text)
-        void window.desktopApi?.tasks.saveDraft({
-          id: "quick-capture",
-          kind: "quick-capture",
-          text,
-        });
+        void window.desktopApi?.tasks
+          .saveDraft({
+            id: "quick-capture",
+            kind: "quick-capture",
+            text,
+          })
+          .catch(() => undefined);
     }, 250);
     return () => window.clearTimeout(timer);
   }, [text]);
@@ -16666,7 +18615,7 @@ function QuickCaptureWindow() {
         await createDiaryFromCapture({
           title: fields.title,
           content: text.trim(),
-          localDate: fields.date ?? new Date().toISOString().slice(0, 10),
+          localDate: fields.date ?? dateKey(),
           captureId: captureIdRef.current,
         });
         rememberCurrentCapture("diary");
@@ -16676,7 +18625,7 @@ function QuickCaptureWindow() {
         captureIdRef.current = `quick-capture-${crypto.randomUUID()}`;
         if (openAfterSave) await window.desktopApi?.shell.showMain("home");
         window.setTimeout(() => {
-          void window.desktopApi?.shell.hideCurrentWindow();
+          void window.desktopApi?.shell.hideCurrentWindow().catch(() => undefined);
         }, 260);
         return;
       }
@@ -16691,9 +18640,9 @@ function QuickCaptureWindow() {
       const baseDate =
         captureDestination === "inbox"
           ? undefined
-          : fields.privatePlanAt?.slice(0, 10) ??
+          : temporalDateKey(fields.privatePlanAt) ??
             (!fields.dueAt ? fields.date : undefined) ??
-            new Date().toISOString().slice(0, 10);
+            dateKey();
       const baseInput = {
         source:
           effectiveSource === "feishu"
@@ -16705,7 +18654,7 @@ function QuickCaptureWindow() {
       };
       const templateInputs = selectedTemplate
         ? buildTaskTemplateInputs(selectedTemplate, fields.title, {
-            date: baseDate ?? new Date().toISOString().slice(0, 10),
+            date: baseDate ?? dateKey(),
             dueAt: fields.dueAt,
             tags: fields.tags,
             priority: priorities[fields.priority] ?? "medium",
@@ -16789,7 +18738,7 @@ function QuickCaptureWindow() {
         );
       }
       window.setTimeout(() => {
-        void window.desktopApi?.shell.hideCurrentWindow();
+        void window.desktopApi?.shell.hideCurrentWindow().catch(() => undefined);
       }, 260);
     } catch (reason) {
       setCaptureError(
@@ -16906,7 +18855,7 @@ function QuickCaptureWindow() {
             }}
             onKeyDown={(event) => {
               if (event.key === "Escape")
-                void window.desktopApi?.shell.hideCurrentWindow();
+                void window.desktopApi?.shell.hideCurrentWindow().catch(() => undefined);
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 void save(fields.source, event.metaKey || event.ctrlKey);
@@ -17733,6 +19682,9 @@ function FloatingWindow() {
   const [privacyMode, setPrivacyMode] = useState(false);
   const [floatingLocked, setFloatingLocked] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextMenuFirstItemRef = useRef<HTMLButtonElement>(null);
+  const contextMenuReturnFocusRef = useRef<HTMLElement | undefined>(undefined);
   const [interactionWheelOpen, setInteractionWheelOpen] = useState(false);
   const petInteractionTriggerRef = useRef<HTMLButtonElement>(null);
   const [floatingGame, setFloatingGame] = useState<FloatingPetGame>();
@@ -18080,7 +20032,7 @@ function FloatingWindow() {
     if (heldTaskId) setHeldTaskBubbleCollapsed(false);
   }, [heldTaskId]);
   useEffect(() => {
-    void window.desktopApi?.shell.setFloatingPetOnly(petOnly);
+    void window.desktopApi?.shell.setFloatingPetOnly(petOnly).catch(() => undefined);
   }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -18143,10 +20095,12 @@ function FloatingWindow() {
       proactiveMessageRef.current = suggestion.message;
       setProactiveTask(suggestion.nextTask);
       petBehavior.act(suggestion.action, suggestion.message, 8_000);
-      void window.desktopApi?.pet.recordProactiveMessage({
-        kind: suggestion.kind,
-        reason: suggestion.message,
-      });
+      void window.desktopApi?.pet
+        .recordProactiveMessage({
+          kind: suggestion.kind,
+          reason: suggestion.message,
+        })
+        .catch(() => undefined);
     };
     const timer = window.setTimeout(showSuggestion, delay);
     const interval = window.setInterval(
@@ -18174,13 +20128,16 @@ function FloatingWindow() {
       // works if a platform policy blocks local storage.
     }
     if (window.desktopApi && floatingSettingsLoadedRef.current) {
-      void window.desktopApi.settings.get().then((settings) => {
-        if (settings.floating.selectedTab === tab) return;
-        return window.desktopApi?.settings.replace({
-          ...settings,
-          floating: { ...settings.floating, selectedTab: tab },
-        });
-      });
+      void window.desktopApi.settings
+        .get()
+        .then((settings) => {
+          if (settings.floating.selectedTab === tab) return;
+          return window.desktopApi?.settings.replace({
+            ...settings,
+            floating: { ...settings.floating, selectedTab: tab },
+          });
+        })
+        .catch(() => undefined);
     }
   }, [tab]);
   useEffect(() => {
@@ -18263,7 +20220,7 @@ function FloatingWindow() {
         if (hoveringFloatingRef.current || stackIsHovered) scheduleHoverExpand();
       }
     };
-    void window.desktopApi.settings.get().then(apply);
+    void window.desktopApi.settings.get().then(apply).catch(() => undefined);
     return window.desktopApi.events.onSettingsChanged(apply);
   }, []);
   useEffect(() => {
@@ -18501,7 +20458,7 @@ function FloatingWindow() {
       clearEdgePeekDockTimer();
       setEdgePeekDocked(false);
       setEdgePeeked(false);
-      void window.desktopApi?.shell.setFloatingEdgeDocked(false);
+      void window.desktopApi?.shell.setFloatingEdgeDocked(false).catch(() => undefined);
       petBehavior.act("wave", "我回来啦，还是会一直陪着你。", 2_600);
     }
     setContextMenuOpen(false);
@@ -18518,7 +20475,7 @@ function FloatingWindow() {
       } catch {
         // The in-memory mode still works if persistence is unavailable.
       }
-      void window.desktopApi?.shell.setFloatingPetOnly(false);
+      void window.desktopApi?.shell.setFloatingPetOnly(false).catch(() => undefined);
     }
     if (hoverExpandTimerRef.current !== undefined) {
       window.clearTimeout(hoverExpandTimerRef.current);
@@ -18541,7 +20498,7 @@ function FloatingWindow() {
     }
     expandTriggerRef.current = value ? trigger : undefined;
     setExpanded(value);
-    void window.desktopApi?.shell.setFloatingExpanded(value);
+    void window.desktopApi?.shell.setFloatingExpanded(value).catch(() => undefined);
   }
   function collapsePetTaskRail(): void {
     if (hoverExpandTimerRef.current !== undefined) {
@@ -18568,7 +20525,7 @@ function FloatingWindow() {
     } catch {
       // The in-memory mode still works if persistence is unavailable.
     }
-    void window.desktopApi?.shell.setFloatingPetOnly(true);
+    void window.desktopApi?.shell.setFloatingPetOnly(true).catch(() => undefined);
     if (edgePeekModeRef.current) window.setTimeout(dockEdgePeek, 0);
   }
   function expandPetTaskRail(): void {
@@ -18579,19 +20536,36 @@ function FloatingWindow() {
     } catch {
       // The in-memory mode still works if persistence is unavailable.
     }
-    void window.desktopApi?.shell.setFloatingPetOnly(false);
+    void window.desktopApi?.shell.setFloatingPetOnly(false).catch(() => undefined);
   }
   function closeFloatingContextMenu(): void {
     const returnToExpandedPanel = contextMenuReturnExpandedRef.current;
     const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
+    const returnFocus = contextMenuReturnFocusRef.current;
     contextMenuReturnExpandedRef.current = false;
     contextMenuReturnPetOnlyRef.current = false;
+    contextMenuReturnFocusRef.current = undefined;
     setContextMenuOpen(false);
     if (returnToPetOnly) {
       collapsePetTaskRail();
+      restoreFloatingContextFocus(returnFocus);
       return;
     }
     if (!returnToExpandedPanel) setPanelExpanded(false);
+    restoreFloatingContextFocus(returnFocus);
+  }
+  function restoreFloatingContextFocus(returnFocus: HTMLElement | undefined): void {
+    if (!returnFocus) return;
+    window.requestAnimationFrame(() => {
+      if (
+        !returnFocus.isConnected ||
+        returnFocus.hasAttribute("disabled") ||
+        returnFocus.getAttribute("aria-disabled") === "true"
+      ) {
+        return;
+      }
+      returnFocus.focus({ preventScroll: true });
+    });
   }
   function openPetInteractionWheel(): void {
     interactionReturnExpandedRef.current = expanded;
@@ -18652,7 +20626,14 @@ function FloatingWindow() {
   ): void {
     void window.desktopApi?.pet
       .recordMiniGame({ game, score, durationSeconds })
-      .then(() => petData.refresh());
+      .then(() => petData.refresh())
+      .catch((reason) => {
+        petBehavior.act(
+          "sync-error",
+          reason instanceof Error ? reason.message : "这次互动暂时没有记住，稍后再试。",
+          4_000,
+        );
+      });
     petBehavior.celebrate(
       game === "jump-rope"
         ? `我们一起跳了 ${score} 下！配合越来越好啦。`
@@ -18666,6 +20647,11 @@ function FloatingWindow() {
     event.preventDefault();
     event.stopPropagation();
     revealEdgePeek();
+    const activeElement = document.activeElement;
+    contextMenuReturnFocusRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : petInteractionTriggerRef.current ?? undefined;
     contextMenuReturnExpandedRef.current = expanded;
     contextMenuReturnPetOnlyRef.current = petOnly;
     setContextMenuOpen(true);
@@ -18675,22 +20661,25 @@ function FloatingWindow() {
     const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
     contextMenuReturnExpandedRef.current = false;
     contextMenuReturnPetOnlyRef.current = false;
+    contextMenuReturnFocusRef.current = undefined;
     setContextMenuOpen(false);
     if (returnToPetOnly) collapsePetTaskRail();
     else setPanelExpanded(false);
-    void window.desktopApi?.shell.showMain(route);
+    void window.desktopApi?.shell.showMain(route).catch(() => undefined);
   }
   function showQuickCaptureFromFloatingMenu(): void {
     const returnToPetOnly = contextMenuReturnPetOnlyRef.current;
     contextMenuReturnExpandedRef.current = false;
     contextMenuReturnPetOnlyRef.current = false;
+    contextMenuReturnFocusRef.current = undefined;
     setContextMenuOpen(false);
     if (returnToPetOnly) collapsePetTaskRail();
     else setPanelExpanded(false);
-    void window.desktopApi?.shell.showQuickCapture();
+    void window.desktopApi?.shell.showQuickCapture().catch(() => undefined);
   }
   function openFloatingChatFromMenu(): void {
     contextMenuReturnExpandedRef.current = false;
+    contextMenuReturnFocusRef.current = undefined;
     setContextMenuOpen(false);
     chatFollowsOutputRef.current = true;
     setTab("chat");
@@ -18711,6 +20700,7 @@ function FloatingWindow() {
           },
         }),
       )
+      .catch(() => undefined)
       .finally(closeFloatingContextMenu);
   }
   function togglePetVacationMode(enabled: boolean): void {
@@ -18723,10 +20713,12 @@ function FloatingWindow() {
           pet: { ...settings.pet, vacationMode: enabled },
         }),
       )
+      .catch(() => undefined)
       .finally(closeFloatingContextMenu);
   }
   function toggleBossMode(enabled: boolean): void {
     if (!window.desktopApi) return;
+    if (contextMenuOpen) closeFloatingContextMenu();
     void window.desktopApi.settings
       .get()
       .then((settings) =>
@@ -18738,6 +20730,7 @@ function FloatingWindow() {
           // process. Collapse local surfaces first so re-showing from the
           // tray never restores an expanded panel or a stale menu.
           setContextMenuOpen(false);
+          contextMenuReturnFocusRef.current = undefined;
           setInteractionWheelOpen(false);
           setFloatingGame(undefined);
           setExpanded(false);
@@ -18762,6 +20755,7 @@ function FloatingWindow() {
         }),
       )
       .then(() => window.desktopApi?.notifications.refresh())
+      .catch(() => undefined)
       .finally(closeFloatingContextMenu);
   }
   function mutePetForOneHour(): void {
@@ -18792,20 +20786,22 @@ function FloatingWindow() {
     event.currentTarget.setPointerCapture(event.pointerId);
     setPetWindowDragging(true);
     petBehavior.startDragging();
-    void window.desktopApi?.shell.beginFloatingDrag(
-      event.screenX,
-      event.screenY,
-    );
+    void window.desktopApi?.shell
+      .beginFloatingDrag(event.screenX, event.screenY)
+      .catch(() => {
+        floatingDragPointerRef.current = undefined;
+        setPetWindowDragging(false);
+        petBehavior.stopDragging();
+      });
   }
   function updateFloatingHandleDrag(
     event: ReactPointerEvent<HTMLButtonElement>,
   ): void {
     if (floatingDragPointerRef.current !== event.pointerId) return;
     event.preventDefault();
-    void window.desktopApi?.shell.updateFloatingDrag(
-      event.screenX,
-      event.screenY,
-    );
+    void window.desktopApi?.shell
+      .updateFloatingDrag(event.screenX, event.screenY)
+      .catch(() => undefined);
   }
   function finishFloatingHandleDrag(
     event?: ReactPointerEvent<HTMLButtonElement>,
@@ -18821,7 +20817,7 @@ function FloatingWindow() {
     floatingDragPointerRef.current = undefined;
     setPetWindowDragging(false);
     petBehavior.stopDragging();
-    void window.desktopApi?.shell.endFloatingDrag();
+    void window.desktopApi?.shell.endFloatingDrag().catch(() => undefined);
   }
   function beginPetAvatarPointer(
     event: ReactPointerEvent<HTMLButtonElement>,
@@ -18884,16 +20880,27 @@ function FloatingWindow() {
             return;
           }
           if (!current || current.pointerId !== event.pointerId || !current.dragging) {
-            void window.desktopApi?.shell.endFloatingDrag();
+            void window.desktopApi?.shell.endFloatingDrag().catch(() => undefined);
             return;
           }
           void window.desktopApi?.shell.updateFloatingDrag(
             current.lastScreenX,
             current.lastScreenY,
-          );
+          ).catch(() => undefined);
+        })
+        .catch(() => {
+          const current = petAvatarPointerRef.current;
+          if (!current || current.pointerId !== event.pointerId) return;
+          petAvatarPointerRef.current = undefined;
+          floatingDragPointerRef.current = undefined;
+          suppressPetAvatarClickRef.current = false;
+          setPetWindowDragging(false);
+          petBehavior.stopDragging();
         });
     } else {
-      void window.desktopApi?.shell.updateFloatingDrag(event.screenX, event.screenY);
+      void window.desktopApi?.shell
+        .updateFloatingDrag(event.screenX, event.screenY)
+        .catch(() => undefined);
     }
     event.preventDefault();
     event.stopPropagation();
@@ -19233,16 +21240,12 @@ function FloatingWindow() {
     dismissPetReaction();
     if (task) startPetFocus("pomodoro", petSettings.focus.focusMinutes, task);
   }
-  useEffect(() => {
-    if (!contextMenuOpen) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      closeFloatingContextMenu();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [contextMenuOpen]);
+  useDialogFocus(
+    contextMenuRef,
+    contextMenuFirstItemRef,
+    closeFloatingContextMenu,
+    contextMenuOpen,
+  );
   useEffect(() => {
     if (!interactionWheelOpen && !floatingGame) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -19268,7 +21271,7 @@ function FloatingWindow() {
       }, 180);
       setPetWindowDragging(false);
       petBehavior.stopDragging();
-      void window.desktopApi?.shell.endFloatingDrag();
+      void window.desktopApi?.shell.endFloatingDrag().catch(() => undefined);
     };
     window.addEventListener("pointerup", finish, { once: true });
     window.addEventListener("blur", finish, { once: true });
@@ -19297,7 +21300,7 @@ function FloatingWindow() {
             ? "pet"
             : "all";
     const showMain = () => {
-      void window.desktopApi?.shell.showMain(route);
+      void window.desktopApi?.shell.showMain(route).catch(() => undefined);
     };
     showMain();
     // A hidden main BrowserWindow can be between renderer commits when the
@@ -19368,7 +21371,15 @@ function FloatingWindow() {
       const pointedElement = withinViewport
         ? document.elementFromPoint(x, y)
         : null;
-      if (pointedElement?.closest(".floating-stack")) {
+      const floatingStack = document.querySelector<HTMLElement>(".floating-stack");
+      // Native transparent-window resizing can leave the last client
+      // coordinate stale for one event loop turn. The browser's live :hover
+      // state is stronger evidence than that old coordinate and prevents a
+      // visible panel from collapsing while the pointer is still over it.
+      if (
+        floatingStack?.matches(":hover") ||
+        pointedElement?.closest(".floating-stack")
+      ) {
         hoveringFloatingRef.current = true;
         setIsFloatingHovered(true);
         return;
@@ -19675,6 +21686,7 @@ function FloatingWindow() {
               mood={petMood}
               emotion={petBehavior.emotion}
               action={petBehavior.action}
+              actionKey={petBehavior.actionKey}
               name={petName}
               visualStyle="atlas"
               scalePercent={expanded ? 100 : scalePercent}
@@ -19818,7 +21830,9 @@ function FloatingWindow() {
                         onClick={() => {
                           setContextMenuOpen(false);
                           setPanelExpanded(false);
-                          void window.desktopApi?.shell.showMain("activity");
+                          void window.desktopApi?.shell
+                            .showMain("activity")
+                            .catch(() => undefined);
                         }}
                       >
                         <Activity size={13} /> 查看活动面板
@@ -20236,9 +22250,11 @@ function FloatingWindow() {
               }}
             />
             <div
+              ref={contextMenuRef}
               className="floating-context-menu no-drag"
               role="menu"
               aria-label="Todo Pet 快捷菜单"
+              tabIndex={-1}
               onContextMenu={(event) => event.preventDefault()}
             >
               <div className="floating-context-heading">
@@ -20248,6 +22264,7 @@ function FloatingWindow() {
               <button
                 type="button"
                 role="menuitem"
+                ref={contextMenuFirstItemRef}
                 onClick={() => showMainFromFloatingMenu("today")}
               >
                 <Sun size={16} />
@@ -20711,6 +22728,7 @@ function FloatingWindow() {
                     mood={petFocus?.status === "running" ? "focus" : "idle"}
                     emotion={petBehavior.emotion}
                     action={petBehavior.action}
+                    actionKey={petBehavior.actionKey}
                     name={petName}
                     visualStyle="atlas"
                     interactive
@@ -20827,11 +22845,13 @@ function FloatingWindow() {
               )}
               {tab === "home" && (
                 <div className="pet-home-view">
+                  <BuddyInteractions mini />
                   <div className="pet-home-hero">
                     <PetCharacter
                       mood={petMood}
                       emotion={petBehavior.emotion}
                       action={petBehavior.action}
+                      actionKey={petBehavior.actionKey}
                       name={petName}
                       visualStyle="atlas"
                       interactive
@@ -20901,6 +22921,7 @@ function FloatingWindow() {
             </div>
             {(isTaskTab || tab === "chat") && !privacyMode && (
               <div className="mini-composer">
+                {tab === 'chat' && <AgentContextControls chat={floatingChat} compact />}
                 {(voice.interimTranscript || voice.error) && (
                   <div
                     className={`voice-capture-status mini-voice-status ${voice.error ? "has-error" : ""}`}
@@ -21016,6 +23037,7 @@ function FloatingWindow() {
 export function App() {
   const kind =
     new URLSearchParams(window.location.search).get("window") ?? "main";
+  if (kind === 'screen-region') return <ScreenRegionSelector />;
   if (kind === "quick") return <QuickCaptureWindow />;
   if (kind === "floating") return <FloatingWindow />;
   return <MainWindow />;

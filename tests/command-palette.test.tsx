@@ -48,6 +48,7 @@ describe("CommandPalette", () => {
     );
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith(false);
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -63,5 +64,18 @@ describe("CommandPalette", () => {
 
     await user.click(screen.getByRole("presentation"));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps Tab navigation inside the command dialog", () => {
+    render(<CommandPalette actions={actions()} onClose={vi.fn()} />);
+
+    const close = screen.getByRole("button", { name: "关闭快速命令" });
+    const lastOption = screen.getAllByRole("option").at(-1)!;
+    lastOption.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(close).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(lastOption).toHaveFocus();
   });
 });

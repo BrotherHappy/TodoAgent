@@ -1,4 +1,5 @@
 import type { WeatherForecastDay } from "../shared/pet-types";
+import { localDateKey } from "./timeline-utils";
 
 export interface PetWeatherForecastItem {
   date: string;
@@ -72,7 +73,7 @@ export function buildPetWeatherForecast(
   options: { today?: string; maxDays?: number } = {},
 ): PetWeatherForecastItem[] {
   if (!forecast?.length) return [];
-  const today = options.today ?? new Date().toISOString().slice(0, 10);
+  const today = options.today ?? localDateKey();
   const maxDays = Number.isFinite(options.maxDays)
     ? Math.max(1, Math.min(5, Math.floor(options.maxDays ?? 3)))
     : 3;

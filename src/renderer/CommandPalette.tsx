@@ -7,6 +7,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useDialogFocus } from "./dialog-focus";
 
 export interface CommandPaletteAction {
   id: string;
@@ -20,7 +21,7 @@ export interface CommandPaletteAction {
 
 interface CommandPaletteProps {
   actions: readonly CommandPaletteAction[];
-  onClose: () => void;
+  onClose: (restoreFocus?: boolean) => void;
 }
 
 const normalize = (value: string): string => value.trim().toLocaleLowerCase();
@@ -29,6 +30,7 @@ export function CommandPalette({ actions, onClose }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
 
   const filteredActions = useMemo(() => {
     const needle = normalize(query);
@@ -44,6 +46,7 @@ export function CommandPalette({ actions, onClose }: CommandPaletteProps) {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+  useDialogFocus(dialogRef, inputRef);
 
   useEffect(() => {
     setActiveIndex((current) =>
@@ -56,7 +59,7 @@ export function CommandPalette({ actions, onClose }: CommandPaletteProps) {
   const runActive = () => {
     const action = filteredActions[activeIndex];
     if (!action) return;
-    onClose();
+    onClose(false);
     action.run();
   };
 
@@ -70,9 +73,11 @@ export function CommandPalette({ actions, onClose }: CommandPaletteProps) {
     >
       <section
         className="command-palette"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="command-palette-title"
+        tabIndex={-1}
       >
         <div className="command-palette-heading">
           <div className="command-palette-mark" aria-hidden="true">
@@ -85,7 +90,7 @@ export function CommandPalette({ actions, onClose }: CommandPaletteProps) {
           <button
             type="button"
             className="icon-button command-palette-close"
-            onClick={onClose}
+            onClick={() => onClose()}
             aria-label="关闭快速命令"
             title="关闭（Esc）"
           >

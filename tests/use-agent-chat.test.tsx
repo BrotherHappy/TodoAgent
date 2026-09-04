@@ -9,6 +9,7 @@ import type {
 } from "../src/shared/desktop-api";
 import type { AgentRunEvent } from "../src/shared/agent-types";
 import type { Task } from "../src/shared/models";
+import { AGENT_CONVERSATIONS_STORAGE_KEY } from "../src/renderer/agent-conversation-store";
 import { useAgentChat } from "../src/renderer/use-agent-chat";
 
 interface AgentHarness {
@@ -96,6 +97,49 @@ afterEach(() => {
 });
 
 describe("useAgentChat", () => {
+  it("refreshes the generated welcome when the task snapshot finishes loading", async () => {
+    const loadingWelcome = "我可以查询、创建和整理任务。正在读取当前视图的任务…";
+    const readyWelcome = "我可以查询、创建和整理任务。当前有 3 项任务在这个视图里。";
+    const { result, rerender } = renderHook(
+      ({ welcome }) => useAgentChat({ initialMessage: welcome }),
+      { initialProps: { welcome: loadingWelcome } },
+    );
+
+    expect(result.current.messages[0]?.text).toBe(loadingWelcome);
+    rerender({ welcome: readyWelcome });
+    await waitFor(() => expect(result.current.messages[0]?.text).toBe(readyWelcome));
+  });
+
+  it("migrates a persisted task-count welcome to the current snapshot", () => {
+    const conversationId = "00000000-0000-4000-8000-000000000001";
+    window.localStorage.setItem(
+      AGENT_CONVERSATIONS_STORAGE_KEY,
+      JSON.stringify({
+        schemaVersion: 1,
+        activeConversationId: conversationId,
+        conversations: [
+          {
+            schemaVersion: 1,
+            conversationId,
+            updatedAt: new Date().toISOString(),
+            messages: [
+              {
+                role: "assistant",
+                text: "我可以查询、创建和整理任务。当前有 0 项任务在这个视图里。",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const readyWelcome = "我可以查询、创建和整理任务。当前有 3 项任务在这个视图里。";
+    const { result } = renderHook(() =>
+      useAgentChat({ initialMessage: readyWelcome, persistConversation: true }),
+    );
+
+    expect(result.current.messages[0]?.text).toBe(readyWelcome);
+  });
+
   it("streams only the correlated run and converges on the final reply", async () => {
     const completion = deferred<AgentSendResult>();
     const harness = installAgentApi(async () => completion.promise);

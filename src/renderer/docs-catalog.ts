@@ -11,7 +11,9 @@ import todoPetAiHandoff from "../../docs/TODO_PET_AI_HANDOFF.md?raw";
 import todoPetAtlas from "../../docs/TODO_PET_ATLAS_DESIGN.md?raw";
 import technicalArchitecture from "../../docs/TECHNICAL_ARCHITECTURE.md?raw";
 import feishuConnection from "../../docs/FEISHU_CONNECTION.md?raw";
+import dailyPlanIntegrity from "../../docs/DAILY_PLAN_INTEGRITY.md?raw";
 import clawdIntegration from "../../docs/CLAWD_INTEGRATION.md?raw";
+import desktopBuddyIntegration from "../../docs/DESKTOPBUDDY_INTEGRATION.md?raw";
 import implementationStatus from "../../docs/IMPLEMENTATION_STATUS.md?raw";
 import qaAudit from "../../docs/QA_REAL_USER_AUDIT.md?raw";
 import acceptanceMatrix from "../../docs/GOAL_ACCEPTANCE_MATRIX.md?raw";
@@ -221,6 +223,17 @@ export const projectDocs: readonly ProjectDoc[] = [
     content: feishuConnection,
   }),
   projectDoc({
+    id: "daily-plan-integrity",
+    file: "DAILY_PLAN_INTEGRITY.md",
+    title: "今日规划与同步数据完整性",
+    category: "engineering",
+    summary: "私人计划字段隔离、空标题恢复、批量原子写入、中文错误及后台回归门禁。",
+    status: "防回归约束",
+    updatedAt: "2026-08-31",
+    keywords: ["今日规划", "空标题", "同步", "原子", "错误", "回归"],
+    content: dailyPlanIntegrity,
+  }),
+  projectDoc({
     id: "clawd-integration",
     file: "CLAWD_INTEGRATION.md",
     title: "Todo Pet × clawd-on-desk 能力融合",
@@ -230,6 +243,17 @@ export const projectDocs: readonly ProjectDoc[] = [
     updatedAt: "2026-08-29",
     keywords: ["clawd", "agent", "bridge", "权限", "桌面宠物"],
     content: clawdIntegration,
+  }),
+  projectDoc({
+    id: "desktopbuddy-integration",
+    file: "DESKTOPBUDDY_INTEGRATION.md",
+    title: "DesktopBuddy 伙伴、动画与本地 AI",
+    category: "pet",
+    summary: "五个原版 Live2D 伙伴、桌面物理、33 帧图片生成、Ollama、选区与文件摘要。",
+    status: "当前动画实现",
+    updatedAt: "2026-08-31",
+    keywords: ["desktopbuddy", "live2d", "ollama", "33帧", "动画", "人格", "选区"],
+    content: desktopBuddyIntegration,
   }),
   projectDoc({
     id: "implementation-status",

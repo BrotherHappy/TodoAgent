@@ -1,6 +1,7 @@
 import { BookOpen, Check, Link2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { extractActionItemsFromText } from "../shared/calendar-action-items";
+import { useDialogFocus } from "./dialog-focus";
 
 export interface AgentResearchCardDraft {
   title: string;
@@ -86,6 +87,8 @@ export function AgentResearchCardSheet({
   onClose,
   onConfirm,
 }: AgentResearchCardSheetProps) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState(draft.title);
   const [url, setUrl] = useState(draft.url ?? "");
   const [summary, setSummary] = useState(draft.summary);
@@ -94,6 +97,10 @@ export function AgentResearchCardSheet({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+
+  useDialogFocus(dialogRef, titleInputRef, () => {
+    if (!saving) onClose();
+  });
 
   useEffect(() => {
     setTitle(draft.title);
@@ -174,11 +181,13 @@ export function AgentResearchCardSheet({
       }}
     >
       <section
+        ref={dialogRef}
         className="modal-sheet agent-research-card-sheet"
         role="dialog"
         aria-modal="true"
         aria-label="保存 Agent 研究卡"
         aria-busy={saving}
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -208,6 +217,7 @@ export function AgentResearchCardSheet({
             <label>
               标题
               <input
+                ref={titleInputRef}
                 className="field-input"
                 value={title}
                 maxLength={MAX_TITLE_CHARS}

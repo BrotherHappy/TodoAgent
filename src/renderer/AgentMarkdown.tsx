@@ -25,8 +25,8 @@ export function AgentMarkdown({
 }: {
   text: string;
   streaming?: boolean;
-  onExtractActionItems?: (text: string) => void;
-  onSaveResearchCard?: (text: string) => void;
+  onExtractActionItems?: (text: string, trigger?: HTMLElement) => void;
+  onSaveResearchCard?: (text: string, trigger?: HTMLElement) => void;
 }): ReactElement {
   const [savedContext, setSavedContext] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -76,7 +76,9 @@ export function AgentMarkdown({
             aria-label="从 Agent 回复提取行动项"
             title="先预览并确认，再创建本地任务"
             disabled={streaming || !text.trim()}
-            onClick={() => onExtractActionItems(text.trim())}
+            onClick={(event) =>
+              onExtractActionItems(text.trim(), event.currentTarget)
+            }
           >
             <ListChecks size={12} />
             <span>提取行动项</span>
@@ -89,7 +91,9 @@ export function AgentMarkdown({
             aria-label="保存到当前任务研究卡"
             title="先编辑并确认，再保存为当前任务的私人研究卡"
             disabled={streaming || !text.trim()}
-            onClick={() => onSaveResearchCard(text.trim())}
+            onClick={(event) =>
+              onSaveResearchCard(text.trim(), event.currentTarget)
+            }
           >
             <BookOpen size={12} />
             <span>保存研究卡</span>

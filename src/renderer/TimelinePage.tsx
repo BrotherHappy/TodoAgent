@@ -14,6 +14,7 @@ import {
   formatTimelineDate,
   formatClock,
   localDateKey,
+  localDateKeyFromInstant,
   localIsoAt,
   scheduledTimelineTasks,
   tasksForWeekDay,
@@ -50,6 +51,7 @@ import {
   setCalendarSourceColor,
   writeCalendarSourceColors,
 } from "./calendar-source-preferences";
+import { taskUndoFailureMessage } from "./task-operation-feedback";
 import { GanttView } from "./GanttView";
 import {
   buildGanttPlan,
@@ -67,13 +69,13 @@ export interface TimelinePageProps {
   onRetry: () => void;
   onSelect: (taskId: string) => void;
   onMove: (taskId: string, patch: UpdateTaskInput) => Promise<string | undefined>;
-  onUndo: (operationId: string) => void;
+  onUndo: (operationId: string) => void | Promise<void>;
   notify: (message: string, kind?: ToastKind, action?: { label: string; run: () => void }) => void;
   focusDate?: string;
   calendarEvents?: readonly CalendarEvent[];
   onCalendarEventsChange?: (events: CalendarEvent[]) => void;
   onCreateFollowUp?: (event: CalendarEvent) => void;
-  onExtractActionItems?: (event: CalendarEvent) => void;
+  onExtractActionItems?: (event: CalendarEvent, trigger?: HTMLElement) => void;
 }
 
 const priorityClass = (task: Task): string =>
@@ -274,6 +276,14 @@ export function TimelinePage({
     nowIndicatorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
   };
 
+  const undoOperation = async (operationId: string): Promise<void> => {
+    try {
+      await onUndo(operationId);
+    } catch (reason) {
+      notify(taskUndoFailureMessage(reason), "error");
+    }
+  };
+
   const moveToSlot = async (taskId: string, minute: number) => {
     if (movingId) return;
     const task = tasks.find((candidate) => candidate.id === taskId);
@@ -294,7 +304,12 @@ export function TimelinePage({
       }).format(new Date(startAt))}`;
       setAnnouncement(message);
       notify(message, "success", operationId
-        ? { label: "撤销", run: () => { onUndo(operationId); } }
+        ? {
+            label: "撤销",
+            run: () => {
+              void undoOperation(operationId);
+            },
+          }
         : undefined);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "暂时无法安排时间块";
@@ -340,7 +355,14 @@ export function TimelinePage({
       notify(
         message,
         "success",
-        operationId ? { label: "撤销", run: () => onUndo(operationId) } : undefined,
+        operationId
+          ? {
+              label: "撤销",
+              run: () => {
+                void undoOperation(operationId);
+              },
+            }
+          : undefined,
       );
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "暂时无法更新任务状态";
@@ -579,7 +601,7 @@ export function TimelinePage({
                       >
                         <button type="button" className="project-board-card-body" onClick={() => onSelect(task.id)}>
                           <strong>{task.title}</strong>
-                          <small>{task.dueAt ? `截止 ${formatTimelineDate(task.dueAt.slice(0, 10))}` : "无截止时间"}{task.dependencyIds.length ? ` · 前置 ${task.dependencyIds.length} 项` : ""}</small>
+                          <small>{localDateKeyFromInstant(task.dueAt) ? `截止 ${formatTimelineDate(localDateKeyFromInstant(task.dueAt)!)}` : "无截止时间"}{task.dependencyIds.length ? ` · 前置 ${task.dependencyIds.length} 项` : ""}</small>
                         </button>
                         <button
                           type="button"
@@ -662,10 +684,11 @@ export function TimelinePage({
               {workCycleMetrics.candidateTasks.length ? (
                 <div className="timeline-work-cycle-candidate-list">
                   {workCycleMetrics.candidateTasks.map((task) => {
+                    const dueDate = localDateKeyFromInstant(task.dueAt);
                     const reason = task.plannedDate
                       ? "已计划，等待安排具体时间"
-                      : task.dueAt
-                        ? `截止 ${task.dueAt.slice(0, 10)}`
+                      : dueDate
+                        ? `截止 ${dueDate}`
                         : "没有日期，适合放进下个周期";
                     return (
                       <button type="button" key={task.id} className={`timeline-work-cycle-candidate ${priorityClass(task)}`} onClick={() => onSelect(task.id)}>
@@ -1048,7 +1071,9 @@ export function TimelinePage({
                             className="timeline-calendar-action-items"
                             aria-label={`从“${sourceEvent.summary}”提取行动项`}
                             title="从会议备注提取行动项"
-                            onClick={() => onExtractActionItems(sourceEvent)}
+                            onClick={(event) =>
+                              onExtractActionItems(sourceEvent, event.currentTarget)
+                            }
                           >
                             <ListChecks size={12} aria-hidden="true" /> 行动项
                           </button>

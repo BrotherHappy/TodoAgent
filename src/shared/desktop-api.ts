@@ -19,6 +19,8 @@ import type {
   TaskList,
   TaskMutationResult,
   TaskOperation,
+  TaskOperationSummary,
+  RedoResult,
   RecordWorkLogInput,
   TaskProject,
   TaskSyncStatus,
@@ -135,7 +137,10 @@ export interface TaskDesktopApi {
   restore(id: TaskId): Promise<TaskMutationResult>;
   purge(id: TaskId): Promise<TaskOperation>;
   history(id: TaskId, limit?: number): Promise<TaskHistoryEntry[]>;
+  getLatestUndoableOperation(): Promise<TaskOperationSummary | undefined>;
+  getLatestRedoableOperation(): Promise<TaskOperationSummary | undefined>;
   undo(operationId?: string): Promise<UndoResult>;
+  redo(operationId?: string): Promise<RedoResult>;
   saveDraft(input: SaveDraftInput): Promise<TaskDraft>;
   getDraft(id: string): Promise<TaskDraft | undefined>;
   listDrafts(): Promise<TaskDraft[]>;
@@ -230,6 +235,10 @@ export interface AgentChatMessage {
 }
 
 export interface AgentSendRequest {
+  /** One-use previews explicitly confirmed in this window. Never model supplied. */
+  contextTokens?: string[];
+  /** Assigned by the main-process IPC router, not accepted from a renderer. */
+  contextOwnerId?: number;
   /** Optional caller-generated correlation ID for matching live events. */
   runId?: string;
   /**
@@ -797,6 +806,8 @@ export interface DesktopEventApi {
 }
 
 export interface DesktopApi {
+  agentContext?: import('./agent-context').AgentContextApi;
+  buddy?: import('./desktopbuddy-contract').BuddyDesktopApi;
   tasks: TaskDesktopApi;
   settings: SettingsDesktopApi;
   shell: ShellDesktopApi;
@@ -832,7 +843,10 @@ export const DESKTOP_CHANNELS = {
   taskRestore: "tasks:restore",
   taskPurge: "tasks:purge",
   taskHistory: "tasks:history",
+  taskLatestUndoableOperation: "tasks:latest-undoable-operation",
+  taskLatestRedoableOperation: "tasks:latest-redoable-operation",
   taskUndo: "tasks:undo",
+  taskRedo: "tasks:redo",
   taskChooseAttachments: "tasks:choose-attachments",
   taskOpenAttachment: "tasks:open-attachment",
   taskDeleteAttachment: "tasks:delete-attachment",

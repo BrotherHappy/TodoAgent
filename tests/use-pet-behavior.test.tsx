@@ -18,6 +18,17 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("usePetBehavior direct-action priority", () => {
+  it("repeated accepted touches get a fresh gesture key without changing action", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => usePetBehavior(baseContext, "小序", true));
+    act(() => result.current.interact("head-pat"));
+    const key = result.current.actionKey;
+    expect(result.current.action).toBe("pet");
+    act(() => vi.advanceTimersByTime(700));
+    act(() => result.current.interact("head-pat"));
+    expect(result.current.action).toBe("pet");
+    expect(result.current.actionKey).not.toBe(key);
+  });
   it("settles rapid lifecycle updates before changing the visible pose", () => {
     vi.useFakeTimers();
     const { result, rerender } = renderHook(

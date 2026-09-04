@@ -37,8 +37,15 @@ import {
   saveGlobalSearchPreset,
   type GlobalSearchPreset,
 } from "./global-search-presets";
+import { useDialogFocus } from "./dialog-focus";
 
 type SearchFilter = "all" | GlobalSearchResultKind;
+
+type StartSearchItem = {
+  id: string;
+  query: string;
+  kind: "preset" | "recent";
+};
 
 interface GlobalSearchSheetProps {
   tasks: readonly Task[];
@@ -93,12 +100,15 @@ export function GlobalSearchSheet({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<SearchFilter>("all");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [activeStartIndex, setActiveStartIndex] = useState(0);
   const [recentQueries, setRecentQueries] = useState<string[]>(() => readGlobalSearchHistory());
   const [presets, setPresets] = useState<GlobalSearchPreset[]>(() => readGlobalSearchPresets());
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [presetError, setPresetError] = useState<string>();
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const resultRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const searchInput: GlobalSearchInput = useMemo(
     () => ({ tasks, projects, lists, calendarEvents, conversations, query, limit: 36 }),
@@ -109,16 +119,44 @@ export function GlobalSearchSheet({
     () => (filter === "all" ? allResults : allResults.filter((result) => result.kind === filter)),
     [allResults, filter],
   );
+  const startItems = useMemo<StartSearchItem[]>(
+    () => [
+      ...presets.map((preset) => ({
+        id: `preset:${preset.id}`,
+        query: preset.query,
+        kind: "preset" as const,
+      })),
+      ...recentQueries.map((recent) => ({
+        id: `recent:${recent}`,
+        query: recent,
+        kind: "recent" as const,
+      })),
+    ],
+    [presets, recentQueries],
+  );
+  const activeStartItemId = startItems[activeStartIndex]?.id;
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+  useDialogFocus(dialogRef, inputRef);
 
   useEffect(() => {
     setActiveIndex((current) =>
       results.length === 0 ? 0 : Math.min(current, results.length - 1),
     );
   }, [results.length]);
+
+  useEffect(() => {
+    setActiveStartIndex((current) =>
+      startItems.length === 0 ? 0 : Math.min(current, startItems.length - 1),
+    );
+  }, [startItems.length]);
+
+  useEffect(() => {
+    if (!query.trim() || results.length === 0) return;
+    resultRefs.current[activeIndex]?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex, filter, query, results.length]);
 
   const selectActive = () => {
     const result = results[activeIndex];
@@ -131,6 +169,15 @@ export function GlobalSearchSheet({
   const selectResult = (result: GlobalSearchResult): void => {
     setRecentQueries(rememberGlobalSearch(query));
     onSelect(result);
+  };
+
+  const selectStartItem = (): void => {
+    const item = startItems[activeStartIndex];
+    if (!item) return;
+    setQuery(item.query);
+    setFilter("all");
+    setActiveIndex(0);
+    inputRef.current?.focus();
   };
 
   const submitPreset = (): void => {
@@ -155,6 +202,7 @@ export function GlobalSearchSheet({
     setQuery(preset.query);
     setFilter("all");
     setActiveIndex(0);
+    setActiveStartIndex(0);
     inputRef.current?.focus();
   };
 
@@ -168,10 +216,12 @@ export function GlobalSearchSheet({
     >
       <section
         className="global-search-sheet"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="global-search-title"
         aria-busy={loading}
+        tabIndex={-1}
       >
         <header className="global-search-heading">
           <div className="global-search-mark" aria-hidden="true">
@@ -196,7 +246,11 @@ export function GlobalSearchSheet({
           <input
             ref={inputRef}
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActiveIndex(0);
+              if (!event.target.value.trim()) setActiveStartIndex(0);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
@@ -205,6 +259,12 @@ export function GlobalSearchSheet({
               }
               if (event.key === "ArrowDown") {
                 event.preventDefault();
+                if (!query.trim()) {
+                  setActiveStartIndex((current) =>
+                    startItems.length === 0 ? 0 : (current + 1) % startItems.length,
+                  );
+                  return;
+                }
                 setActiveIndex((current) =>
                   results.length === 0 ? 0 : (current + 1) % results.length,
                 );
@@ -212,6 +272,14 @@ export function GlobalSearchSheet({
               }
               if (event.key === "ArrowUp") {
                 event.preventDefault();
+                if (!query.trim()) {
+                  setActiveStartIndex((current) =>
+                    startItems.length === 0
+                      ? 0
+                      : (current - 1 + startItems.length) % startItems.length,
+                  );
+                  return;
+                }
                 setActiveIndex((current) =>
                   results.length === 0
                     ? 0
@@ -221,6 +289,10 @@ export function GlobalSearchSheet({
               }
               if (event.key === "Enter") {
                 event.preventDefault();
+                if (!query.trim()) {
+                  selectStartItem();
+                  return;
+                }
                 selectActive();
               }
             }}
@@ -361,8 +433,14 @@ export function GlobalSearchSheet({
                       <div className="global-search-saved-item" key={preset.id}>
                         <button
                           type="button"
-                          className="global-search-saved-open"
+                          className={`global-search-saved-open ${activeStartItemId === `preset:${preset.id}` ? "is-keyboard-active" : ""}`}
                           aria-label={`打开快捷搜索：${preset.name}`}
+                          aria-current={activeStartItemId === `preset:${preset.id}` ? "true" : undefined}
+                          onMouseEnter={() =>
+                            setActiveStartIndex(
+                              startItems.findIndex((item) => item.id === `preset:${preset.id}`),
+                            )
+                          }
                           onClick={() => usePreset(preset)}
                         >
                           <Bookmark size={14} aria-hidden="true" />
@@ -406,9 +484,16 @@ export function GlobalSearchSheet({
                       <button
                         key={recent}
                         type="button"
-                        className="global-search-recent-chip"
+                        className={`global-search-recent-chip ${activeStartItemId === `recent:${recent}` ? "is-keyboard-active" : ""}`}
+                        aria-current={activeStartItemId === `recent:${recent}` ? "true" : undefined}
+                        onMouseEnter={() =>
+                          setActiveStartIndex(
+                            startItems.findIndex((item) => item.id === `recent:${recent}`),
+                          )
+                        }
                         onClick={() => {
                           setQuery(recent);
+                          setActiveIndex(0);
                           inputRef.current?.focus();
                         }}
                       >
@@ -436,6 +521,9 @@ export function GlobalSearchSheet({
                 key={`${result.kind}:${result.id}`}
                 id={`global-search-result-${index}`}
                 type="button"
+                ref={(element) => {
+                  resultRefs.current[index] = element;
+                }}
                 className={`global-search-result ${index === activeIndex ? "is-active" : ""}`}
                 role="option"
                 aria-selected={index === activeIndex}

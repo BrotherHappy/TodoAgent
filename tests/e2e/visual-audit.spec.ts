@@ -26,23 +26,12 @@ async function launch(profilePath: string): Promise<ElectronApplication> {
   });
 }
 
+import { waitForElectronWindow } from '../helpers/electron-window';
 async function windowFor(
   app: ElectronApplication,
   kind: "main" | "floating",
 ): Promise<Page> {
-  const existing = app
-    .windows()
-    .find((page) => new URL(page.url()).searchParams.get("window") === kind);
-  if (existing) return existing;
-  return app.waitForEvent("window", {
-    predicate: (page) => {
-      try {
-        return new URL(page.url()).searchParams.get("window") === kind;
-      } catch {
-        return false;
-      }
-    },
-  });
+  return waitForElectronWindow(app, kind);
 }
 
 async function finishOnboarding(page: Page): Promise<void> {
@@ -228,6 +217,10 @@ test("keeps isolated desktop surfaces navigable, scrollable and unobstructed", a
         const navigation = document.querySelector<HTMLElement>(".sidebar");
         return Boolean(navigation && navigation.scrollWidth > navigation.clientWidth);
       })(),
+      navVerticalOverflow: (() => {
+        const navigation = document.querySelector<HTMLElement>(".sidebar");
+        return Boolean(navigation && navigation.scrollHeight > navigation.clientHeight);
+      })(),
       titleSearchVisible: Boolean(document.querySelector<HTMLElement>(".title-search")),
       titlebar: (() => {
         const bar = document.querySelector<HTMLElement>(".app-titlebar");
@@ -246,11 +239,73 @@ test("keeps isolated desktop surfaces navigable, scrollable and unobstructed", a
       })(),
     }));
     expect(narrowLayout.documentWidth).toBeLessThanOrEqual(narrowLayout.viewportWidth + 1);
-    expect(narrowLayout.navOverflow).toBe(false);
+    // At this breakpoint the navigation is intentionally a horizontally
+    // scrollable strip. It must stay one line tall so it cannot push the task
+    // content out of the viewport.
+    expect(narrowLayout.navVerticalOverflow).toBe(false);
     expect(narrowLayout.titleSearchVisible).toBe(true);
     expect(narrowLayout.titlebar.visible).toBe(true);
     expect(narrowLayout.titlebar.brandInside).toBe(true);
     await main.screenshot({ path: path.join(imageDir, "main-narrow-760.png") });
+
+    // Phone widths use a horizontal navigation strip and a full-width details
+    // sheet. This protects the primary task list from regressing into the
+    // old three-column layout where the sidebar hid most of the content.
+    // Electron keeps a native minimum window width on this platform. Emulate
+    // the renderer viewport after the native resize so the phone breakpoint is
+    // exercised without depending on OS-specific window constraints.
+    await resizeMain(app, 760, 600);
+    await main.setViewportSize({ width: 390, height: 844 });
+    const phoneLayout = await main.evaluate(() => {
+      const sidebar = document.querySelector<HTMLElement>(".sidebar");
+      const content = document.querySelector<HTMLElement>(".content-column");
+      const heading = document.querySelector<HTMLElement>(".page-heading h1");
+      const actions = document.querySelector<HTMLElement>(".page-heading .page-actions");
+      if (!sidebar || !content || !heading || !actions)
+        throw new Error("Phone layout is missing navigation, content or heading");
+      const sidebarRect = sidebar.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      const headingRect = heading.getBoundingClientRect();
+      const actionsRect = actions.getBoundingClientRect();
+      return {
+        viewportWidth: innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        sidebarDisplay: getComputedStyle(sidebar).display,
+        sidebarHeight: sidebarRect.height,
+        sidebarBottom: sidebarRect.bottom,
+        contentTop: contentRect.top,
+        contentLeft: contentRect.left,
+        headingWidth: headingRect.width,
+        headingBottom: headingRect.bottom,
+        actionsTop: actionsRect.top,
+        sidebarScrollHeight: sidebar.scrollHeight,
+        sidebarClientHeight: sidebar.clientHeight,
+      };
+    });
+    expect(phoneLayout.documentWidth).toBeLessThanOrEqual(phoneLayout.viewportWidth + 1);
+    expect(phoneLayout.sidebarDisplay).toBe("flex");
+    expect(phoneLayout.sidebarBottom).toBeLessThanOrEqual(phoneLayout.contentTop + 1);
+    expect(phoneLayout.contentLeft).toBeLessThanOrEqual(1);
+    expect(phoneLayout.sidebarScrollHeight).toBeLessThanOrEqual(phoneLayout.sidebarClientHeight + 1);
+    expect(phoneLayout.headingWidth).toBeGreaterThan(200);
+    expect(phoneLayout.actionsTop).toBeGreaterThanOrEqual(phoneLayout.headingBottom);
+    await main.screenshot({ path: path.join(imageDir, "main-phone.png") });
+
+    await row.locator(".task-body").click();
+    await expect(inspector).toBeVisible();
+    const phoneInspector = await main.evaluate(() => {
+      const element = document.querySelector<HTMLElement>(".inspector:not(.inspector-empty)");
+      if (!element) throw new Error("Phone task details are missing");
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    });
+    expect(phoneInspector.left).toBeLessThanOrEqual(1);
+    expect(phoneInspector.right).toBeGreaterThanOrEqual(phoneLayout.viewportWidth - 1);
+    expect(phoneInspector.bottom).toBeGreaterThanOrEqual(843);
+    await main.getByLabel("关闭任务详情").click();
+    await expect(inspector).toBeHidden();
+    await main.setViewportSize({ width: 760, height: 600 });
+    await resizeMain(app, 760, 600);
 
     // Main navigation must remain usable while switching between Agent and Settings.
     await nav.getByRole("button", { name: "Agent", exact: true }).click();
@@ -280,17 +335,23 @@ test("keeps isolated desktop surfaces navigable, scrollable and unobstructed", a
       const markdown = layout.querySelector<HTMLElement>(".agent-markdown");
       const table = layout.querySelector<HTMLElement>(".agent-markdown table");
       const pre = layout.querySelector<HTMLElement>(".agent-markdown pre");
+      const shell = document.querySelector<HTMLElement>(".shell-grid");
       return {
         layoutOverflow: layout.scrollWidth > layout.clientWidth,
         layoutScrollable: layout.scrollHeight > layout.clientHeight,
         threadScrollable: Boolean(thread && thread.scrollHeight > thread.clientHeight),
+        pageScrollable: Boolean(
+          shell && (shell.scrollHeight > shell.clientHeight || shell.scrollWidth > shell.clientWidth),
+        ),
         markdownOverflow: Boolean(markdown && markdown.scrollWidth > markdown.clientWidth),
         tableScrollable: Boolean(table && table.scrollWidth > table.clientWidth),
         preScrollable: Boolean(pre && pre.scrollWidth > pre.clientWidth),
       };
     });
     expect(agentOverflow.layoutOverflow).toBe(false);
-    expect(agentOverflow.threadScrollable || agentOverflow.layoutScrollable).toBe(true);
+    expect(
+      agentOverflow.threadScrollable || agentOverflow.layoutScrollable || agentOverflow.pageScrollable,
+    ).toBe(true);
     expect(agentOverflow.markdownOverflow).toBe(false);
     expect(agentOverflow.preScrollable).toBe(true);
     await main.screenshot({ path: path.join(imageDir, "agent-long-markdown.png") });

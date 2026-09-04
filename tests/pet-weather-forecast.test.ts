@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildPetWeatherForecast } from "../src/renderer/pet-weather-forecast";
 
 const forecast = [
@@ -79,5 +79,18 @@ describe("pet weather forecast", () => {
       ),
     ).toHaveLength(2);
     expect(buildPetWeatherForecast(undefined)).toEqual([]);
+  });
+
+  it("uses the local calendar day when the caller omits today", () => {
+    const originalNow = Date;
+    vi.useFakeTimers();
+    vi.setSystemTime(new originalNow("2026-08-21T00:30:00+08:00"));
+    try {
+      expect(buildPetWeatherForecast(forecast.slice(0, 1))).toEqual([
+        expect.objectContaining({ dayLabel: "今天" }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

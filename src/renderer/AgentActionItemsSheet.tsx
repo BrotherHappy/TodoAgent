@@ -1,6 +1,7 @@
 import { Check, ListChecks, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CalendarActionItemDraft } from "../shared/calendar-action-items";
+import { useDialogFocus } from "./dialog-focus";
 
 interface ActionItemRow extends CalendarActionItemDraft {
   selected: boolean;
@@ -21,6 +22,8 @@ export function AgentActionItemsSheet({
   onClose,
   onConfirm,
 }: AgentActionItemsSheetProps) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<ActionItemRow[]>(() =>
     drafts.map((draft) => ({ ...draft, selected: true })),
   );
@@ -30,6 +33,10 @@ export function AgentActionItemsSheet({
     () => rows.filter((row) => row.selected && row.title.trim()).length,
     [rows],
   );
+
+  useDialogFocus(dialogRef, firstInputRef, () => {
+    if (!saving) onClose();
+  });
 
   useEffect(() => {
     setRows(drafts.map((draft) => ({ ...draft, selected: true })));
@@ -66,11 +73,13 @@ export function AgentActionItemsSheet({
       }}
     >
       <section
+        ref={dialogRef}
         className="modal-sheet agent-action-items-sheet"
         role="dialog"
         aria-modal="true"
         aria-label="Agent 行动项预览"
         aria-busy={saving}
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -127,6 +136,7 @@ export function AgentActionItemsSheet({
                       行动项 {index + 1}
                     </label>
                     <input
+                      ref={index === 0 ? firstInputRef : undefined}
                       id={`agent-action-item-${row.id}`}
                       className="field-input"
                       value={row.title}

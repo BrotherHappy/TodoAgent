@@ -24,6 +24,7 @@ import type {
 import {
   FeishuApiError,
   FeishuClient,
+  FeishuNetworkError,
   FeishuNotFoundError,
   FeishuPermissionError,
   FeishuRateLimitError,
@@ -522,6 +523,201 @@ function createHarness(
     service,
   };
 }
+
+describe('Feishu incomplete-title recovery', () => {
+  class CompactResponseRemote extends FakeRemote {
+    failDetail = false;
+
+    override async getTask(guid: string): Promise<FeishuTaskV2> {
+      if (this.failDetail) throw new FeishuNetworkError('offline during confirmation');
+      return super.getTask(guid);
+    }
+
+    override async createTask(payload: FeishuCreateTaskPayload, token: string): Promise<FeishuTaskV2> {
+      const remote = await super.createTask(payload, token);
+      return { guid: remote.guid, updated_at: remote.updated_at } as FeishuTaskV2;
+    }
+
+    override async updateTask(guid: string, payload: FeishuPatchTaskPayload): Promise<FeishuTaskV2> {
+      await super.updateTask(guid, payload);
+      return { guid } as FeishuTaskV2;
+    }
+
+    override async completeTask(guid: string): Promise<FeishuTaskV2> {
+      await super.completeTask(guid);
+      return { guid } as FeishuTaskV2;
+    }
+
+    override async reopenTask(guid: string): Promise<FeishuTaskV2> {
+      await super.reopenTask(guid);
+      return { guid } as FeishuTaskV2;
+    }
+  }
+
+  it('confirms compact create, edit, complete and reopen responses without clearing content or repeating writes', async () => {
+    const remote = new CompactResponseRemote();
+    const harness = createHarness({ remote });
+    const { task } = await harness.taskService.createTask({
+      title: 'Original title', notes: 'Preserve notes',
+      source: { type: 'feishu', accountId: 'account-1' },
+      plannedDate: '2026-08-31', privateNotes: 'Local only',
+    });
+    const created = await harness.service.syncNow({ forceFull: true });
+    expect(created).toMatchObject({ pushed: 1 });
+    expect(created.issue).toBeUndefined();
+    expect(await harness.adapter.getTask(task.id)).toMatchObject({
+      title: task.title, notes: task.notes, plannedDate: task.plannedDate,
+      privateNotes: task.privateNotes, sync: { status: 'synced' },
+    });
+
+    await harness.localStore.transact(state => {
+      state.tasks[task.id].title = 'Edited title';
+      state.tasks[task.id].notes = 'Edited notes';
+    });
+    await harness.service.enqueueUpsert(task.id);
+    expect((await harness.service.syncNow()).issue).toBeUndefined();
+    expect(await harness.adapter.getTask(task.id)).toMatchObject({ title: 'Edited title', notes: 'Edited notes', sync: { status: 'synced' } });
+
+    await harness.localStore.transact(state => { state.tasks[task.id].status = 'completed'; });
+    await harness.service.enqueueComplete(task.id);
+    expect((await harness.service.syncNow()).issue).toBeUndefined();
+    expect(await harness.adapter.getTask(task.id)).toMatchObject({ title: 'Edited title', status: 'completed', sync: { status: 'synced' } });
+
+    await harness.localStore.transact(state => { state.tasks[task.id].status = 'open'; });
+    await harness.service.enqueueComplete(task.id, false);
+    expect((await harness.service.syncNow()).issue).toBeUndefined();
+    expect(await harness.adapter.getTask(task.id)).toMatchObject({ title: 'Edited title', status: 'open', plannedDate: task.plannedDate, privateNotes: task.privateNotes, sync: { status: 'synced' } });
+    expect(remote.createPayloads).toHaveLength(1);
+    expect(remote.patches).toHaveLength(1);
+    expect(remote.completeCalls).toBe(1);
+    expect(remote.reopenCalls).toBe(1);
+    expect((await harness.service.getState()).queue).toEqual([]);
+  });
+
+  it('keeps a compact create GUID durably when confirmation is offline; restarting does not POST a duplicate', async () => {
+    const remote = new CompactResponseRemote();
+    remote.failDetail = true;
+    const harness = createHarness({ remote, sleep: async () => undefined });
+    const { task } = await harness.taskService.createTask({
+      title: 'Known submitted title', notes: 'Keep these notes',
+      source: { type: 'feishu', accountId: 'account-1' },
+      plannedDate: '2026-08-31', privateNotes: 'Keep private plan',
+    });
+    expect(await harness.service.syncNow({ forceFull: true })).toMatchObject({ pushed: 0, offline: true });
+    expect(harness.stateStore.state?.mappingsByLocalId[task.id]).toMatchObject({ guid: 'created-guid-1', base: { title: task.title } });
+    expect(await harness.adapter.getTask(task.id)).toMatchObject({
+      title: task.title, notes: task.notes, privateNotes: task.privateNotes,
+      plannedDate: task.plannedDate, source: { externalId: 'created-guid-1' }, sync: { status: 'offline' },
+    });
+
+    remote.failDetail = false;
+    const restarted = new FeishuSyncService({ remote, adapter: harness.adapter, stateStore: harness.stateStore, now: () => NOW });
+    expect(await restarted.syncNow({ forceFull: true })).toMatchObject({ pushed: 1, offline: false });
+    expect(remote.createPayloads).toHaveLength(1);
+    expect(remote.tasks.size).toBe(1);
+    expect((await restarted.getState()).queue).toEqual([]);
+    expect(await harness.adapter.getTask(task.id)).toMatchObject({ title: task.title, notes: task.notes, sync: { status: 'synced' } });
+  });
+
+  it('rejects mismatched detail identities instead of importing another task for a compact response', async () => {
+    const harness = createHarness();
+    const remote = harness.remote as FakeRemote;
+    vi.spyOn(remote, 'listAllTasks').mockResolvedValue([{ guid: 'wanted' } as FeishuTaskV2]);
+    vi.spyOn(remote, 'getTask').mockResolvedValue({ guid: 'different', summary: 'Unrelated task' });
+    expect(await harness.service.syncNow({ forceFull: true })).toMatchObject({ pulled: 0, skippedInvalidTasks: 1 });
+    expect(await harness.adapter.listAccountTasks()).toEqual([]);
+    expect((await harness.service.getState()).localIdByGuid).toEqual({});
+  });
+
+  it.each([undefined, '', '   ', '\u200b'])('isolates an incomplete task, persists valid mappings, and continues the rest of a full pull: %j', summary => {
+    return (async () => {
+      const harness = createHarness();
+      const remote = harness.remote as FakeRemote;
+      remote.tasks.set('first', { guid: 'first', summary: 'Before incomplete item', status: 'open' });
+      remote.tasks.set('incomplete', { guid: 'incomplete', summary, status: 'open' } as FeishuTaskV2);
+      remote.tasks.set('last', { guid: 'last', summary: 'After incomplete item', status: 'open' });
+      const result = await harness.service.syncNow({ forceFull: true });
+      expect(result).toMatchObject({ pulled: 2, skippedInvalidTasks: 1, issue: { code: 'SYNC_FAILED', message: expect.stringContaining('标题不完整') } });
+      const state = await harness.service.getState();
+      expect(Object.keys(state.localIdByGuid)).toEqual(['first', 'last']);
+      expect(Object.values(state.mappingsByLocalId).every(mapping => mapping.base.title.trim())).toBe(true);
+      expect(state.lastFullSyncAt).toBeUndefined();
+      expect(state.cursor).toBeUndefined();
+      remote.tasks.set('incomplete', { guid: 'incomplete', summary: 'Fixed in Feishu', status: 'open' });
+      const retry = await harness.service.syncNow();
+      expect(retry).toMatchObject({ pulled: 3, usedFullSync: true });
+      expect(retry.issue).toBeUndefined();
+      expect((await harness.adapter.listAccountTasks()).map(task => task.title)).toContain('Fixed in Feishu');
+    })();
+  });
+
+  it('hydrates a partial list entry from an exact read before importing it', async () => {
+    const harness = createHarness();
+    const remote = harness.remote as FakeRemote;
+    remote.tasks.set('partial', { guid: 'partial', summary: 'Full title from detail', status: 'open' });
+    vi.spyOn(remote, 'listAllTasks').mockResolvedValue([{ guid: 'partial', status: 'open' } as FeishuTaskV2]);
+    const result = await harness.service.syncNow({ forceFull: true });
+    expect(result.pulled).toBe(1);
+    expect(result.issue).toBeUndefined();
+    expect((await harness.adapter.listAccountTasks())[0].title).toBe('Full title from detail');
+  });
+
+  it('restores a legacy empty title from the confirmed cache without remote writes or private-data changes', async () => {
+    const harness = createHarness();
+    const remote = harness.remote as FakeRemote;
+    remote.tasks.set('cached', { guid: 'cached', summary: 'Known title', status: 'open' });
+    await harness.service.syncNow({ forceFull: true });
+    const id = (await harness.service.getState()).localIdByGuid.cached;
+    await harness.localStore.transact(state => {
+      state.tasks[id].title = '';
+      state.tasks[id].plannedDate = '2026-08-31';
+      state.tasks[id].privateNotes = 'Do not alter';
+    });
+    const before = (await harness.adapter.getTask(id))!;
+    await harness.service.initialize(); // Works offline; no provider request.
+    const restored = (await harness.adapter.getTask(id))!;
+    expect(restored).toEqual({ ...before, title: 'Known title' });
+    expect((await harness.service.getState()).queue).toEqual([]);
+    expect(remote.patches).toEqual([]);
+
+    remote.tasks.set('cached', { guid: 'cached', summary: '', status: 'open' });
+    remote.tasks.set('healthy', { guid: 'healthy', summary: 'Keep syncing', status: 'open' });
+    const report = await harness.service.syncNow({ forceFull: true });
+    expect(report).toMatchObject({ pulled: 1, skippedInvalidTasks: 1 });
+    expect(await harness.adapter.getTask(id)).toEqual(restored);
+    expect((await harness.service.getState()).mappingsByLocalId[id].base.title).toBe('Known title');
+    expect(remote.patches).toEqual([]);
+  });
+
+  it('never replaces a concurrent valid edit while restoring a missing cached title', async () => {
+    const harness = createHarness();
+    const remote = harness.remote as FakeRemote;
+    remote.tasks.set('cached', { guid: 'cached', summary: 'Cached title', status: 'open' });
+    await harness.service.syncNow({ forceFull: true });
+    const id = (await harness.service.getState()).localIdByGuid.cached;
+    await harness.localStore.transact(state => { state.tasks[id].title = ''; });
+    harness.localStore.beforeNextTransaction = state => { state.tasks[id].title = 'User repaired it'; };
+    await harness.service.initialize();
+    expect((await harness.adapter.getTask(id))?.title).toBe('User repaired it');
+  });
+
+  it('does not advance past an invalid delta; a later full pull can recover it', async () => {
+    const harness = createHarness();
+    const remote = harness.remote as FakeRemote;
+    remote.tasks.set('cached', { guid: 'cached', summary: 'Known title', status: 'open' });
+    await harness.service.syncNow({ forceFull: true });
+    const incomplete: FeishuTaskV2 = { guid: 'cached', summary: '', status: 'open' };
+    remote.tasks.set('cached', incomplete);
+    remote.changePages.set('cursor-1', { items: [incomplete], deletedGuids: [], nextCursor: 'cursor-2', hasMore: false });
+    const report = await harness.service.syncNow();
+    expect(report.skippedInvalidTasks).toBe(1);
+    expect((await harness.service.getState()).cursor).toBe('cursor-1');
+    expect((await harness.service.getState()).lastFullSyncAt).toBeUndefined();
+    remote.tasks.set('cached', { guid: 'cached', summary: 'Title returned', status: 'open' });
+    expect((await harness.service.syncNow()).usedFullSync).toBe(true);
+    expect((await harness.adapter.listAccountTasks())[0].title).toBe('Title returned');
+  });
+});
 
 describe("Feishu application pull adapter", () => {
   it("maps Feishu completion mode, authorized-user role, and co-sign state", async () => {

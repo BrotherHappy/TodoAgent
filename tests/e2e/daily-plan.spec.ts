@@ -12,23 +12,12 @@ import {
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 
+import { waitForElectronWindow } from '../helpers/electron-window';
 async function windowFor(
   app: ElectronApplication,
   kind: "main" | "floating",
 ): Promise<Page> {
-  const current = app
-    .windows()
-    .find((page) => new URL(page.url()).searchParams.get("window") === kind);
-  if (current) return current;
-  return app.waitForEvent("window", {
-    predicate: (page) => {
-      try {
-        return new URL(page.url()).searchParams.get("window") === kind;
-      } catch {
-        return false;
-      }
-    },
-  });
+  return waitForElectronWindow(app, kind);
 }
 
 async function resizeMain(

@@ -1,11 +1,12 @@
 import { Check, Copy, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Task } from "../shared/models";
 import {
   buildTaskTemplateFromTask,
   taskTemplateTextSupportsVariables,
   type TaskTemplate,
 } from "./task-templates";
+import { useDialogFocus } from "./dialog-focus";
 
 export interface TaskTemplateSaveSheetProps {
   task: Task;
@@ -34,6 +35,8 @@ export function TaskTemplateSaveSheet({
   onClose,
   onConfirm,
 }: TaskTemplateSaveSheetProps) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(task.title.slice(0, MAX_NAME_CHARS));
   const [description, setDescription] = useState(
     "从现有任务保存的本地模板，可在快速录入中继续复用。",
@@ -42,6 +45,10 @@ export function TaskTemplateSaveSheet({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const notesCanBeCopied = !task.notes.trim() || taskTemplateTextSupportsVariables(task.notes);
+
+  useDialogFocus(dialogRef, nameInputRef, () => {
+    if (!saving) onClose();
+  });
 
   useEffect(() => {
     setName(task.title.slice(0, MAX_NAME_CHARS));
@@ -95,11 +102,13 @@ export function TaskTemplateSaveSheet({
       }}
     >
       <section
+        ref={dialogRef}
         className="modal-sheet task-template-save-sheet"
         role="dialog"
         aria-modal="true"
         aria-label="保存为工作流模板"
         aria-busy={saving}
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="feature-icon">
@@ -134,6 +143,7 @@ export function TaskTemplateSaveSheet({
             <label>
               模板名称
               <input
+                ref={nameInputRef}
                 className="field-input"
                 aria-label="模板名称"
                 value={name}

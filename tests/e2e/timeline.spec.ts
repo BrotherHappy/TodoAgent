@@ -6,12 +6,9 @@ import { _electron as electron, expect, test, type ElectronApplication, type Pag
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 
+import { waitForElectronWindow } from '../helpers/electron-window';
 async function mainWindow(app: ElectronApplication): Promise<Page> {
-  const existing = app.windows().find((page) => new URL(page.url()).searchParams.get("window") === "main");
-  if (existing) return existing;
-  return app.waitForEvent("window", {
-    predicate: (page) => new URL(page.url()).searchParams.get("window") === "main",
-  });
+  return waitForElectronWindow(app, 'main');
 }
 
 test("plans a task on the local timeline without changing its Feishu due date", async () => {
