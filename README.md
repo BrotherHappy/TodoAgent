@@ -52,10 +52,12 @@
 
 <table>
   <tr>
-    <td width="25%" align="center"><strong>01 · 捕获</strong><br /><sub>一句话、剪贴板、选中文本、窗口与语音，先预览再保存</sub></td>
-    <td width="25%" align="center"><strong>02 · 看清</strong><br /><sub>列表、表格、筛选、项目、依赖和全局搜索，共用同一份事实</sub></td>
-    <td width="25%" align="center"><strong>03 · 排进时间</strong><br /><sub>Today、日历、容量、时间线、周视图、看板和甘特路线</sub></td>
-    <td width="25%" align="center"><strong>04 · 开始行动</strong><br /><sub>专注计时、温和提醒、自动化、Agent 与 Todo Pet 一起推进</sub></td>
+    <td width="50%" align="center"><strong>01 · 捕获</strong><br /><sub>一句话、剪贴板、选中文本、窗口与语音，先预览再保存</sub></td>
+    <td width="50%" align="center"><strong>02 · 看清</strong><br /><sub>列表、表格、筛选、项目、依赖和全局搜索，共用同一份事实</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><strong>03 · 排进时间</strong><br /><sub>Today、日历、容量、时间线、周视图、看板和甘特路线</sub></td>
+    <td width="50%" align="center"><strong>04 · 开始行动</strong><br /><sub>专注计时、温和提醒、自动化、Agent 与 Todo Pet 一起推进</sub></td>
   </tr>
 </table>
 
